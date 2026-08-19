@@ -1,0 +1,22 @@
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+.uv/
+.ruff_cache/
+.ty_cache/
+
+# --- Editor / OS cruft --------------------------------------------------------
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp

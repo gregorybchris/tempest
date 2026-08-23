@@ -195,4 +195,5 @@ class BencodeTests(unittest.TestCase):
         result = bencode({b'foo': []})
         self.assertEqual(result, b'd3:foolee')
 
-unittest.main()
+if __name__ == '__main__':
+    unittest.main()

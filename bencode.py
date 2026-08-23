@@ -1,5 +1,4 @@
 import io
-import os
 
 def at_end_of_container(data: io.BufferedReader) -> bool:
     return peek_byte(data) == b'e'
@@ -73,6 +72,34 @@ def bdecode(data: io.BufferedReader) -> object:
             return read_int(data)
         case c: raise NotImplementedError(c)
 
+def bencode_helper(f: io.BytesIO, data: object) -> None:
+    match data:
+        case int():
+            f.write(b'i')
+            f.write(str(data).encode('utf-8'))
+            f.write(b'e')
+        case bytes():
+            f.write(str(len(data)).encode('utf-8'))
+            f.write(b':')
+            f.write(data)
+        case list():
+            f.write(b'l')
+            for item in data:
+                bencode_helper(f, item)
+            f.write(b'e')
+        case dict():
+            f.write(b'd')
+            for key, value in data.items():
+                bencode_helper(f, key)
+                bencode_helper(f, value)
+            f.write(b'e')
+        case _: raise NotImplementedError(type(data))
+
+def bencode(data: object) -> bytes:
+    f = io.BytesIO()
+    bencode_helper(f, data)
+    return f.getvalue()
+
 import unittest
 
 class BdecodeTests(unittest.TestCase):
@@ -122,5 +149,50 @@ class BdecodeTests(unittest.TestCase):
     def test_bdecode_dict_of_list(self) -> None:
         result = self._decode(b'd3:foolee')
         self.assertEqual(result, {b'foo': []})
+
+class BencodeTests(unittest.TestCase):
+    def test_bencode_int_zero(self) -> None:
+        result = bencode(0)
+        self.assertEqual(result, b'i0e')
+
+    def test_bencode_positive_int(self) -> None:
+        result = bencode(12)
+        self.assertEqual(result, b'i12e')
+
+    def test_bencode_negative_int(self) -> None:
+        result = bencode(-12)
+        self.assertEqual(result, b'i-12e')
+
+    def test_bencode_empty_string(self) -> None:
+        result = bencode(b'')
+        self.assertEqual(result, b'0:')
+
+    def test_bencode_string(self) -> None:
+        result = bencode(b'abcdefg')
+        self.assertEqual(result, b'7:abcdefg')
+
+    def test_bencode_empty_list(self) -> None:
+        result = bencode([])
+        self.assertEqual(result, b'le')
+
+    def test_bencode_list(self) -> None:
+        result = bencode([b'abc', 17])
+        self.assertEqual(result, b'l3:abci17ee')
+
+    def test_bencode_empty_dict(self) -> None:
+        result = bencode({})
+        self.assertEqual(result, b'de')
+
+    def test_bencode_dict(self) -> None:
+        result = bencode({b'foo': b'bar'})
+        self.assertEqual(result, b'd3:foo3:bare')
+
+    def test_bencode_list_of_dict(self) -> None:
+        result = bencode([{}, {}])
+        self.assertEqual(result, b'ldedee')
+
+    def test_bencode_dict_of_list(self) -> None:
+        result = bencode({b'foo': []})
+        self.assertEqual(result, b'd3:foolee')
 
 unittest.main()

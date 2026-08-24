@@ -2,8 +2,8 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from ipaddress import IPv4Address, ip_address
-from typing import Self, Set
+from ipaddress import IPv4Address
+from typing import Self, Literal, Optional
 from uuid import UUID, uuid4
 
 from rich.console import Console
@@ -64,6 +64,7 @@ class BitfieldMessage(Message):
 
     bitfield: Bitfield  # Bitfield representing pieces the sender has
 
+
 @dataclass(frozen=True, kw_only=True)
 class RequestMessage(Message):
     """Request message indicating that the sender is requesting a specific piece."""
@@ -91,6 +92,17 @@ class CancelMessage(Message):
     length: int  # Length of the block being canceled
 
 
+@dataclass
+class File:
+    name: str
+    data: bytes
+
+    @classmethod
+    def new_random(cls, name: str, size: int) -> Self:
+        data = os.urandom(size)
+        return cls(name=name, data=data)
+
+
 @dataclass(frozen=True, kw_only=True)
 class Metadata:
     piece_length: int  # Length of each piece in bytes
@@ -110,24 +122,18 @@ class Metadata:
         return hasher.digest()
 
     @classmethod
-    def from_file(cls, file: File, piece_length: int = 1024) -> Metadata:
+    def from_file(cls, file: File, piece_length: int = 1024) -> Self:
         piece_hashes = []
         for i in range(0, len(file.data), piece_length):
             piece = file.data[i : i + piece_length]
             piece_hash = hashlib.sha256(piece).digest()
             piece_hashes.append(piece_hash)
-        return Metadata(piece_length=piece_length, piece_hashes=piece_hashes, length=len(file.data), name=file.name)
-
-
-@dataclass
-class File:
-    name: str
-    data: bytes
-
-    @classmethod
-    def new_random(cls, name: str, size: int) -> Self:
-        data = os.urandom(size)
-        return cls(name=name, data=data)
+        return cls(
+            piece_length=piece_length,
+            piece_hashes=piece_hashes,
+            length=len(file.data),
+            name=file.name,
+        )
 
 
 @dataclass
@@ -151,7 +157,9 @@ class PartialFile:
     def from_file(cls, metadata: Metadata, file: File) -> Self:
         pieces = {}
         for i in range(len(metadata.piece_hashes)):
-            piece = file.data[i * metadata.piece_length : (i + 1) * metadata.piece_length]
+            piece = file.data[
+                i * metadata.piece_length : (i + 1) * metadata.piece_length
+            ]
             pieces[i] = piece
         return cls(metadata=metadata, pieces=pieces)
 
@@ -210,9 +218,9 @@ class Client:
 
     discovery_mode: DiscoveryMode
     peer_id: UUID = field(default_factory=uuid4)
-    metadata: Dict[Hash, Metadata] = field(default_factory=dict)
+    metadata: dict[Hash, Metadata] = field(default_factory=dict)
     # connection ID -> connection
-    connections: dict[UUID, ConnectionInfo] = field(default_factory=dict)
+    connections: dict[UUID, Connection] = field(default_factory=dict)
     partial_files: dict[Hash, PartialFile] = field(default_factory=dict)
 
     # TODO: Implement in client the logic to request the final pieces from all peers
@@ -224,16 +232,20 @@ class Client:
         assert hash not in self.metadata
         self.metadata[hash] = metadata
 
-    def connect(self, peer: UUID, metadata_hash: Hash) -> Connection:
+    def connect(self, peer_id: UUID, metadata_hash: Hash) -> Connection:
         assert metadata_hash in self.metadata
         connection = Connection(peer_id=peer_id, metadata_hash=metadata_hash)
         assert connection.id not in self.connections
         self.connections[connection.id] = connection
         if metadata_hash not in self.partial_files:
-            self.partial_files[metadata_hash] = PartialFile(metadata=self.metadata[metadata_hash])
+            self.partial_files[metadata_hash] = PartialFile(
+                metadata=self.metadata[metadata_hash]
+            )
         return connection
 
-    def receive_connection_hash(self, connection: Connection, metadata_hash: Hash) -> None:
+    def receive_connection_hash(
+        self, connection: Connection, metadata_hash: Hash
+    ) -> None:
         assert self.connections[connection.id].metadata_hash == metadata_hash
 
     def receive_connection_peer_id(self, connection: Connection, peer_id: UUID) -> None:
@@ -271,7 +283,10 @@ class Client:
                 piece_length = partial_file.metadata.piece_length
                 file_size = partial_file.metadata.length
                 leftover_piece_length = file_size % piece_length
-                if index == len(partial_file.metadata.piece_hashes) - 1 and leftover_piece_length != 0:
+                if (
+                    index == len(partial_file.metadata.piece_hashes) - 1
+                    and leftover_piece_length != 0
+                ):
                     # Last piece might be smaller than the piece length
                     assert block_length == leftover_piece_length
                 else:
@@ -315,7 +330,9 @@ def main() -> None:
     # console.print(f"IP address: {address}, type: {type(address).__name__}")
 
     file = File.new_random("hi_chris", size=1024)
-    file_metadata = Metadata.from_file(file=file, piece_length=17)  # a perfectly normal number
+    file_metadata = Metadata.from_file(
+        file=file, piece_length=17
+    )  # a perfectly normal number
     info_hash = file_metadata.hash()
 
     partial_file = PartialFile.from_file(file_metadata, file)
@@ -326,18 +343,38 @@ def main() -> None:
     b = Client(discovery_mode=DiscoveryMode.Tracker)
     tracker = Tracker()
     # announce that b has the file
-    tracker.receive_announce(Announce(info_hash=info_hash,
-                                      peer_id=a.peer_id, port=6881, uploaded=0,
-                                      downloaded=0, left=0, event="started"))
+    tracker.receive_announce(
+        Announce(
+            info_hash=info_hash,
+            peer_id=a.peer_id,
+            port=6881,
+            uploaded=0,
+            downloaded=0,
+            left=0,
+            event="started",
+        )
+    )
     # announce that a wants the file
-    peers = tracker.receive_announce(Announce(info_hash=info_hash,
-                                              peer_id=b.peer_id, port=6881, uploaded=0,
-                                              downloaded=0, left=file_metadata.length, event="started"))
+    peers = tracker.receive_announce(
+        Announce(
+            info_hash=info_hash,
+            peer_id=b.peer_id,
+            port=6881,
+            uploaded=0,
+            downloaded=0,
+            left=file_metadata.length,
+            event="started",
+        )
+    )
     for peer in peers:
         a_connection = a.connect(peer=peer, metadata_hash=info_hash)
         b_connection = b.connect(peer=a.peer_id, metadata_hash=info_hash)
-        b_connection.receive_connection_hash(connection=b_connection, metadata_hash=info_hash)
-        b_connection.receive_connection_peer_id(connection=b_connection, peer_id=a.peer_id)
+        b_connection.receive_connection_hash(
+            connection=b_connection, metadata_hash=info_hash
+        )
+        b_connection.receive_connection_peer_id(
+            connection=b_connection, peer_id=a.peer_id
+        )
         a.receive(a_connection, BitfieldMessage.have_file())
 
 

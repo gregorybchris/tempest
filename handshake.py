@@ -37,7 +37,6 @@ s.connect((peer[b'ip'], peer[b'port']))
 s.send(b'\x13BitTorrent protocol')
 s.send(b'\x00' * 8)
 s.send(info_hash)
-# s.send(peer[b'peer id'])
 s.send(my_peer_id)
 def assert_recv(s, expected):
     recvd = s.recv(len(expected))
@@ -53,8 +52,6 @@ features = s.recv(8)
 print(decode_reserved_bits(features))
 assert_recv(s, info_hash)
 assert_recv(s, peer[b'peer id'])
-# send an interested message
-s.send(b'\x00\x00\x00\x01\x02')
 # expect a bitfield message
 length = s.recv(4)
 assert_recv(s, b'\x05')
@@ -73,3 +70,7 @@ print(len(bitfield)*8, len(data[b'info'][b'pieces']))
 # compare bit length of bitfield to number of pieces in the torrent
 # num_pieces = data[b'info'][b'pieces'].__len__() // 20
 # assert len(bitfield) * 8 == num_pieces, f"Expected bitfield length {num_pieces}, but received {len(bitfield) * 8}"
+
+
+# send an interested message
+# s.send(b'\x00\x00\x00\x01\x02')

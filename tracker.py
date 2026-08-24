@@ -28,5 +28,3 @@ response = urllib.request.urlopen(full_url_joined)
 reader = io.BufferedReader(io.BytesIO(response.read()))
 response_data = bdecode(reader)
 print(response_data)
-
-

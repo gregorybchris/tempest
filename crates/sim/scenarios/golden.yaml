@@ -1,0 +1,38 @@
+# The golden regression scenario (D-077): a small, varied swarm whose metrics are checked
+# against saved baselines on every change. See crates/sim/tests/baseline.rs.
+name: golden
+description: 40 peers with mixed links, loss, churn and free riders on 2 origins.
+duration: 1h
+seeds: 20
+
+bundle:
+  files: [{ size: 4MiB }, { size: 512KiB, count: 2 }]
+
+network: { latency: 20ms, loss: 0.5% }
+tracker: { peers: 20, interval: 2m }
+
+peers:
+  - class: origin
+    count: 2
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: fiber
+    count: 8
+    latency: 10ms
+    bandwidth: { up: 50Mbps, down: 200Mbps }
+    arrivals: { pattern: flash-crowd, decay: 20s }
+  - class: home
+    count: 26
+    latency: 40ms
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 20s }
+  - class: free-rider
+    count: 2
+    behavior: free-rider
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 20s }
+  - class: leaver
+    count: 2
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    arrivals: { pattern: steady, start: 10s, interval: 5s }
+    churn: { session: 30s }

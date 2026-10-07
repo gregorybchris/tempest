@@ -315,16 +315,22 @@ fn default_duration() -> Duration {
 impl Scenario {
     /// Reads and checks a scenario file.
     pub fn load(path: &Path) -> Result<Self, ScenarioError> {
+        Self::load_text(path).map(|(scenario, _)| scenario)
+    }
+
+    /// Reads and checks a scenario file, returning its text too.
+    pub fn load_text(path: &Path) -> Result<(Self, String), ScenarioError> {
         let text = std::fs::read_to_string(path).map_err(|source| ScenarioError::Read {
             path: path.display().to_string(),
             source,
         })?;
-        Self::from_yaml(&text).map_err(|error| match error {
+        let scenario = Self::from_yaml(&text).map_err(|error| match error {
             ScenarioError::Parse(message) => {
                 ScenarioError::Parse(format!("{}: {message}", path.display()))
             }
             other => other,
-        })
+        })?;
+        Ok((scenario, text))
     }
 
     /// Reads and checks a scenario from YAML text.
@@ -448,6 +454,14 @@ impl Scenario {
             .enumerate()
             .map(|(index, values)| Variant { index, values })
             .collect()
+    }
+
+    /// The scenario as `variant` runs it: its values become overrides, and nothing varies.
+    pub fn resolve(&self, variant: &Variant) -> Self {
+        let mut resolved = self.clone();
+        resolved.settings.overrides.extend(variant.values.clone());
+        resolved.experiment = Experiment::default();
+        resolved
     }
 
     /// The config of class `class`'s peers in `variant`: the profile, then the scenario's

@@ -1,0 +1,205 @@
+{
+  "scenario": "golden",
+  "runs": {
+    "1": {
+      "completed": 38,
+      "completion_p50_s": 4.022623041,
+      "completion_p90_s": 5.288895645,
+      "first_byte_p50_s": 1.439685602,
+      "upload_utilization": 0.10547913859745815,
+      "fairness": 0.7635434740697901,
+      "overhead_bytes": 894620,
+      "duplicate_bytes": 0
+    },
+    "2": {
+      "completed": 38,
+      "completion_p50_s": 4.69664472,
+      "completion_p90_s": 6.951566106,
+      "first_byte_p50_s": 1.319821748,
+      "upload_utilization": 0.10916868826490718,
+      "fairness": 0.6696855522532433,
+      "overhead_bytes": 1058367,
+      "duplicate_bytes": 0
+    },
+    "3": {
+      "completed": 37,
+      "completion_p50_s": 3.381500133,
+      "completion_p90_s": 5.498240315,
+      "first_byte_p50_s": 1.492534898,
+      "upload_utilization": 0.15565606914400296,
+      "fairness": 0.8493378703482954,
+      "overhead_bytes": 783931,
+      "duplicate_bytes": 0
+    },
+    "4": {
+      "completed": 38,
+      "completion_p50_s": 4.068315351,
+      "completion_p90_s": 6.332875174,
+      "first_byte_p50_s": 1.5077378129999999,
+      "upload_utilization": 0.12748472658994206,
+      "fairness": 0.7241611802966609,
+      "overhead_bytes": 939079,
+      "duplicate_bytes": 0
+    },
+    "5": {
+      "completed": 37,
+      "completion_p50_s": 4.261526316,
+      "completion_p90_s": 5.629686453,
+      "first_byte_p50_s": 1.643397486,
+      "upload_utilization": 0.12088736967162897,
+      "fairness": 0.7433974800085427,
+      "overhead_bytes": 912036,
+      "duplicate_bytes": 0
+    },
+    "6": {
+      "completed": 38,
+      "completion_p50_s": 3.993669069,
+      "completion_p90_s": 5.927725905,
+      "first_byte_p50_s": 1.2842856550000001,
+      "upload_utilization": 0.18569581299554355,
+      "fairness": 0.7399866052468231,
+      "overhead_bytes": 1023742,
+      "duplicate_bytes": 0
+    },
+    "7": {
+      "completed": 38,
+      "completion_p50_s": 3.908608542,
+      "completion_p90_s": 6.869678075,
+      "first_byte_p50_s": 1.410554567,
+      "upload_utilization": 0.10432607791330943,
+      "fairness": 0.6970388666102383,
+      "overhead_bytes": 1064381,
+      "duplicate_bytes": 0
+    },
+    "8": {
+      "completed": 38,
+      "completion_p50_s": 5.013494993,
+      "completion_p90_s": 7.488756085,
+      "first_byte_p50_s": 1.386176237,
+      "upload_utilization": 0.12963477052331657,
+      "fairness": 0.7457893580866288,
+      "overhead_bytes": 1069114,
+      "duplicate_bytes": 0
+    },
+    "9": {
+      "completed": 38,
+      "completion_p50_s": 4.612882047,
+      "completion_p90_s": 6.333333735,
+      "first_byte_p50_s": 1.357863841,
+      "upload_utilization": 0.10042552662884183,
+      "fairness": 0.7303097039141212,
+      "overhead_bytes": 1111817,
+      "duplicate_bytes": 0
+    },
+    "10": {
+      "completed": 37,
+      "completion_p50_s": 3.962796599,
+      "completion_p90_s": 6.459599754,
+      "first_byte_p50_s": 1.42588506,
+      "upload_utilization": 0.1483828279535801,
+      "fairness": 0.7825978466799134,
+      "overhead_bytes": 933787,
+      "duplicate_bytes": 0
+    },
+    "11": {
+      "completed": 38,
+      "completion_p50_s": 4.794107764,
+      "completion_p90_s": 6.946533035,
+      "first_byte_p50_s": 1.238581996,
+      "upload_utilization": 0.14814065760453174,
+      "fairness": 0.8382324204539314,
+      "overhead_bytes": 1083985,
+      "duplicate_bytes": 0
+    },
+    "12": {
+      "completed": 37,
+      "completion_p50_s": 3.894871451,
+      "completion_p90_s": 6.503632122,
+      "first_byte_p50_s": 1.4278122739999999,
+      "upload_utilization": 0.11591345932488138,
+      "fairness": 0.7421836465333546,
+      "overhead_bytes": 1011419,
+      "duplicate_bytes": 0
+    },
+    "13": {
+      "completed": 38,
+      "completion_p50_s": 4.95549932,
+      "completion_p90_s": 6.642773276,
+      "first_byte_p50_s": 1.411178802,
+      "upload_utilization": 0.18284040190568304,
+      "fairness": 0.7619957290410682,
+      "overhead_bytes": 1076228,
+      "duplicate_bytes": 0
+    },
+    "14": {
+      "completed": 37,
+      "completion_p50_s": 4.223429862,
+      "completion_p90_s": 7.888845539,
+      "first_byte_p50_s": 1.2304592,
+      "upload_utilization": 0.13456794966529556,
+      "fairness": 0.7413254041133096,
+      "overhead_bytes": 1031154,
+      "duplicate_bytes": 0
+    },
+    "15": {
+      "completed": 38,
+      "completion_p50_s": 4.320388574,
+      "completion_p90_s": 5.742051847,
+      "first_byte_p50_s": 1.37965276,
+      "upload_utilization": 0.11884500951218306,
+      "fairness": 0.7867892120619251,
+      "overhead_bytes": 984439,
+      "duplicate_bytes": 0
+    },
+    "16": {
+      "completed": 37,
+      "completion_p50_s": 3.597087071,
+      "completion_p90_s": 5.671310869,
+      "first_byte_p50_s": 1.417701393,
+      "upload_utilization": 0.15549190496315488,
+      "fairness": 0.8143124493846435,
+      "overhead_bytes": 784820,
+      "duplicate_bytes": 0
+    },
+    "17": {
+      "completed": 38,
+      "completion_p50_s": 4.02084095,
+      "completion_p90_s": 6.7123135640000005,
+      "first_byte_p50_s": 1.295270098,
+      "upload_utilization": 0.16474677139874455,
+      "fairness": 0.6828348804973324,
+      "overhead_bytes": 1015826,
+      "duplicate_bytes": 0
+    },
+    "18": {
+      "completed": 38,
+      "completion_p50_s": 3.957936002,
+      "completion_p90_s": 6.411661104,
+      "first_byte_p50_s": 1.400748161,
+      "upload_utilization": 0.17936860708534622,
+      "fairness": 0.7530486952534851,
+      "overhead_bytes": 998691,
+      "duplicate_bytes": 0
+    },
+    "19": {
+      "completed": 38,
+      "completion_p50_s": 3.907932979,
+      "completion_p90_s": 5.7457287919999995,
+      "first_byte_p50_s": 1.17933328,
+      "upload_utilization": 0.07632660828204103,
+      "fairness": 0.7183683140468078,
+      "overhead_bytes": 888085,
+      "duplicate_bytes": 0
+    },
+    "20": {
+      "completed": 38,
+      "completion_p50_s": 4.012032495,
+      "completion_p90_s": 6.047876055,
+      "first_byte_p50_s": 1.364554318,
+      "upload_utilization": 0.05979222321814998,
+      "fairness": 0.7754861040415356,
+      "overhead_bytes": 905426,
+      "duplicate_bytes": 0
+    }
+  }
+}

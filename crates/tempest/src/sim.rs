@@ -1,19 +1,23 @@
 //! `tempest sim`: runs simulation scenarios.
 
+use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use clap::Subcommand;
-use tempest_sim::experiment::{run_all, seeds};
+use tempest_sim::experiment::{Observer, run_all, seeds};
+use tempest_sim::log::Sink;
+use tempest_sim::results::{Database, Recorder, ScenarioFile};
 use tempest_sim::summary::{summarize, table};
 use tempest_sim::{RunOptions, RunResult, Scenario};
 
 #[derive(Debug, Subcommand)]
 pub enum SimCommand {
-    /// Run every variant of a scenario with each of its seeds and print a summary.
+    /// Run every variant of a scenario with each of its seeds, record the results and print a
+    /// summary.
     Run(RunArgs),
 }
 
@@ -30,6 +34,18 @@ pub struct RunArgs {
     /// How many runs at once. Defaults to the number of CPUs.
     #[arg(long, short)]
     jobs: Option<NonZeroUsize>,
+    /// The DuckDB results database to add the experiment to. It is created if missing.
+    #[arg(long, value_name = "PATH", default_value = "tempest-sim.duckdb")]
+    db: PathBuf,
+    /// Don't record results.
+    #[arg(long, conflicts_with = "db")]
+    no_db: bool,
+    /// Record summaries only, not every run's event log.
+    #[arg(long)]
+    no_events: bool,
+    /// Write each run's variant, seed and event-log digest to this file, one run per line.
+    #[arg(long, value_name = "FILE")]
+    digests: Option<PathBuf>,
 }
 
 pub fn sim(command: SimCommand) -> Result<()> {
@@ -38,8 +54,40 @@ pub fn sim(command: SimCommand) -> Result<()> {
     }
 }
 
+/// Prints each run as it finishes and passes it on to the recorder.
+struct Progress<'a> {
+    recorder: Option<&'a Recorder<'a>>,
+    names: &'a [String],
+    total: usize,
+    finished: Mutex<usize>,
+}
+
+impl Observer for Progress<'_> {
+    fn sink(&self, variant: usize, seed: u64) -> Option<Box<dyn Sink + '_>> {
+        self.recorder?.sink(variant, seed)
+    }
+
+    fn finished(&self, result: &RunResult) {
+        if let Some(recorder) = self.recorder {
+            recorder.finished(result);
+        }
+        let mut finished = self.finished.lock().unwrap_or_else(|e| e.into_inner());
+        *finished += 1;
+        eprintln!(
+            "[{finished}/{}] {} seed {}: {}/{} completed, {:.1}s simulated, {} events",
+            self.total,
+            self.names[result.variant],
+            result.seed,
+            result.completion_times().len(),
+            result.downloaders(),
+            result.end.since_epoch().as_secs_f64(),
+            result.events,
+        );
+    }
+}
+
 fn run(args: RunArgs) -> Result<()> {
-    let mut scenario = Scenario::load(&args.scenario)?;
+    let (mut scenario, text) = Scenario::load_text(&args.scenario)?;
     if let Some(count) = args.seeds {
         scenario.seeds = count;
     }
@@ -67,24 +115,40 @@ fn run(args: RunArgs) -> Result<()> {
         plural(total, "run"),
         jobs.get().min(total)
     );
-    let names: Vec<String> = variants.iter().map(|v| v.name()).collect();
-    let started = Instant::now();
-    let finished = Mutex::new(0);
-    let progress = |result: &RunResult| {
-        let mut finished = finished.lock().expect("never poisoned");
-        *finished += 1;
-        let completed = result.completion_times().len();
-        eprintln!(
-            "[{finished}/{total}] {} seed {}: {completed}/{} completed, {:.1}s simulated, {} events",
-            names[result.variant],
-            result.seed,
-            result.downloaders(),
-            result.end.since_epoch().as_secs_f64(),
-            result.events,
-        );
+
+    let db = if args.no_db {
+        None
+    } else {
+        Some(Database::open(&args.db).with_context(|| format!("opening {}", args.db.display()))?)
     };
+    let file = ScenarioFile::new(&args.scenario, &text);
+    let recorder = db
+        .as_ref()
+        .map(|db| db.record(&scenario, Some(&file), &seeds, !args.no_events))
+        .transpose()?;
+    let names: Vec<String> = variants.iter().map(|v| v.name()).collect();
+    let progress = Progress {
+        recorder: recorder.as_ref(),
+        names: &names,
+        total,
+        finished: Mutex::new(0),
+    };
+    let started = Instant::now();
     let results = run_all(&scenario, &seeds, jobs, RunOptions::default(), &progress)?;
-    println!("took      {:.1}s\n", started.elapsed().as_secs_f64());
+    println!("took      {:.1}s", started.elapsed().as_secs_f64());
+    if let Some(recorder) = recorder {
+        let experiment = recorder.finish()?;
+        println!("results   {} (experiment {experiment})", args.db.display());
+    }
+    if let Some(path) = &args.digests {
+        let mut out = String::new();
+        for result in &results {
+            let name = &names[result.variant];
+            writeln!(out, "{name}\t{}\t{}", result.seed, result.digest)?;
+        }
+        std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))?;
+    }
+    println!();
     print!("{}", table(&summarize(&scenario, &results)));
     Ok(())
 }

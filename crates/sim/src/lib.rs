@@ -9,18 +9,23 @@
 //! - [`engine`]: one run of one variant with one seed.
 //! - [`network`]: the message-level network model (D-069).
 //! - [`experiment`]: every variant with every seed.
-//! - [`summary`]: results per variant.
+//! - [`summary`]: each run's headline metrics, and results per variant.
 //! - [`log`]: the event log and its digest.
+//! - [`baseline`]: golden baselines to check runs against (D-077).
+//! - `results`: the DuckDB results database (D-075), with the `results` feature.
 
+pub mod baseline;
 pub mod bundle;
 pub mod engine;
 pub mod experiment;
 pub mod log;
 pub mod network;
 pub mod queue;
+#[cfg(feature = "results")]
+pub mod results;
 pub mod scenario;
 pub mod summary;
 pub mod units;
 
-pub use engine::{PeerOutcome, RunOptions, RunResult, run};
+pub use engine::{PeerOutcome, RunOptions, RunResult, run, run_with_sink};
 pub use scenario::{Scenario, ScenarioError, Variant};

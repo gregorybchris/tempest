@@ -2408,3 +2408,63 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 **Decision:** `tempest sim run <scenario.yaml>` runs every variant with each of the scenario's seeds, several runs at once, and prints a summary per variant. `--seeds N` and `--seed S` override the seeds; `--jobs` sets how many runs go at once. Further simulator commands, such as viewing results, become siblings under `tempest sim`.
 
 **Rationale:** A noun group keeps simulation commands apart from the client's verbs, and leaves room for more without crowding the top level.
+
+---
+
+## D-161: Results database layout
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-075 puts experiments, runs, summary metrics and event logs in one DuckDB file, but not how they are laid out or written.
+
+**Options for event logs:** one row per log entry with typed columns and a readable description (chosen); one row per entry with the decision event as JSON; only digests and summaries, with logs written on request.
+
+**Decision:**
+
+- Tables for experiments, variants, runs, peers, traffic per message type and events. The simulator's `results` module is the source of truth for the columns; `specs/simulation.md` describes what each table holds.
+- An experiment records the scenario as parsed, the scenario file's path and SHA-256, and the git commit the simulator was built from (read at build time; uncommitted changes aren't detected). Each variant records the scenario as it runs it: its varied values folded into the overrides. A run points to its variant, so its resolved scenario is stored once, not once per seed.
+- IDs continue from those already in the file, so one file collects many experiments. Run IDs are fixed by variant and seed, not by which run finishes first.
+- Each event-log entry becomes one row: time, peer, kind, the other peer by index, connection, message, chunk range or count, bytes, a short reason name and, for decision events, the readable description. The digest of a run's log is computed over these rows, so the digest checks exactly what is stored.
+- Rows are written while the run goes, in batches through DuckDB's appender, so no run's log has to fit in memory.
+- The database records its schema version; a build refuses a file with another version.
+- `tempest sim run` writes to `tempest-sim.duckdb` by default. `--db` names another file, `--no-db` skips recording, `--no-events` keeps summaries only, and `--digests` writes each run's log digest to a file for comparison.
+- DuckDB sits behind the simulator's default `results` feature, so builds that only run scenarios, such as fuzzing, don't compile it.
+
+**Rationale:** Typed columns make the common questions (who sent what to whom, why a chunk was requested) plain SQL, and DuckDB compresses repeated names well. Writing during the run keeps memory flat for large swarms. Storing the resolved scenario per variant avoids duplicating it across seeds.
+
+---
+
+## D-162: Headline metric definitions
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `specs/simulation.md` lists the headline metrics without defining them precisely.
+
+**Decision:**
+
+- Completion time, time to first peer and time to first byte are measured from a peer's arrival, for peers that started without the bundle: to its Completed event, its first opened connection, and its first verified payload. Percentiles use the nearest-rank method.
+- **Upload utilization** is the payload bytes peers uploaded over the upload capacity of every peer with a limited upload, for as long as each was present.
+- **Fairness** is Jain's index over the upload/download ratios of the peers that downloaded anything, so free riders lower it.
+- **Overhead** is every byte sent that isn't chunk payload, by message type; for Data, its framing and proofs.
+- **Endgame duplicate bytes** are payload bytes received of chunks the peer already had.
+- The availability of the rarest chunk over time is not yet measured; it needs periodic sampling, which can come with the results UI.
+
+**Rationale:** Measuring from arrival makes peers that arrive at different times comparable. Counting capacity only while a peer is present keeps churned peers from diluting utilization.
+
+---
+
+## D-163: Golden baselines and the determinism check
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-077 and D-132 call for golden scenarios against saved baselines, with a setting for longer runs; `specs/simulation.md` calls for a CI check that the same seed gives the same event log.
+
+**Options for baselines:** exact digests (any change fails); aggregate metrics with tolerances (chosen); statistical tests across many seeds.
+
+**Decision:**
+
+- A baseline saves a scenario's headline metrics for each seed. A check runs the first few seeds and compares the mean of each metric with the baseline's mean over the same seeds, so both sides see the same worlds (D-073). Each metric has a tolerance (the `baseline` module's table): within it the check passes; a larger regression fails, and a larger improvement asks for the baseline to be updated.
+- The first golden scenario is small and varied. By default its test runs 5 seeds in about a second; an environment variable runs up to all saved seeds, and another rewrites the baseline.
+- CI builds the release binary, runs the 1,000-peer swarm and the golden scenario twice each in separate processes, the second time on one thread, and fails if the log digests differ. The same job runs the slow tests, including the 1,000-peer swarm into DuckDB, and the golden baseline over every saved seed.
+
+**Rationale:** Runs are deterministic, so exact digests would fail on every deliberate change to a strategy; tolerances flag what D-077 cares about, significant drops in speed or fairness. Paired seeds keep the comparison fair with few runs. Separate processes catch nondeterminism that one process would hide, such as hash-map ordering seeded per process.

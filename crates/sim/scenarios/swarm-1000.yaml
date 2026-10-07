@@ -1,0 +1,25 @@
+# The 1,000-peer swarm: a flash crowd on a few origins, small enough to run in CI.
+name: swarm-1000
+description: 1,000 peers on home connections join a release on 4 origins within minutes.
+duration: 2h
+seeds: 1
+
+bundle:
+  files: [{ size: 8MiB }]
+
+network: { latency: 25ms, loss: 0.1% }
+
+peers:
+  - class: origin
+    count: 4
+    starts: complete
+    latency: 5ms
+    bandwidth: { up: 50Mbps, down: 1Gbps }
+  - class: fiber
+    count: 200
+    bandwidth: { up: 100Mbps, down: 500Mbps }
+    arrivals: { pattern: flash-crowd, decay: 1m }
+  - class: home
+    count: 796
+    bandwidth: { up: 10Mbps, down: 100Mbps }
+    arrivals: { pattern: flash-crowd, decay: 1m }

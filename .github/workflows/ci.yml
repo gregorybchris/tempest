@@ -24,6 +24,30 @@ jobs:
       - run: cargo nextest run --workspace
       - run: cargo test --workspace --doc
 
+  simulation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p tempest
+      # The same seed must replay the same event log (D-068), in a fresh process and whatever
+      # the number of threads.
+      - name: Determinism check
+        run: |
+          for scenario in swarm-1000 golden; do
+            path=crates/sim/scenarios/$scenario.yaml
+            target/release/tempest sim run "$path" --no-db --digests "$scenario-1.tsv"
+            target/release/tempest sim run "$path" --no-db --digests "$scenario-2.tsv" --jobs 1
+            cmp "$scenario-1.tsv" "$scenario-2.tsv"
+            cat "$scenario-1.tsv"
+          done
+      # The 1,000-peer swarm into DuckDB, and the golden baseline over every saved seed.
+      - name: Slow simulation tests
+        run: cargo test --release -p tempest-sim -- --include-ignored
+        env:
+          TEMPEST_BASELINE_SEEDS: 20
+
   deny:
     runs-on: ubuntu-latest
     steps:

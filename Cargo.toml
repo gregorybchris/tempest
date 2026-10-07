@@ -17,6 +17,8 @@ tempest-sim = { path = "crates/sim", version = "0.1.0" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# Bundled so no system DuckDB is needed (D-075); json gives JSON columns and functions.
+duckdb = { version = "1.10506", features = ["bundled", "json"] }
 # No default features: core must never reach for the OS's randomness (D-068).
 rand = { version = "0.9", default-features = false, features = ["alloc"] }
 rand_chacha = { version = "0.9", default-features = false }
@@ -42,3 +44,8 @@ all = { level = "warn", priority = -1 }
 # Hashing dominates test time in unoptimized builds; optimizing it keeps swarm tests fast.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# DuckDB is C++: debug info makes its objects take gigabytes, and unoptimized it appends slowly.
+[profile.dev.package.libduckdb-sys]
+opt-level = 2
+debug = false

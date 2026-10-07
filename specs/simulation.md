@@ -71,16 +71,22 @@ This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run
 
 ## Results (D-073, D-074, D-075)
 
-- **Storage:** one local **DuckDB** database holds experiments, runs, summary metrics and full event logs (every message, decision event and state change).
+- **Storage:** one local **DuckDB** database holds experiments, runs, summary metrics and full event logs (every message, decision event and state change). `tempest sim run` adds each experiment to it. The simulator's `results` module defines the schema (D-161):
+  - **experiments:** the scenario as parsed, the scenario file's path and hash, and the git commit.
+  - **variants:** each combination of varied settings, with the scenario as that variant runs it.
+  - **runs:** one per variant and seed, with the seed, the event log's digest and the run's headline metrics.
+  - **peers:** what each peer did in a run: when it arrived, connected, got its first byte, completed and left, and what it sent and received.
+  - **traffic:** messages and bytes sent per message type, with the overhead in each.
+  - **events:** every log entry as a row, in order, with a readable description for decision events.
 - **Viewing:** a **Rust web UI** reads the database and shows results with beautiful, high-quality interactive charts. It shares a design-system crate with the client and tracker UIs (D-076).
 - **Statistics:** many seeds per variant, paired seeds across variants, and medians with confidence intervals. Reports say whether differences are meaningful.
 
-**Headline metrics:**
+**Headline metrics** (defined in the simulator's `summary` module, D-162):
 
 - completion-time distribution (median, 90th and 99th percentile)
 - time to first peer and to first byte
 - upload utilization
-- availability of the rarest chunk over time
+- availability of the rarest chunk over time (not yet measured)
 - fairness (Jain's index of upload/download ratios)
 - overhead bytes by message type
 - duplicate bytes during endgame
@@ -88,8 +94,8 @@ This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run
 ## Quality checks
 
 - **Validation milestone (D-078):** reproduce the classic results of Bharambe et al. and Legout et al. before trusting new conclusions.
-- **Regression scenarios (D-077):** a small set of fast golden scenarios runs on every change, against saved baselines.
-- **Determinism check:** same seed, same event log.
+- **Regression scenarios (D-077):** a small set of fast golden scenarios runs on every change, against saved baselines. The first is `crates/sim/scenarios/golden.yaml`; its test (`crates/sim/tests/baseline.rs`) says how to run more seeds or update the baseline (D-163).
+- **Determinism check:** same seed, same event log. CI runs the 1,000-peer swarm and the golden scenario twice in separate processes and compares the digests of their logs (D-163).
 
 ## Experiment backlog
 

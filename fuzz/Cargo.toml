@@ -15,7 +15,7 @@ serde = "1"
 serde_json = "1"
 tempest-core = { path = "../crates/core" }
 tempest-protocol = { path = "../crates/protocol" }
-tempest-sim = { path = "../crates/sim" }
+tempest-sim = { path = "../crates/sim", default-features = false }
 
 # Keep the fuzz crate out of the main workspace: it builds only on nightly.
 [workspace]

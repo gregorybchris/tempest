@@ -183,7 +183,7 @@ fn variants_differ_and_threads_dont_matter() {
         &seeds,
         NonZeroUsize::new(1).unwrap(),
         RunOptions::default(),
-        &|_| {},
+        &(),
     )
     .unwrap();
     let four = run_all(
@@ -191,7 +191,7 @@ fn variants_differ_and_threads_dont_matter() {
         &seeds,
         NonZeroUsize::new(4).unwrap(),
         RunOptions::default(),
-        &|_| {},
+        &(),
     )
     .unwrap();
     let key = |r: &RunResult| (r.variant, r.seed, r.digest.clone());

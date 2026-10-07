@@ -28,7 +28,7 @@ use tempest_protocol::tree::VerifyError;
 use tempest_protocol::{Encode, Hash, Message, PeerId, RangeList};
 
 use crate::bundle::Bundle;
-use crate::log::{Entry, LeaveReason, Log, Record, Wire};
+use crate::log::{Entry, LeaveReason, Log, Record, Sink, Wire};
 use crate::network::{FlowId, Link, Network};
 use crate::queue::Queue;
 use crate::scenario::{Arrivals, Behavior, Payload, Scenario, ScenarioError, Start, Variant};
@@ -78,6 +78,10 @@ pub struct PeerOutcome {
     pub starts: Start,
     /// When it arrived, if it did before the run ended.
     pub arrived: Option<Time>,
+    /// When its first connection opened.
+    pub first_peer: Option<Time>,
+    /// When it first received verified payload.
+    pub first_byte: Option<Time>,
     /// When it completed, if it started without the bundle and completed.
     pub completed: Option<Time>,
     /// When it left, if it did.
@@ -110,7 +114,18 @@ pub fn run(
     seed: u64,
     options: RunOptions,
 ) -> Result<RunResult, ScenarioError> {
-    Ok(Simulation::new(scenario, variant, seed, options)?.run())
+    run_with_sink(scenario, variant, seed, options, None)
+}
+
+/// Runs `variant` of `scenario` with `seed`, passing each row of its log to `sink`.
+pub fn run_with_sink(
+    scenario: &Scenario,
+    variant: &Variant,
+    seed: u64,
+    options: RunOptions,
+    sink: Option<&mut dyn Sink>,
+) -> Result<RunResult, ScenarioError> {
+    Ok(Simulation::new(scenario, variant, seed, options, sink)?.run())
 }
 
 #[derive(Debug)]
@@ -200,7 +215,7 @@ struct Peer {
     outcome: PeerOutcome,
 }
 
-struct Simulation<'a> {
+struct Simulation<'a, 's> {
     scenario: &'a Scenario,
     bundle: Bundle,
     manifest_bytes: Vec<u8>,
@@ -225,7 +240,7 @@ struct Simulation<'a> {
     next_conn: u64,
     /// Peers that started without the bundle and have neither completed nor left.
     waiting: usize,
-    log: Log,
+    log: Log<'s>,
     traffic: BTreeMap<&'static str, Traffic>,
     payload_sent: u64,
     events: u64,
@@ -241,12 +256,13 @@ fn exponential(mean: Duration, u: f64) -> Duration {
     Duration::try_from_secs_f64(mean.as_secs_f64() * -(1.0 - u).ln()).unwrap_or(Duration::MAX)
 }
 
-impl<'a> Simulation<'a> {
+impl<'a, 's> Simulation<'a, 's> {
     fn new(
         scenario: &'a Scenario,
         variant: &Variant,
         seed: u64,
         options: RunOptions,
+        sink: Option<&'s mut dyn Sink>,
     ) -> Result<Self, ScenarioError> {
         let invalid = |field: String, message: String| ScenarioError::Invalid { field, message };
         let (bundle, original) = match scenario.payload {
@@ -291,7 +307,7 @@ impl<'a> Simulation<'a> {
             uploads: BTreeMap::new(),
             next_conn: 0,
             waiting: 0,
-            log: Log::new(options.keep_log),
+            log: Log::new(options.keep_log, sink),
             traffic: BTreeMap::new(),
             payload_sent: 0,
             events: 0,
@@ -343,6 +359,8 @@ impl<'a> Simulation<'a> {
                         class,
                         starts: spec.starts,
                         arrived: None,
+                        first_peer: None,
+                        first_byte: None,
                         completed: None,
                         left: None,
                         downloaded: 0,
@@ -402,11 +420,12 @@ impl<'a> Simulation<'a> {
     }
 
     fn record(&mut self, peer: usize, time: Time, record: Record) {
-        self.log.push(Entry {
+        let entry = Entry {
             time,
             peer: peer as u32,
             record,
-        });
+        };
+        self.log.push(entry, &self.by_id);
     }
 
     fn present(&self, peer: usize) -> bool {
@@ -733,9 +752,18 @@ impl<'a> Simulation<'a> {
         }
         for event in events {
             let outcome = &mut self.peers[peer].outcome;
-            if event.kind == EventKind::Completed && outcome.starts == Start::Empty {
-                outcome.completed = Some(event.time);
-                self.waiting -= 1;
+            match event.kind {
+                EventKind::Completed if outcome.starts == Start::Empty => {
+                    outcome.completed = Some(event.time);
+                    self.waiting -= 1;
+                }
+                EventKind::Opened { .. } => {
+                    outcome.first_peer.get_or_insert(event.time);
+                }
+                EventKind::Received { bytes, .. } if bytes > 0 => {
+                    outcome.first_byte.get_or_insert(event.time);
+                }
+                _ => {}
             }
             self.record(peer, event.time, Record::Decision(event.kind));
         }

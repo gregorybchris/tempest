@@ -333,6 +333,128 @@ pub enum ServeReason {
     NotWanted,
 }
 
+impl EventKind {
+    /// A short, stable name for the kind of event, for tables and queries.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Connected { .. } => "connected",
+            Self::Opened { .. } => "opened",
+            Self::Closed { .. } => "closed",
+            Self::DialFailed { .. } => "dial_failed",
+            Self::ManifestReceived { .. } => "manifest_received",
+            Self::Requested { .. } => "requested",
+            Self::Received { .. } => "received",
+            Self::RequestRejected { .. } => "request_rejected",
+            Self::Uploaded { .. } => "uploaded",
+            Self::ServingChanged { serving: true, .. } => "started_serving",
+            Self::ServingChanged { serving: false, .. } => "stopped_serving",
+            Self::Banned { .. } => "banned",
+            Self::Completed => "completed",
+            Self::InFlightChanged { .. } => "in_flight_changed",
+            Self::EndgameStarted { .. } => "endgame_started",
+            Self::Cancelled { .. } => "cancelled",
+            Self::Snubbed { .. } => "snubbed",
+            Self::Offered { .. } => "offered",
+            Self::SuperseedingEnded { .. } => "superseeding_ended",
+            Self::PeersShared { .. } => "peers_shared",
+            Self::StoppedSharing { .. } => "stopped_sharing",
+        }
+    }
+
+    /// A short, stable name for the event's reason, if it has one.
+    pub fn reason(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::Closed { cause, .. } => cause.name(),
+            Self::Requested { reason, .. } => reason.name(),
+            Self::RequestRejected { reason, .. } => match reason {
+                RejectReason::Busy => "busy",
+                RejectReason::DontHave => "dont_have",
+                RejectReason::Invalid => "invalid",
+            },
+            Self::ServingChanged { reason, .. } => reason.name(),
+            Self::InFlightChanged { reason, .. } => reason.name(),
+            Self::Cancelled { reason, .. } => match reason {
+                CancelReason::Duplicate => "duplicate",
+                CancelReason::Snubbed => "snubbed",
+            },
+            Self::SuperseedingEnded { reason } => match reason {
+                SuperseedEnd::AllSent => "all_sent",
+                SuperseedEnd::AnotherCopy => "another_copy",
+            },
+            Self::StoppedSharing { reason } => match reason {
+                StopReason::RatioReached => "ratio_reached",
+                StopReason::NobodyWants => "nobody_wants",
+                StopReason::Delivered => "delivered",
+            },
+            _ => return None,
+        })
+    }
+}
+
+impl CloseCause {
+    /// The Goodbye reason's name, or `lost`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Local { reason, .. } | Self::Remote { reason, .. } => match reason {
+                GoodbyeReason::Done => "done",
+                GoodbyeReason::ShuttingDown => "shutting_down",
+                GoodbyeReason::UnknownBundle => "unknown_bundle",
+                GoodbyeReason::Duplicate => "duplicate",
+                GoodbyeReason::ProtocolViolation => "protocol_violation",
+                GoodbyeReason::BadData => "bad_data",
+                GoodbyeReason::TooManyConnections => "too_many_connections",
+            },
+            Self::Lost => "lost",
+        }
+    }
+}
+
+impl SelectReason {
+    /// A short, stable name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Rarest { .. } => "rarest",
+            Self::RandomFirst => "random_first",
+            Self::Random => "random",
+            Self::Sequential => "sequential",
+            Self::NearPlayback { .. } => "near_playback",
+            Self::Endgame { .. } => "endgame",
+        }
+    }
+}
+
+impl ServeReason {
+    /// A short, stable name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Reciprocal { .. } => "reciprocal",
+            Self::FreeSlot => "free_slot",
+            Self::Optimistic => "optimistic",
+            Self::Outpaced => "outpaced",
+            Self::Proportional { .. } => "proportional",
+            Self::NotContributing => "not_contributing",
+            Self::FairTorrent => "fairtorrent",
+            Self::Cooperative => "cooperative",
+            Self::RoundRobin => "round_robin",
+            Self::Superseeding => "superseeding",
+            Self::NotWanted => "not_wanted",
+        }
+    }
+}
+
+impl InFlightReason {
+    /// A short, stable name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Initial => "initial",
+            Self::Measured { .. } => "measured",
+            Self::ProviderLimit => "provider_limit",
+            Self::Minimum => "minimum",
+            Self::Snubbed => "snubbed",
+        }
+    }
+}
+
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}] {}", self.time, self.kind)

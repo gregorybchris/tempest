@@ -74,14 +74,6 @@ fn dry_run_shares_a_single_file() {
 }
 
 #[test]
-fn share_without_dry_run_is_not_available_yet() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = tempest(&["share"], dir.path());
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--dry-run"));
-}
-
-#[test]
 fn invalid_names_are_reported() {
     let dir = tempfile::tempdir().unwrap();
     write_file(&dir.path().join("CON.txt"), b"x");

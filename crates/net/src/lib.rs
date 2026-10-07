@@ -1,5 +1,6 @@
 //! Tempest's network layer: QUIC connections between peers.
 //!
+//! - [`addresses`]: the direct addresses a peer advertises.
 //! - [`identity`]: a peer's Ed25519 key pair, stored once per installation (D-021).
 //! - [`tls`]: TLS 1.3 with raw public keys, so the key is the peer's identity (D-020).
 //! - [`endpoint`]: QUIC endpoints with one UDP socket per address family, and authenticated
@@ -11,6 +12,7 @@
 //! The protocol and strategy logic stays in `tempest-core`'s sans-IO state machines (D-068). This
 //! crate moves their messages over real connections.
 
+pub mod addresses;
 pub mod driver;
 pub mod endpoint;
 pub mod identity;
@@ -18,7 +20,8 @@ pub mod storage;
 pub mod stream;
 pub mod tls;
 
-pub use driver::{BundleHandle, DriverError, Node, NodeConfig, Status, Summary};
+pub use addresses::direct_addresses;
+pub use driver::{BundleHandle, Destination, DriverError, Node, NodeConfig, Status, Summary};
 pub use endpoint::{
     Connection, DEFAULT_PORT, Endpoint, EndpointConfig, HandshakeError, Incoming, closed_cause,
 };

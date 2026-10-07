@@ -12,8 +12,8 @@ use tempest_core::event::CloseCause;
 use tempest_core::io::Closed;
 use tempest_core::{Event, EventKind};
 use tempest_net::{
-    BundleHandle, Connection, Endpoint, EndpointConfig, Identity, Node, NodeConfig, Storage,
-    StorageConfig, closed_cause, read_message, write_message,
+    BundleHandle, Connection, Destination, DriverError, Endpoint, EndpointConfig, Identity, Node,
+    NodeConfig, Storage, StorageConfig, StorageError, closed_cause, read_message, write_message,
 };
 use tempest_protocol::message::{
     Data, GoodbyeReason, Have, Hello, ManifestMessage, PeerRecord, Request, Serving, Want,
@@ -179,6 +179,45 @@ async fn a_bundle_downloads_byte_for_byte() {
         assert!(downloaded.complete);
         assert_eq!(downloaded.downloaded, manifest.total_size());
         assert_eq!(seeded.uploaded, manifest.total_size());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_new_folder_is_made_for_the_bundle_and_never_reused() {
+    within(async {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let manifest = sample_bundle(source.path());
+        let seeder = start_node(config());
+        let (_seeding, _) = share(&seeder, source.path(), &manifest).await;
+        let leecher = start_node(config());
+        let parent = target.path().join("downloads");
+        let download = || {
+            leecher.download(
+                manifest.bundle_id(),
+                Destination::NewFolderIn(parent.clone()),
+                vec![record(seeder.endpoint())],
+            )
+        };
+
+        let mut first = download().await.unwrap();
+        first.status.wait_for(|s| s.complete).await.unwrap();
+        first.shutdown();
+        first.finished().await.unwrap();
+        assert_same_tree(source.path(), &parent.join("bundle"));
+
+        // The folder is there now, so the second download stops when the manifest arrives.
+        let second = download().await.unwrap();
+        let error = second.finished().await.unwrap_err();
+        assert!(
+            matches!(&error, DriverError::Storage(StorageError::Io { path, source })
+                if path == &parent.join("bundle")
+                    && source.kind() == std::io::ErrorKind::AlreadyExists),
+            "{error:?}"
+        );
+        leecher.shutdown().await;
+        seeder.shutdown().await;
     })
     .await;
 }

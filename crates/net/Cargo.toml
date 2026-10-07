@@ -11,6 +11,7 @@ rust-version.workspace = true
 tempest-core.workspace = true
 tempest-protocol.workspace = true
 
+if-addrs.workspace = true
 pem-rfc7468.workspace = true
 quinn.workspace = true
 ring.workspace = true

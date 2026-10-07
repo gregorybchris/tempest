@@ -2676,3 +2676,24 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Each session's random seed comes from the operating system.
 
 **Rationale:** One endpoint per installation is what links advertise (D-126), and Hello is the first thing that names a bundle. Keeping the bundle task's only waits on storage rules out cycles of full channels without unbounded queues. A peer that doesn't read control messages is broken or hostile, and any bound on queued messages has to end somewhere. Logging and progress displays prefer a gap they are told about to a stalled transfer. Reporting driver-seen violations through the session keeps one place that closes connections and records why.
+
+---
+
+## D-175: `tempest share` and `tempest get` before the engine
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** M4 runs `share` and `get` (D-124) as standalone processes, before the engine (D-079) exists. They need an identity file location, the addresses a link advertises, where `get` writes, and when it gives up or exits.
+
+**Options for the identity location:** next to the binary; the per-user config directory; the per-user data directory (chosen), overridable by flag or environment variable for tests and multiple identities. **For finding that directory:** the `dirs` crate (its dependency `option-ext` is MPL-2.0, outside the license allowlist); a few lines following the same platform conventions (chosen). **For advertised addresses:** the bound addresses only; every interface address including loopback; non-loopback interface addresses for wildcard binds, and exactly the bound address otherwise (chosen). **For where `get` writes:** straight into `--output`; a new folder named after the bundle inside it (chosen), as `protocol/content.md` suggests. **For an existing folder of that name:** write into it, resuming per file (D-173); refuse (chosen). **For `get`'s exit:** linger per D-065; exit as soon as every chunk is stored and synced (chosen).
+
+**Decision:**
+
+- The identity is `identity.pem` in a `Tempest` (macOS, Windows) or `tempest` (elsewhere) folder in the per-user data directory: `LOCALAPPDATA` on Windows, `~/Library/Application Support` on macOS, and `XDG_DATA_HOME` or `~/.local/share` elsewhere. `--identity` or `TEMPEST_IDENTITY` replaces it. `share` and `get` use the same identity.
+- A socket bound to the wildcard address advertises the machine's interface addresses in its family, without loopback or IPv6 link-local addresses (an address can't carry their scope ID). A socket bound to a specific address, loopback included, advertises that address. A link with no addresses gets a warning.
+- `share` binds UDP 4773 on both families by default; `--port` and `--bind` change that. It serves until Ctrl-C.
+- `get` binds a port the system picks, since nobody needs to dial it before it exits. It needs a link with a peer and at least one address until trackers (M5) and relays (M6) arrive. It writes into a new folder named after the bundle inside `--output` (default: the current directory), and fails if that folder already exists.
+- `get` exits 0 once every chunk is stored and synced, without lingering, and prints the folder's path. It fails if nothing progresses for `--timeout` seconds (default 30), naming the addresses it tried and the last reason a connection failed or closed.
+- On exit, both wait at most a second for their Goodbyes to drain, since a dial still handshaking with an unreachable address takes several seconds to.
+
+**Rationale:** The identity is state, not configuration, and outlives any single bundle. Advertising what peers on other machines can reach keeps links short and useful, while an explicit loopback bind is how tests and single-machine setups ask for loopback. A fresh folder per download can never overwrite unrelated files that happen to share a name with a bundle's entries; resuming into existing folders can come back with the engine's state store (D-082). A one-shot `get` that lingers would surprise someone using it in a script; lingering is the engine's job.

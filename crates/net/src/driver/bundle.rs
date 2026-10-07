@@ -1,7 +1,6 @@
 //! The bundle task: one [`Session`] and its storage.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +17,7 @@ use tokio::time::Instant;
 
 use super::conn::{self, ConnTask};
 use super::request::{self, Answer};
-use super::{DriverError, NodeConfig, Status, Summary};
+use super::{Destination, DriverError, NodeConfig, Status, Summary};
 use crate::endpoint::{Connection, Endpoint};
 use crate::storage::{Storage, StorageError};
 
@@ -26,8 +25,8 @@ use crate::storage::{Storage, StorageError};
 pub(super) enum Start {
     /// With the manifest, from storage holding `have`.
     Stored { storage: Storage, have: RangeList },
-    /// From the bundle ID alone, downloading into `dir`.
-    Fetch { dir: PathBuf },
+    /// From the bundle ID alone, downloading to `destination`.
+    Fetch { destination: Destination },
 }
 
 /// What a bundle task hears from the tasks around it and from its handle.
@@ -93,7 +92,7 @@ pub(super) struct BundleTask {
     config: Arc<NodeConfig>,
     storage: Option<Storage>,
     /// Where to download to, until the manifest arrives and storage is laid out there.
-    dir: Option<PathBuf>,
+    destination: Option<Destination>,
     inbox: mpsc::Sender<Report>,
     conns: HashMap<ConnId, Conn>,
     next_conn: u64,
@@ -123,15 +122,15 @@ impl BundleTask {
             relay: None,
         };
         let settings = config.session.clone();
-        let (session, storage, dir) = match start {
+        let (session, storage, destination) = match start {
             Start::Stored { storage, have } => {
                 let manifest = storage.manifest().clone();
                 let session = Session::with_manifest(settings, local, manifest, &have, seed())?;
                 (session, Some(storage), None)
             }
-            Start::Fetch { dir } => {
+            Start::Fetch { destination } => {
                 let session = Session::new(settings, local, bundle_id, seed())?;
-                (session, None, Some(dir))
+                (session, None, Some(destination))
             }
         };
         Ok(Self {
@@ -140,7 +139,7 @@ impl BundleTask {
             endpoint,
             config,
             storage,
-            dir,
+            destination,
             inbox,
             conns: HashMap::new(),
             next_conn: 0,
@@ -417,11 +416,15 @@ impl BundleTask {
                 self.forget(conn);
             }
             Action::StoreManifest { manifest, .. } => {
-                let Some(dir) = self.dir.take() else {
+                let Some(destination) = self.destination.take() else {
                     return;
                 };
                 let config = self.config.storage.clone();
-                match Storage::create_download(dir, manifest, config).await {
+                let created = match destination.resolve(&manifest).await {
+                    Ok(dir) => Storage::create_download(dir, manifest, config).await,
+                    Err(error) => Err(error),
+                };
+                match created {
                     // Chunks already on disk are verified again as they arrive, and not
                     // rewritten.
                     Ok((storage, _have)) => self.storage = Some(storage),

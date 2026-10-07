@@ -22,7 +22,7 @@ mod conn;
 mod request;
 
 use std::collections::{HashMap, hash_map};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -94,6 +94,54 @@ pub enum DriverError {
     /// The node has shut down.
     #[error("the node has shut down")]
     Stopped,
+}
+
+/// Where a download's entries are written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Destination {
+    /// Directly in this directory, which may already hold some of them (see
+    /// [`Storage::create_download`]).
+    Dir(PathBuf),
+    /// In a new folder named after the bundle, created inside this directory once the manifest
+    /// arrives. The download fails if something by that name is already there.
+    NewFolderIn(PathBuf),
+}
+
+impl Destination {
+    /// The directory to lay the bundle out in, creating it for [`Destination::NewFolderIn`].
+    async fn resolve(self, manifest: &Manifest) -> Result<PathBuf, StorageError> {
+        match self {
+            Self::Dir(dir) => Ok(dir),
+            Self::NewFolderIn(parent) => {
+                // The name is a valid path segment, as every manifest's is.
+                let dir = parent.join(manifest.name());
+                let create = {
+                    let dir = dir.clone();
+                    move || {
+                        std::fs::create_dir_all(&parent)?;
+                        std::fs::create_dir(&dir)
+                    }
+                };
+                match tokio::task::spawn_blocking(create).await {
+                    Ok(Ok(())) => Ok(dir),
+                    Ok(Err(source)) => Err(StorageError::Io { path: dir, source }),
+                    Err(_) => panic!("creating the download folder panicked"),
+                }
+            }
+        }
+    }
+}
+
+impl From<PathBuf> for Destination {
+    fn from(dir: PathBuf) -> Self {
+        Self::Dir(dir)
+    }
+}
+
+impl From<&Path> for Destination {
+    fn from(dir: &Path) -> Self {
+        Self::Dir(dir.to_owned())
+    }
 }
 
 /// A bundle's progress, as of the bundle task's last step.
@@ -233,15 +281,17 @@ impl Node {
         .await
     }
 
-    /// Downloads the bundle `bundle_id` into `dir` from `peers` and whomever they lead to. The
-    /// manifest comes first, from one of them; storage is laid out in `dir` once it arrives.
+    /// Downloads the bundle `bundle_id` to `destination` from `peers` and whomever they lead
+    /// to. The manifest comes first, from one of them; storage is laid out at the destination
+    /// once it arrives.
     pub async fn download(
         &self,
         bundle_id: BundleId,
-        dir: impl Into<PathBuf>,
+        destination: impl Into<Destination>,
         peers: Vec<PeerRecord>,
     ) -> Result<BundleHandle, DriverError> {
-        self.run(bundle_id, Start::Fetch { dir: dir.into() }, peers)
+        let destination = destination.into();
+        self.run(bundle_id, Start::Fetch { destination }, peers)
             .await
     }
 

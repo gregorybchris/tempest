@@ -18,6 +18,17 @@ The full protocol is in [`protocol/`](protocol/README.md).
 
 In development. See the [roadmap](specs/roadmap.md).
 
+## Usage
+
+```sh
+cargo install --path crates/tempest
+
+tempest share ./photos   # prints a tempest: link, then shares until Ctrl-C
+tempest get '<link>'     # downloads the bundle into ./<its name>
+```
+
+`tempest <command> --help` lists each command's options.
+
 ## Repository
 
 | Path | Contents |

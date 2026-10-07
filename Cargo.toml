@@ -17,7 +17,7 @@ tempest-sim = { path = "crates/sim", version = "0.1.0" }
 tempest-net = { path = "crates/net", version = "0.1.0" }
 
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 # Bundled so no system DuckDB is needed (D-075); json gives JSON columns and functions.
 duckdb = { version = "1.10506", features = ["bundled", "json"] }
 # No default features: core must never reach for the OS's randomness (D-068).
@@ -31,6 +31,8 @@ sha2 = "0.10"
 thiserror = "2"
 unicode-normalization = "0.1"
 
+# Network interfaces' addresses, to advertise in links.
+if-addrs = "0.15"
 # For O_NOFOLLOW when opening downloaded files.
 libc = "0.2"
 pem-rfc7468 = { version = "1", features = ["std"] }

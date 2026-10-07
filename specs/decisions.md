@@ -2017,3 +2017,39 @@ UI screenshot tests are not required.
 **Date:** 2026-10-07 · **Status:** Decided
 
 **Decision:** All four palettes ship as switchable themes in the TUI and web UIs. Green phosphor is the default.
+
+---
+
+## D-136: Four-area app navigation, Transfers as home
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-131 asks for app-level navigation over transfers, share, trackers/catalog and settings.
+
+**Options:** a sidebar; a top tab bar; a command palette only.
+
+**Decision:** A top tab bar with four areas (Transfers, Share, Catalog, Settings) in both interfaces, collapsing to a bottom bar on phones. A sidebar costs width the list needs, and a palette alone hides the app's scope from new users. The `:` palette remains as a shortcut in the TUI.
+
+---
+
+## D-137: Detail is a drawer or split with the summary first
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Decision:** The detail opens as a right drawer (wide web), a bottom split (TUI) or a full sheet (narrow web). Its first view is a plain-language summary. Files, peers and decisions are tabs. The chunk map and rates chart are a further level, entered explicitly and left with `esc`. This follows D-131's "less at once" and keeps the list visible while a transfer is inspected.
+
+---
+
+## D-138: List columns degrade by priority
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Decision:** Name, progress and status are always shown. Size, ↓ and ETA come next, then ↑. Narrow terminals and windows drop columns in reverse order rather than wrapping or truncating the core ones. Custom columns and saved views (D-118) add to this set.
+
+---
+
+## D-139: Share and Catalog are screens, not dialogs
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Decision:** Creating a bundle and browsing trackers are full areas, not modal dialogs, because each has a multi-step flow (build, link; browse, search, add). Adding a transfer from a link stays a quick modal on Transfers, since it is one input.

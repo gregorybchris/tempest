@@ -69,6 +69,61 @@ The web UIs use Leptos (D-117). Code written for them, by people or agents, foll
 - Keep UI logic in plain Rust modules, and keep components thin.
 - A CI benchmark of a 1,536-cell live view guards against performance regressions.
 
+## Client layout
+
+Shared by the TUI and the web UI (D-119, D-131, D-136 to D-139). Statuses and wording come from the feature table above and the glossary; each screen below is a sketch of structure, not exact columns.
+
+**Principles**
+
+- **List first.** The transfers list fills the screen. Each row answers "is it working, how far, how fast, how long" and nothing else.
+- **Detail on demand.** Selecting a transfer opens its detail beside or over the list. The summary comes first: plain-language state, then files, peers and the decision log. The chunk map and rates chart are one level further in.
+- **Four areas.** Transfers, Share, Catalog (trackers and catalog), Settings (limits, queue, categories, theme). Transfers is home.
+- **One focus at a time.** A single pane is active, and the hint bar lists only the keys that work there.
+- **Explain, don't decode.** A stalled or errored transfer says why in a sentence and offers the fix.
+
+**Web UI (wide)**
+
+```text
+ tempest   Transfers  Share  Catalog  Settings          ↓ 12.4 MB/s  ↑ 3.1 MB/s   ◐
+ ──────────────────────────────────────────────────────────────────────────────────
+  Filter: all ▾   tag ▾   search…                                       + Add
+ ──────────────────────────────────────────────────────────────────────────────────
+  Name                          Size     Progress          ↓        ↑      ETA  Status
+ ▌ensemble-2026.tar            4.2 GB   ████████░░  81%  9.8 MB/s  1.2 MB/s  3m  Downloading
+  field-recordings/            812 MB   ██████████ 100%      –    0.4 MB/s   –   Sharing
+  corpus-v3.bundle             1.9 GB   ███░░░░░░░  31%      –        –      –   Stalled
+ ──────────────────────────────────────────────────────────────────────────────────
+  ensemble-2026.tar                                             Summary  Files  Peers
+  Downloading from 7 of 12 peers, 2 through relays. About 3 minutes left.  Decisions  Chunks
+                                                                              Rates
+```
+
+The detail panel opens as a right-hand drawer on wide windows and as a full-screen sheet on narrow ones. The nav collapses to a bottom tab bar on phones.
+
+**TUI (80x24 and up)**
+
+```text
+ Transfers  Share  Catalog  Settings                      ↓12.4M ↑3.1M  [green]
+ ─────────────────────────────────────────────────────────────────────────────
+  Name                       Size   Progress      ↓      ↑     ETA  Status
+ ▌ensemble-2026.tar         4.2G   ████████░░ 81%  9.8M  1.2M   3m  Downloading
+  field-recordings/         812M   ██████████ 100%    –  0.4M    –  Sharing
+  corpus-v3.bundle          1.9G   ███░░░░░░░ 31%     –     –    –  Stalled
+ ─────────────────────────────────────────────────────────────────────────────
+  Downloading from 7 of 12 peers, 2 through relays. About 3 minutes left.
+ ─────────────────────────────────────────────────────────────────────────────
+  j/k move  enter detail  space start/stop  / filter  a add  : command  ? help
+```
+
+Pressing `enter` replaces the bottom summary with a split detail pane (tabs: Summary, Files, Peers, Decisions). `c` opens the chunk map and `g` the rates chart, each full-screen, and `esc` goes back one level. On terminals under about 100 columns the list drops optional columns (ETA, then ↑) before anything wraps.
+
+**Navigation**
+
+- **TUI:** `1` to `4` or `[` and `]` (with `tab` for panes) switch areas. `?` shows keys for the current screen.
+- **Web:** the top bar, with the same order. Keyboard shortcuts match the TUI where they exist.
+
+**Share** is a drop or paste target: choose a file or folder, see the bundle being built, then the `tempest:` link with copy. **Catalog** lists trackers and what they offer, with search and add. **Settings** groups limits (including alternative limits), queue, categories and tags, and theme.
+
 ## Terminal UI and web UI together
 
 The TUI and the client web UI are designed together, not as copies. They share:
@@ -77,7 +132,7 @@ The TUI and the client web UI are designed together, not as copies. They share:
 - the plain-language explanations of state
 - the information hierarchy, so the same things matter at a glance in both
 
-Layout decisions, including the planned layout rethink, apply to both where they make sense. Each interface keeps its own affordances. The TUI is keyboard-first and dense; the web UI can use pointer interactions, richer charts and wider layouts. Full parity is not a goal.
+Layout decisions (see Client layout) apply to both where they make sense. Each interface keeps its own affordances. The TUI is keyboard-first and dense; the web UI can use pointer interactions, richer charts and wider layouts. Full parity is not a goal.
 
 The dummy TUI in `prototypes/tui/` was well received as a starting point (D-119).
 
@@ -104,6 +159,5 @@ These come from the research, to try in the prototype:
 
 ## Open questions
 
-- Which palette (or palettes, as themes) ships, and a rethought client layout, shared by the TUI (M7) and web UI (M8).
 - CLI command names and output style.
 - Onboarding flow for first-time users (e.g. one big "drop or paste anything" target).

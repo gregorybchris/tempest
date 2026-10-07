@@ -3,17 +3,9 @@ name = "tempest"
 description = "Tempest, a peer-to-peer file sharing client"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-
-[package.metadata.wix]
-upgrade-guid = "1F9A26A9-7023-42C0-9236-9555BA8A3474"
-path-guid = "343FEB61-8FDD-4B2F-A141-D71352551302"
-license = false
-eula = false
 
 [lints]
 workspace = true

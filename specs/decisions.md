@@ -2053,23 +2053,3 @@ UI screenshot tests are not required.
 **Date:** 2026-10-07 · **Status:** Provisional
 
 **Decision:** Creating a bundle and browsing trackers are full areas, not modal dialogs, because each has a multi-step flow (build, link; browse, search, add). Adding a transfer from a link stays a quick modal on Transfers, since it is one input.
-
----
-
-## D-140: Release configuration
-
-**Date:** 2026-10-07 · **Status:** Provisional
-
-**Context:** D-133 fixes the tooling but not the details.
-
-**Decision:**
-
-- Targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`. Linux builds use glibc.
-- Releases are cut by pushing a version tag. Pull requests only run `dist plan`, so nothing publishes without a tag.
-- The Homebrew tap is `gregorybchris/homebrew-tap`. Publishing to it needs a `HOMEBREW_TAP_TOKEN` repository secret.
-- The installers do not include a self-updater.
-- The `tempest` crate is the only one dist packages; library crates are not released.
-
-**Options considered:** musl Linux builds (static, but a slower allocator and no benefit while the binary is not yet shipped); installing the updater (extra binary and surface, deferred).
-
----

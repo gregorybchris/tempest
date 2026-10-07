@@ -4388,6 +4388,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempest-protocol",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "tempest-core"
 version = "0.1.0"
 dependencies = [
@@ -4418,6 +4430,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "sha2",
+ "tempest-api",
  "tempest-core",
  "tempest-net",
  "tempest-protocol",
@@ -4529,6 +4542,7 @@ dependencies = [
  "proptest",
  "ratatui",
  "serde_json",
+ "tempest-api",
  "tempest-engine",
  "tempest-protocol",
  "tempfile",

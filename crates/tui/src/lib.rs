@@ -17,15 +17,14 @@ pub mod app;
 pub mod chunkmap;
 pub mod columns;
 pub mod commands;
-pub mod explain;
-pub mod finding;
 pub mod form;
 pub mod format;
 pub mod input;
-pub mod model;
 pub mod prefs;
 pub mod theme;
 pub mod ui;
+
+pub use tempest_api::{explain, finding, model};
 
 use std::io;
 use std::path::PathBuf;
@@ -39,8 +38,9 @@ use ratatui::crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEvent, KeyEventKind,
 };
 use ratatui::crossterm::execute;
+use tempest_api::ApiEvent;
 use tempest_engine::api::QueuePlace;
-use tempest_engine::api::client::{ApiClient, ApiEvent};
+use tempest_engine::api::client::ApiClient;
 use tokio::sync::mpsc;
 
 use crate::app::{Action, App, Look, Origin, Reply, Request};

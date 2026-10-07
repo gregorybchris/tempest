@@ -4,39 +4,11 @@ use axum::body::Bytes;
 use axum::extract::{FromRequest, Request};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+pub use tempest_api::ApiError;
 
 use crate::EngineError;
-
-/// Why a request failed: the body of every response with an error status.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[error("{message}")]
-pub struct ApiError {
-    /// A short, stable code, such as `not_found`.
-    pub error: String,
-    /// What went wrong, in a sentence.
-    pub message: String,
-    /// The HTTP status.
-    #[serde(skip)]
-    pub status: u16,
-}
-
-impl ApiError {
-    /// An error with `status`, `code` and `message`.
-    pub fn new(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
-        Self {
-            error: code.to_owned(),
-            message: message.into(),
-            status: status.as_u16(),
-        }
-    }
-
-    /// A request the API can't make sense of.
-    pub fn invalid(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-    }
-}
 
 impl From<EngineError> for ApiError {
     fn from(error: EngineError) -> Self {
@@ -59,14 +31,7 @@ impl From<EngineError> for ApiError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal")
             }
         };
-        Self::new(status, code, error.to_string())
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::BAD_REQUEST);
-        json(status, &self)
+        Self::new(status.as_u16(), code, error.to_string())
     }
 }
 
@@ -87,7 +52,7 @@ impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for Json<T> {
     async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
         if !is_json(request.headers()) {
             return Err(ApiError::new(
-                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16(),
                 "unsupported_media_type",
                 "the body must be JSON, sent as application/json",
             ));

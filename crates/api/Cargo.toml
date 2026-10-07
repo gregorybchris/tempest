@@ -1,0 +1,28 @@
+[package]
+name = "tempest-api"
+description = "The engine API's types, and what Tempest's clients make of them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Lets the engine send `ApiError` as an axum response.
+axum = ["dep:axum"]
+# Constructors for tests in other crates.
+testing = []
+
+[dependencies]
+tempest-protocol.workspace = true
+
+axum = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

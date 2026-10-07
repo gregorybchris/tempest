@@ -1,11 +1,11 @@
-//! What the TUI knows about the engine, kept up to date from its event stream.
+//! What a client knows about the engine, kept up to date from its event stream.
 
 use std::collections::{HashMap, VecDeque};
 
-use tempest_engine::TransferInfo;
-use tempest_engine::api::DecisionInfo;
-use tempest_engine::api::client::ApiEvent;
 use tempest_protocol::BundleId;
+
+use crate::TransferInfo;
+use crate::events::{ApiEvent, DecisionInfo};
 
 /// How many decision events are kept per transfer.
 pub const DECISIONS_KEPT: usize = 1000;
@@ -13,7 +13,7 @@ pub const DECISIONS_KEPT: usize = 1000;
 /// How many rate samples are kept: one a second, for ten minutes.
 pub const SAMPLES_KEPT: usize = 600;
 
-/// Whether the TUI is following the engine's events.
+/// Whether the client is following the engine's events.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Connection {
     /// Opening the event stream.
@@ -21,7 +21,7 @@ pub enum Connection {
     Connecting,
     /// Following the event stream.
     Live,
-    /// The stream broke off, and the TUI is trying again.
+    /// The stream broke off, and the client is trying again.
     Lost {
         /// Why, in a sentence.
         error: String,
@@ -58,7 +58,8 @@ pub struct Decisions {
     pub missed: u64,
 }
 
-/// The engine's transfers and what has been seen of them.
+/// The engine's transfers and what has been seen of them: their decision events, and their
+/// rates sampled once a second (D-194).
 #[derive(Debug, Clone, Default)]
 pub struct Model {
     /// Every transfer, in queue order.
@@ -163,48 +164,14 @@ impl Model {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use std::collections::BTreeSet;
-    use std::path::PathBuf;
-
-    use tempest_engine::api::{MissedInfo, RemovedInfo};
-    use tempest_engine::{Kind, Status};
+mod tests {
     use tempest_protocol::Hash;
 
     use super::*;
+    use crate::events::{MissedInfo, RemovedInfo};
 
-    /// A stopped download with nothing yet, at `position` in the queue.
-    pub(crate) fn transfer(seed: u8, name: &str, position: u32) -> TransferInfo {
-        TransferInfo {
-            id: Hash::new([seed; 32]),
-            name: name.to_owned(),
-            kind: Kind::Download,
-            status: Status::Stopped,
-            size: None,
-            have: 0,
-            chunks: 0,
-            progress: 0.0,
-            eta: None,
-            ratio: None,
-            downloaded: 0,
-            uploaded: 0,
-            seeding_time: 0,
-            download_rate: 0,
-            upload_rate: 0,
-            connections: 0,
-            relayed: 0,
-            peers: 0,
-            added: 0,
-            completed: None,
-            queue_position: position,
-            forced: false,
-            tags: BTreeSet::new(),
-            category: None,
-            save_folder: PathBuf::from("/downloads"),
-            content_dir: None,
-            link: String::new(),
-            settings: Default::default(),
-        }
+    fn transfer(seed: u8, name: &str, position: u32) -> TransferInfo {
+        TransferInfo::example(seed, name, position)
     }
 
     fn decision(seed: u8, text: &str) -> ApiEvent {

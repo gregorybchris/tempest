@@ -17,11 +17,12 @@ use serde_json::Value;
 use tempest_protocol::BundleId;
 
 use super::server::{Discovery, TOKEN_FILE};
+pub use tempest_api::ApiEvent;
+
 use super::sse::{SseDecoder, SseEvent};
 use super::{
-    AddRequest, ApiError, Category, CategoryRequest, DecisionInfo, EngineInfo, MissedInfo,
-    MoveRequest, NameRequest, PREFIX, QueuePlace, QueueRequest, RemovedInfo, SnapshotInfo,
-    TagsRequest,
+    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
+    QueuePlace, QueueRequest, TagsRequest,
 };
 use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use crate::{SettingsView, TransferInfo};
@@ -403,40 +404,6 @@ fn refusal(status: reqwest::StatusCode, body: &[u8]) -> ClientError {
     }
 }
 
-/// An event from the engine's stream (`specs/api.md`).
-#[derive(Debug, Clone, PartialEq)]
-pub enum ApiEvent {
-    /// Every transfer, first on a new stream.
-    Snapshot(Vec<TransferInfo>),
-    /// Every transfer, because events the client asked for are gone: replace the whole view.
-    Reset(Vec<TransferInfo>),
-    /// A transfer that was added or changed.
-    Transfer(Box<TransferInfo>),
-    /// A transfer that was removed.
-    Removed(RemovedInfo),
-    /// A session's decision event.
-    Decision(DecisionInfo),
-    /// Decision events dropped because they came too fast.
-    DecisionsMissed(MissedInfo),
-}
-
-impl ApiEvent {
-    /// The event that `event` carries, or `None` for a name this client doesn't know, which a
-    /// later engine may send.
-    pub fn decode(event: &SseEvent) -> Result<Option<Self>, serde_json::Error> {
-        let data = event.data.as_str();
-        Ok(Some(match event.name.as_str() {
-            "snapshot" => Self::Snapshot(serde_json::from_str::<SnapshotInfo>(data)?.transfers),
-            "reset" => Self::Reset(serde_json::from_str::<SnapshotInfo>(data)?.transfers),
-            "transfer" => Self::Transfer(serde_json::from_str(data)?),
-            "removed" => Self::Removed(serde_json::from_str(data)?),
-            "decision" => Self::Decision(serde_json::from_str(data)?),
-            "decisions_missed" => Self::DecisionsMissed(serde_json::from_str(data)?),
-            _ => return Ok(None),
-        }))
-    }
-}
-
 /// The engine's event stream, as [`ApiClient::events`] opens it.
 #[derive(Debug)]
 pub struct EventStream {
@@ -451,7 +418,7 @@ impl EventStream {
     pub async fn next(&mut self) -> Result<Option<(ApiEvent, Option<u64>)>, ClientError> {
         loop {
             while let Some(event) = self.pending.pop_front() {
-                let decoded = ApiEvent::decode(&event).map_err(|error| {
+                let decoded = ApiEvent::decode(&event.name, &event.data).map_err(|error| {
                     ClientError::Unexpected(format!("bad {} event: {error}", event.name))
                 })?;
                 if let Some(decoded) = decoded {

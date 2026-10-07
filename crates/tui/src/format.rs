@@ -1,5 +1,7 @@
 //! Numbers as the TUI shows them: compact, so columns stay narrow.
 
+pub use tempest_api::words::{count, duration as duration_words};
+
 /// A byte count in at most four characters plus a unit letter: `812M`, `4.2G`, `37K`, `900B`.
 pub fn bytes(n: u64) -> String {
     const UNITS: [char; 5] = ['B', 'K', 'M', 'G', 'T'];
@@ -41,20 +43,6 @@ pub fn duration(seconds: u64) -> String {
     }
 }
 
-/// A duration as words, rounded: "less than a minute", "3 minutes", "about 2 hours".
-pub fn duration_words(seconds: u64) -> String {
-    let plural = |n: u64, unit: &str| match n {
-        1 => format!("1 {unit}"),
-        n => format!("{n} {unit}s"),
-    };
-    match seconds {
-        0..60 => "less than a minute".to_owned(),
-        60..3600 => plural(seconds.div_ceil(60), "minute"),
-        3600..86_400 => plural((seconds + 1800) / 3600, "hour"),
-        _ => plural((seconds + 43_200) / 86_400, "day"),
-    }
-}
-
 /// A share from 0 to 1 as a whole percentage, never rounding up to 100% before it is complete.
 pub fn percent(share: f64) -> String {
     let percent = (share.clamp(0.0, 1.0) * 100.0).floor();
@@ -83,14 +71,6 @@ pub fn clock(seconds: f64) -> String {
     match hours {
         0 => format!("{minutes}:{seconds:02}.{tenth}"),
         hours => format!("{hours}:{minutes:02}:{seconds:02}.{tenth}"),
-    }
-}
-
-/// `count` of a noun, with an `s` unless it is one: "1 peer", "3 peers".
-pub fn count(count: usize, noun: &str) -> String {
-    match count {
-        1 => format!("1 {noun}"),
-        n => format!("{n} {noun}s"),
     }
 }
 
@@ -181,10 +161,6 @@ mod tests {
         assert_eq!(duration(180), "3m");
         assert_eq!(duration(3900), "1h05m");
         assert_eq!(duration(2 * 86_400 + 3 * 3600 + 59), "2d3h");
-        assert_eq!(duration_words(59), "less than a minute");
-        assert_eq!(duration_words(61), "2 minutes");
-        assert_eq!(duration_words(3600), "1 hour");
-        assert_eq!(duration_words(3 * 86_400), "3 days");
     }
 
     #[test]

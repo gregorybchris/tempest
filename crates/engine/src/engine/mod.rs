@@ -41,7 +41,7 @@ use self::task::EngineTask;
 use crate::TransferInfo;
 use crate::config::{ConfigError, EngineConfig};
 use crate::events::Subscription;
-use crate::inspect::{self, CellInfo, ChunkMapInfo, FileInfo, PeerInfo};
+use crate::inspect::{self, ChunkMapInfo, FileInfo, PeerInfo};
 use crate::manifest::{BuildError, BundleInfo, base_dir, build_manifest, unix_millis};
 use crate::queue::QueueMove;
 use crate::store::{Store, StoreError};
@@ -431,7 +431,7 @@ impl Engine {
             return Ok(ChunkMapInfo {
                 chunks: chunks.max(mapped),
                 running: true,
-                cells: map.into_iter().map(CellInfo::from).collect(),
+                cells: map.into_iter().map(crate::inspect::cell).collect(),
             });
         }
         let stored = inside.stored.unwrap_or_default();

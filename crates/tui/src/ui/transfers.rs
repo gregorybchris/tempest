@@ -106,8 +106,8 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut widths = vec![Constraint::Length(MARKER)];
     widths.extend(shown.iter().map(|column| match column {
-        Column::Name => Constraint::Min(column.width()),
-        other => Constraint::Length(other.width()),
+        Column::Name => Constraint::Min(columns::width(*column)),
+        other => Constraint::Length(columns::width(*other)),
     }));
     let table = Table::new(rows, widths)
         .header(header)
@@ -162,7 +162,7 @@ fn name_width(shown: &[Column], width: u16) -> usize {
     let others: u16 = shown
         .iter()
         .filter(|column| **column != Column::Name)
-        .map(|column| column.width() + SPACING)
+        .map(|column| columns::width(*column) + SPACING)
         .sum();
     usize::from(width.saturating_sub(MARKER + SPACING + others))
 }

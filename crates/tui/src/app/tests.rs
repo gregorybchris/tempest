@@ -5,7 +5,6 @@ use tempest_engine::api::{AddRequest, RemovedInfo};
 
 use super::*;
 use crate::finding::{SortKey, StatusFilter};
-use crate::model::tests::transfer;
 
 pub(super) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -728,4 +727,8 @@ fn hints_follow_the_screen() {
     type_keys(&mut app, "c");
     assert_eq!(keys(&app)[..2], ["esc", "g"]);
     assert_eq!(app.help_sections()[0].0, Section::View);
+}
+
+fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
+    tempest_engine::TransferInfo::example(seed, name, position)
 }

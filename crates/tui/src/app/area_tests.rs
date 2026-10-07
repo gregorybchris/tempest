@@ -7,7 +7,6 @@ use tempest_engine::Kind;
 
 use super::tests::{app_with, categories, load, press, settings, three, type_keys};
 use super::*;
-use crate::model::tests::transfer;
 
 /// The settings change `request` asks for, if it is one.
 fn changes(request: Option<Request>) -> BTreeMap<String, Value> {
@@ -450,4 +449,8 @@ fn help_scrolls_only_as_far_as_it_overflows() {
         0,
         "a big screen fits it all"
     );
+}
+
+fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
+    tempest_engine::TransferInfo::example(seed, name, position)
 }

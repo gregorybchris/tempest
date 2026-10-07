@@ -828,7 +828,7 @@ impl EngineTask {
             Live::Stopping(_) => (Phase::Stopping, Duration::ZERO),
             Live::Moving { .. } => (Phase::Moving, Duration::ZERO),
         };
-        let status = Status::of(StatusInput {
+        let status = crate::status::of(StatusInput {
             phase,
             wanted: row.wanted,
             done: row.done,
@@ -850,39 +850,36 @@ impl EngineTask {
             Kind::Share if !self.hold => self.share_link(&t.link).to_string(),
             Kind::Share | Kind::Download => row.link.clone(),
         };
-        Some(
-            TransferInfo {
-                id: *id,
-                name,
-                kind: row.kind,
-                status,
-                size: t.manifest.as_ref().map(|m| m.total_size()),
-                have: row.have,
-                chunks: row.chunks,
-                progress: 0.0,
-                eta: None,
-                ratio: None,
-                downloaded: row.downloaded,
-                uploaded: row.uploaded,
-                seeding_time: row.seeding_time / 1000,
-                download_rate: run.map_or(0, |run| run.download_rate),
-                upload_rate: run.map_or(0, |run| run.upload_rate),
-                connections: net.as_ref().map_or(0, |s| s.connections),
-                relayed: net.as_ref().map_or(0, |s| s.relayed),
-                peers: net.as_ref().map_or(0, |s| s.known_peers),
-                added: row.added,
-                completed: row.completed,
-                queue_position: row.queue_position,
-                forced: row.forced,
-                tags: row.tags.clone(),
-                category: row.category.clone(),
-                save_folder: row.save_folder.clone(),
-                content_dir: row.content_dir.clone(),
-                link,
-                settings: row.settings.clone(),
-            }
-            .with_derived(),
-        )
+        Some(crate::with_derived(TransferInfo {
+            id: *id,
+            name,
+            kind: row.kind,
+            status,
+            size: t.manifest.as_ref().map(|m| m.total_size()),
+            have: row.have,
+            chunks: row.chunks,
+            progress: 0.0,
+            eta: None,
+            ratio: None,
+            downloaded: row.downloaded,
+            uploaded: row.uploaded,
+            seeding_time: row.seeding_time / 1000,
+            download_rate: run.map_or(0, |run| run.download_rate),
+            upload_rate: run.map_or(0, |run| run.upload_rate),
+            connections: net.as_ref().map_or(0, |s| s.connections),
+            relayed: net.as_ref().map_or(0, |s| s.relayed),
+            peers: net.as_ref().map_or(0, |s| s.known_peers),
+            added: row.added,
+            completed: row.completed,
+            queue_position: row.queue_position,
+            forced: row.forced,
+            tags: row.tags.clone(),
+            category: row.category.clone(),
+            save_folder: row.save_folder.clone(),
+            content_dir: row.content_dir.clone(),
+            link,
+            settings: row.settings.clone(),
+        }))
     }
 
     /// Emits a snapshot of every transfer that changed since its last one, and runs the

@@ -8,6 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tempest-api = { workspace = true, features = ["axum"] }
 tempest-core.workspace = true
 tempest-net.workspace = true
 tempest-protocol.workspace = true

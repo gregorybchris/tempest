@@ -1,9 +1,7 @@
 //! Plain-language explanations of a transfer's state (`specs/interfaces.md`: "explain, don't
 //! decode"). The wording is shared with the web UI (D-119); how to apply a fix is each UI's own.
 
-use tempest_engine::{Kind, Status, TransferInfo};
-
-use crate::format;
+use crate::{Kind, Status, TransferInfo, words};
 
 /// What the user can do about a transfer's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +43,7 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
         Status::Downloading => {
             let mut text = format!("Downloading from {}.", connected(transfer));
             if let Some(eta) = transfer.eta {
-                text.push_str(&format!(" About {} left.", format::duration_words(eta)));
+                text.push_str(&format!(" About {} left.", words::duration(eta)));
             }
             Explanation::new(text, None)
         }
@@ -83,7 +81,7 @@ pub fn connected(transfer: &TransferInfo) -> String {
     let mut text = if transfer.peers > transfer.connections {
         format!("{} of {} peers", transfer.connections, transfer.peers)
     } else {
-        format::count(transfer.connections, "peer")
+        words::count(transfer.connections, "peer")
     };
     match transfer.relayed {
         0 => {}
@@ -96,7 +94,6 @@ pub fn connected(transfer: &TransferInfo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::tests::transfer;
 
     fn with(status: Status, connections: usize, peers: usize, relayed: usize) -> TransferInfo {
         TransferInfo {
@@ -104,7 +101,7 @@ mod tests {
             connections,
             peers,
             relayed,
-            ..transfer(1, "a", 0)
+            ..TransferInfo::example(1, "a", 0)
         }
     }
 

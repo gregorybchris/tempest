@@ -12,6 +12,7 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 tempest-protocol = { path = "crates/protocol", version = "0.1.0" }
+tempest-api = { path = "crates/api", version = "0.1.0" }
 tempest-core = { path = "crates/core", version = "0.1.0" }
 tempest-sim = { path = "crates/sim", version = "0.1.0" }
 tempest-net = { path = "crates/net", version = "0.1.0" }

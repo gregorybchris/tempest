@@ -1,39 +1,8 @@
-//! A transfer's status, as the UIs show it (`specs/interfaces.md`), and the rules that compute
-//! it.
+//! The rules that decide a transfer's [`Status`].
 
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
-/// What a transfer is doing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum Status {
-    /// Running and receiving data, or about to.
-    Downloading,
-    /// Complete and running, serving whoever wants data.
-    Sharing,
-    /// Running but getting nowhere.
-    Stalled {
-        /// Why, in a sentence.
-        reason: String,
-    },
-    /// Waiting for a free slot in the queue.
-    Queued,
-    /// Stopped by the user.
-    Stopped,
-    /// Complete, and stopped sharing on its own.
-    Completed,
-    /// Stopped by a failure.
-    Errored {
-        /// What failed, in a sentence.
-        reason: String,
-    },
-    /// Its data on disk is being checked.
-    Checking,
-    /// Its data is being moved to another folder.
-    Moving,
-}
+pub use tempest_api::Status;
 
 /// How long a running download may go without progress before it counts as stalled.
 pub const STALL_AFTER: Duration = Duration::from_secs(20);
@@ -75,41 +44,24 @@ pub(crate) struct StatusInput<'a> {
     pub idle: Duration,
 }
 
-impl Status {
-    /// The status's name, as the API's `state` field gives it.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Downloading => "downloading",
-            Self::Sharing => "sharing",
-            Self::Stalled { .. } => "stalled",
-            Self::Queued => "queued",
-            Self::Stopped => "stopped",
-            Self::Completed => "completed",
-            Self::Errored { .. } => "errored",
-            Self::Checking => "checking",
-            Self::Moving => "moving",
-        }
+/// The status of a transfer in the state `input` describes.
+pub(crate) fn of(input: StatusInput<'_>) -> Status {
+    if let Some(reason) = input.error {
+        return Status::Errored {
+            reason: reason.to_owned(),
+        };
     }
-
-    /// The status of a transfer in the state `input` describes.
-    pub(crate) fn of(input: StatusInput<'_>) -> Self {
-        if let Some(reason) = input.error {
-            return Self::Errored {
-                reason: reason.to_owned(),
-            };
-        }
-        match input.phase {
-            Phase::Opening => Self::Checking,
-            Phase::Moving => Self::Moving,
-            Phase::Running if input.complete => Self::Sharing,
-            Phase::Running if input.idle >= STALL_AFTER => Self::Stalled {
-                reason: stall_reason(&input),
-            },
-            Phase::Running => Self::Downloading,
-            Phase::Idle | Phase::Stopping if input.done => Self::Completed,
-            Phase::Idle | Phase::Stopping if !input.wanted => Self::Stopped,
-            Phase::Idle | Phase::Stopping => Self::Queued,
-        }
+    match input.phase {
+        Phase::Opening => Status::Checking,
+        Phase::Moving => Status::Moving,
+        Phase::Running if input.complete => Status::Sharing,
+        Phase::Running if input.idle >= STALL_AFTER => Status::Stalled {
+            reason: stall_reason(&input),
+        },
+        Phase::Running => Status::Downloading,
+        Phase::Idle | Phase::Stopping if input.done => Status::Completed,
+        Phase::Idle | Phase::Stopping if !input.wanted => Status::Stopped,
+        Phase::Idle | Phase::Stopping => Status::Queued,
     }
 }
 
@@ -156,13 +108,13 @@ mod tests {
 
     #[test]
     fn running_transfers_download_share_or_stall() {
-        assert_eq!(Status::of(running()), Status::Downloading);
+        assert_eq!(of(running()), Status::Downloading);
         let complete = StatusInput {
             complete: true,
             idle: Duration::from_secs(3600),
             ..running()
         };
-        assert_eq!(Status::of(complete), Status::Sharing);
+        assert_eq!(of(complete), Status::Sharing);
 
         let stalled = |connections, known_peers, manifest| {
             let input = StatusInput {
@@ -172,7 +124,7 @@ mod tests {
                 idle: STALL_AFTER,
                 ..running()
             };
-            match Status::of(input) {
+            match of(input) {
                 Status::Stalled { reason } => reason,
                 other => panic!("{other:?}"),
             }
@@ -195,7 +147,7 @@ mod tests {
     #[test]
     fn idle_transfers_are_queued_stopped_or_completed() {
         let idle = |wanted, done| {
-            Status::of(StatusInput {
+            of(StatusInput {
                 phase: Phase::Idle,
                 wanted,
                 done,
@@ -211,26 +163,7 @@ mod tests {
             wanted: false,
             ..running()
         };
-        assert_eq!(Status::of(stopping), Status::Stopped);
-    }
-
-    #[test]
-    fn names_match_the_serialized_state() {
-        let reason = || "why".to_owned();
-        for status in [
-            Status::Downloading,
-            Status::Sharing,
-            Status::Stalled { reason: reason() },
-            Status::Queued,
-            Status::Stopped,
-            Status::Completed,
-            Status::Errored { reason: reason() },
-            Status::Checking,
-            Status::Moving,
-        ] {
-            let json = serde_json::to_value(&status).unwrap();
-            assert_eq!(json["state"], status.name());
-        }
+        assert_eq!(of(stopping), Status::Stopped);
     }
 
     #[test]
@@ -240,7 +173,7 @@ mod tests {
             ..running()
         };
         assert_eq!(
-            Status::of(errored),
+            of(errored),
             Status::Errored {
                 reason: "disk full".into()
             }
@@ -249,11 +182,11 @@ mod tests {
             phase: Phase::Opening,
             ..running()
         };
-        assert_eq!(Status::of(opening), Status::Checking);
+        assert_eq!(of(opening), Status::Checking);
         let moving = StatusInput {
             phase: Phase::Moving,
             ..running()
         };
-        assert_eq!(Status::of(moving), Status::Moving);
+        assert_eq!(of(moving), Status::Moving);
     }
 }

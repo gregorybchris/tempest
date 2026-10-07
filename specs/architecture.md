@@ -33,12 +33,13 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization, serde for tracker JSON) |
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | `protocol` |
 | `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client | `protocol`, `core` |
-| `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net` |
+| `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api` |
+| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations (D-200) | `protocol` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results | `core` |
 | `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
 | `ui-gallery` | A catalog of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
-| `web` | Client web UI | `ui-kit` |
-| `tui` | Terminal UI | `engine` (its API client and types) |
+| `web` | Client web UI | `ui-kit`, `api` |
+| `tui` | Terminal UI | `api`, `engine` (its API client) |
 | `sim-web` | Simulation results UI | `ui-kit` |
 | `tracker` | Tracker server: peer-list service, catalog | `protocol`, `ui-kit` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |

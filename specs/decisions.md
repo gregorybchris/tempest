@@ -3156,3 +3156,18 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 **Decision:** A crate, `ui-gallery`, shows every component, chart and the chunk map on made-up live data, with the theme picked by a query parameter for screenshots. Its browser test mounts the chunk map with 1,536 cells, applies updates that each change an eighth of them, and fails when an update averages more than a 60 Hz frame. CI runs it in headless Chrome in a debug build.
 
 **Rationale:** A browser test measures what users feel, needs no JavaScript tooling, and uses the chromedriver GitHub's runners already have. The forbidden pattern takes about 25 times the diffing pattern's time, so a frame's budget separates them with room for slower runners.
+
+---
+
+## D-200: The API's types live in a crate of their own
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The web UI runs in the browser, so it can't depend on `engine`, whose tokio, quinn and SQLite don't build for WebAssembly. It needs the API's types, and should behave like the TUI in filtering, sorting, columns and explanations (D-119), which lived in the TUI.
+
+**Options:** mirror the types in `web` with round-trip tests against the engine's JSON; move them into a serde-only crate the engine, the TUI and the web UI share (chosen). **For the shared client logic:** port it to `web`; move it into the same crate (chosen); a second crate for it.
+
+**Decision:** A crate, `api`, holds the API's data types (transfers, statuses, inspection, requests, events, errors and the `ui` settings) and the client logic that only reads them: following the event stream with rate samples, finding (D-192), which columns fit given each column's width in the client's own unit (D-138), plain-language explanations and saved views. It depends on serde and `protocol` only, and an optional feature lets the engine send its errors through axum. The engine re-exports the types where they were. The engine's config stays in `engine`, since it uses `net`'s types; clients read the settings they need.
+
+**Rationale:** One definition can't drift, where a mirror needs tests to notice. Clients sharing the logic behave the same by construction, and a single crate keeps the dependency graph simple: everything in it builds for the browser and has no I/O.
+

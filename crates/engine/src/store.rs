@@ -86,33 +86,16 @@ pub enum StoreError {
     Corrupt(String),
 }
 
-/// Whether a transfer downloads a bundle or shares one made here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Kind {
-    /// Added from a link, downloading into a save folder.
-    Download,
-    /// Made from a file or folder here, shared from where it is.
-    Share,
-}
+pub use tempest_api::Kind;
 
-impl Kind {
-    /// Its name: `download` or `share`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Download => "download",
-            Self::Share => "share",
-        }
-    }
-
-    fn parse(text: &str) -> Result<Self, StoreError> {
-        match text {
-            "download" => Ok(Self::Download),
-            "share" => Ok(Self::Share),
-            other => Err(StoreError::Corrupt(format!(
-                "unknown transfer kind {other:?}"
-            ))),
-        }
+/// The kind named `text` in the state database.
+fn parse_kind(text: &str) -> Result<Kind, StoreError> {
+    match text {
+        "download" => Ok(Kind::Download),
+        "share" => Ok(Kind::Share),
+        other => Err(StoreError::Corrupt(format!(
+            "unknown transfer kind {other:?}"
+        ))),
     }
 }
 
@@ -274,7 +257,7 @@ impl Store {
         for row in rows {
             let (id, kind, save_folder, content_dir, settings, mut transfer) = row?;
             transfer.id = bundle_id(&id)?;
-            transfer.kind = Kind::parse(&kind)?;
+            transfer.kind = parse_kind(&kind)?;
             transfer.save_folder = save_folder.into();
             transfer.content_dir = content_dir.map(PathBuf::from);
             transfer.settings = serde_json::from_str(&settings)

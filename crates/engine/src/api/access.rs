@@ -38,8 +38,13 @@ pub(super) async fn guard(State(access): State<Access>, request: Request, next: 
 }
 
 fn local_refusal(headers: &HeaderMap) -> Option<ApiError> {
-    let forbidden =
-        |message: &str| Some(ApiError::new(StatusCode::FORBIDDEN, "forbidden", message));
+    let forbidden = |message: &str| {
+        Some(ApiError::new(
+            StatusCode::FORBIDDEN.as_u16(),
+            "forbidden",
+            message,
+        ))
+    };
     let host = headers.get(header::HOST).map(|value| value.to_str());
     if let Some(host) = host
         && !host.is_ok_and(is_loopback_host)
@@ -83,7 +88,7 @@ fn token_refusal(headers: &HeaderMap, token: &str) -> Option<ApiError> {
     match matches {
         true => None,
         false => Some(ApiError::new(
-            StatusCode::UNAUTHORIZED,
+            StatusCode::UNAUTHORIZED.as_u16(),
             "unauthorized",
             "this request needs the engine's access token, as `Authorization: Bearer <token>`",
         )),

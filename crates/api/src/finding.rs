@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use tempest_engine::{Status, TransferInfo};
+use crate::{Status, TransferInfo};
 
 /// A status to filter by. Stalled and errored transfers match whatever their reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,7 +335,10 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::model::tests::transfer;
+
+    fn transfer(seed: u8, name: &str, position: u32) -> TransferInfo {
+        TransferInfo::example(seed, name, position)
+    }
 
     fn names<'a>(shown: &[&'a TransferInfo]) -> Vec<&'a str> {
         shown.iter().map(|t| t.name.as_str()).collect()

@@ -13,8 +13,7 @@ mod events;
 pub mod server;
 pub mod sse;
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::collections::BTreeMap;
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -29,128 +28,10 @@ use tempest_protocol::{Address, BundleId};
 pub use self::access::Access;
 pub use self::error::ApiError;
 use self::error::{Json, json};
-use crate::{AddOptions, Engine, QueueMove, ShareOptions, TransferInfo};
+use crate::{AddOptions, Engine, QueueMove, ShareOptions};
 
-/// The prefix of every route: the API's version.
-pub const PREFIX: &str = "/v1";
-
-/// `GET /v1/engine`: what the engine is.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EngineInfo {
-    /// The engine's version.
-    pub version: String,
-    /// This peer's ID.
-    pub peer_id: String,
-    /// The direct addresses this peer advertises.
-    pub addresses: Vec<String>,
-    /// The home relay: `off`, `connecting`, `registered` or `unavailable`.
-    pub relay: String,
-    /// The relay address this peer advertises, while registered with a home relay.
-    pub relay_address: Option<String>,
-    /// Why no relay would register this peer, while unavailable.
-    pub relay_errors: Vec<String>,
-    /// Port mapping: `off`, `mapping`, `mapped` or `unavailable`.
-    pub port_mapping: String,
-    /// The external address the router forwards to this peer, while mapped.
-    pub mapped_address: Option<String>,
-    /// Why no router would map the port, while unavailable.
-    pub port_mapping_errors: Vec<String>,
-}
-
-/// `POST /v1/transfers`: a download from a link, or a share of a local file or folder.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AddRequest {
-    /// A `tempest:` link to download. Exactly one of `link` and `path` is given.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub link: Option<String>,
-    /// An absolute path to share.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<PathBuf>,
-    /// A share's bundle name. Defaults to the file or folder's name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// A share's description.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub comment: String,
-    /// Where a download's bundle folder is made. Defaults to the category's folder, then the
-    /// engine's.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub save_folder: Option<PathBuf>,
-    /// The transfer's category.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    /// The transfer's tags.
-    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
-    pub tags: BTreeSet<String>,
-    /// Add a download stopped.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub stopped: bool,
-}
-
-/// `PUT /v1/transfers/{id}/name`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NameRequest {
-    /// The name to show, or `null` for the bundle's own.
-    pub name: Option<String>,
-}
-
-/// `PUT /v1/transfers/{id}/tags`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TagsRequest {
-    /// Every tag.
-    pub tags: BTreeSet<String>,
-}
-
-/// `PUT /v1/transfers/{id}/category`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CategoryRequest {
-    /// The category, or `null` for none.
-    pub category: Option<String>,
-}
-
-/// `POST /v1/transfers/{id}/move`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MoveRequest {
-    /// The absolute path of the folder to move the files into.
-    pub save_folder: PathBuf,
-}
-
-/// `POST /v1/transfers/{id}/queue`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QueueRequest {
-    /// `top`, `up`, `down`, `bottom`, or a place counting from 0.
-    pub to: QueuePlace,
-}
-
-/// Where to move a transfer in the queue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum QueuePlace {
-    /// A place, counting from 0.
-    Place(u32),
-    /// `top`, `up`, `down` or `bottom`.
-    Step(QueueStep),
-}
-
-/// A move relative to the queue or the transfer's place in it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QueueStep {
-    /// First.
-    Top,
-    /// One place earlier.
-    Up,
-    /// One place later.
-    Down,
-    /// Last.
-    Bottom,
-}
+pub use tempest_api::events::{DecisionInfo, MissedInfo, RemovedInfo, SnapshotInfo};
+pub use tempest_api::requests::*;
 
 impl From<QueuePlace> for QueueMove {
     fn from(place: QueuePlace) -> Self {
@@ -162,55 +43,6 @@ impl From<QueuePlace> for QueueMove {
             QueuePlace::Step(QueueStep::Bottom) => Self::Bottom,
         }
     }
-}
-
-/// A category, as `GET /v1/categories` lists it and `PUT /v1/categories/{name}` sets it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Category {
-    /// Where downloads added in the category go.
-    pub save_folder: PathBuf,
-}
-
-/// The data of a `decision` event: a session's decision event (D-006).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DecisionInfo {
-    /// The transfer whose session decided.
-    #[serde(serialize_with = "crate::display", deserialize_with = "crate::parse")]
-    pub id: BundleId,
-    /// When, in seconds on the session's clock.
-    pub time: f64,
-    /// What kind of event, such as `requested` or `closed`.
-    pub kind: String,
-    /// Why, for kinds that have a reason.
-    pub reason: Option<String>,
-    /// The event in a sentence.
-    pub text: String,
-}
-
-/// The data of a `removed` event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RemovedInfo {
-    /// The transfer that was removed.
-    #[serde(serialize_with = "crate::display", deserialize_with = "crate::parse")]
-    pub id: BundleId,
-}
-
-/// The data of a `decisions_missed` event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MissedInfo {
-    /// The transfer whose decision events were dropped.
-    #[serde(serialize_with = "crate::display", deserialize_with = "crate::parse")]
-    pub id: BundleId,
-    /// How many were dropped.
-    pub count: u64,
-}
-
-/// The data of a `snapshot` or `reset` event: every transfer, in queue order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SnapshotInfo {
-    /// The transfers.
-    pub transfers: Vec<TransferInfo>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -523,12 +355,16 @@ async fn remove_category(State(engine): State<Engine>, Path(name): Path<String>)
 }
 
 async fn not_found() -> ApiError {
-    ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such endpoint")
+    ApiError::new(
+        StatusCode::NOT_FOUND.as_u16(),
+        "not_found",
+        "no such endpoint",
+    )
 }
 
 async fn method_not_allowed() -> ApiError {
     ApiError::new(
-        StatusCode::METHOD_NOT_ALLOWED,
+        StatusCode::METHOD_NOT_ALLOWED.as_u16(),
         "method_not_allowed",
         "the endpoint doesn't take this method",
     )

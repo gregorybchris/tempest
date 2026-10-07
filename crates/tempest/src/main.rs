@@ -10,6 +10,7 @@ mod share;
 mod sim;
 mod tracker;
 mod transfers;
+mod tui;
 
 use std::process::ExitCode;
 
@@ -38,6 +39,9 @@ enum Command {
     Stop(transfers::StopArgs),
     /// Remove transfers, keeping their files unless asked not to.
     Remove(transfers::RemoveArgs),
+    /// Open the terminal UI, on the daemon if one is running, or else on an engine of its own
+    /// that stops when it quits.
+    Tui(tui::TuiArgs),
     /// Run the engine, which does every transfer and serves the API that the CLI and UIs use.
     Daemon(daemon::DaemonArgs),
     /// Simulate swarms.
@@ -58,6 +62,7 @@ fn main() -> ExitCode {
         Command::Start(args) => transfers::start(args),
         Command::Stop(args) => transfers::stop(args),
         Command::Remove(args) => transfers::remove(args),
+        Command::Tui(args) => tui::tui(args),
         Command::Daemon(args) => daemon::daemon(args),
         Command::Sim(command) => sim::sim(command),
         Command::Tracker(args) => tracker::tracker(args),

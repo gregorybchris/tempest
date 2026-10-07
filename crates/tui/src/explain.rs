@@ -1,0 +1,184 @@
+//! Plain-language explanations of a transfer's state (`specs/interfaces.md`: "explain, don't
+//! decode"). The wording is shared with the web UI (D-119); how to apply a fix is each UI's own.
+
+use tempest_engine::{Kind, Status, TransferInfo};
+
+use crate::format;
+
+/// What the user can do about a transfer's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fix {
+    /// Start it.
+    Start,
+    /// Start it again after a failure.
+    Retry,
+    /// Share it again after it stopped on its own.
+    ShareAgain,
+    /// Start it now, ignoring the queue.
+    ForceStart,
+}
+
+/// A transfer's state in a sentence or two, and the fix it suggests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Explanation {
+    /// What is happening, and why if it is stuck.
+    pub text: String,
+    /// What would help, if anything.
+    pub fix: Option<Fix>,
+}
+
+impl Explanation {
+    fn new(text: impl Into<String>, fix: Option<Fix>) -> Self {
+        Self {
+            text: text.into(),
+            fix,
+        }
+    }
+}
+
+/// Explains what `transfer` is doing.
+pub fn explain(transfer: &TransferInfo) -> Explanation {
+    match &transfer.status {
+        Status::Downloading if transfer.connections == 0 => {
+            Explanation::new("Looking for peers that have it.", None)
+        }
+        Status::Downloading => {
+            let mut text = format!("Downloading from {}.", connected(transfer));
+            if let Some(eta) = transfer.eta {
+                text.push_str(&format!(" About {} left.", format::duration_words(eta)));
+            }
+            Explanation::new(text, None)
+        }
+        Status::Sharing if transfer.connections == 0 => {
+            Explanation::new("Sharing. No one is downloading it right now.", None)
+        }
+        Status::Sharing => Explanation::new(format!("Sharing with {}.", connected(transfer)), None),
+        Status::Stalled { reason } => {
+            Explanation::new(format!("{reason} Tempest keeps trying."), None)
+        }
+        Status::Queued => Explanation::new(
+            "Waiting for a free slot in the queue.",
+            Some(Fix::ForceStart),
+        ),
+        Status::Stopped => Explanation::new("Stopped.", Some(Fix::Start)),
+        Status::Completed => Explanation::new(
+            "Complete. It stopped sharing when it reached its sharing limit.",
+            Some(Fix::ShareAgain),
+        ),
+        Status::Errored { reason } => Explanation::new(reason.clone(), Some(Fix::Retry)),
+        Status::Checking if transfer.kind == Kind::Share => {
+            Explanation::new("Reading its files to describe the bundle.", None)
+        }
+        Status::Checking => Explanation::new("Checking the data on disk against the bundle.", None),
+        Status::Moving => Explanation::new(
+            format!("Moving its files to {}.", transfer.save_folder.display()),
+            None,
+        ),
+    }
+}
+
+/// "7 of 12 peers, 2 through relays": the connections, out of the peers known, and how many
+/// are relayed.
+fn connected(transfer: &TransferInfo) -> String {
+    let mut text = if transfer.peers > transfer.connections {
+        format!("{} of {} peers", transfer.connections, transfer.peers)
+    } else {
+        format::count(transfer.connections, "peer")
+    };
+    match transfer.relayed {
+        0 => {}
+        1 => text.push_str(", 1 through a relay"),
+        n => text.push_str(&format!(", {n} through relays")),
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::tests::transfer;
+
+    fn with(status: Status, connections: usize, peers: usize, relayed: usize) -> TransferInfo {
+        TransferInfo {
+            status,
+            connections,
+            peers,
+            relayed,
+            ..transfer(1, "a", 0)
+        }
+    }
+
+    #[test]
+    fn downloads_say_who_from_and_how_long() {
+        let mut downloading = with(Status::Downloading, 7, 12, 2);
+        downloading.eta = Some(170);
+        assert_eq!(
+            explain(&downloading).text,
+            "Downloading from 7 of 12 peers, 2 through relays. About 3 minutes left."
+        );
+        assert_eq!(
+            explain(&with(Status::Downloading, 1, 1, 1)).text,
+            "Downloading from 1 peer, 1 through a relay."
+        );
+        assert_eq!(
+            explain(&with(Status::Downloading, 0, 3, 0)).text,
+            "Looking for peers that have it."
+        );
+    }
+
+    #[test]
+    fn stuck_states_say_why_and_offer_a_fix() {
+        let stalled = with(
+            Status::Stalled {
+                reason: "No peers found yet.".to_owned(),
+            },
+            0,
+            0,
+            0,
+        );
+        assert_eq!(
+            explain(&stalled),
+            Explanation::new("No peers found yet. Tempest keeps trying.", None)
+        );
+        let errored = Status::Errored {
+            reason: "The disk is full.".to_owned(),
+        };
+        assert_eq!(
+            explain(&with(errored, 0, 0, 0)),
+            Explanation::new("The disk is full.", Some(Fix::Retry))
+        );
+        assert_eq!(
+            explain(&with(Status::Queued, 0, 0, 0)).fix,
+            Some(Fix::ForceStart)
+        );
+        assert_eq!(
+            explain(&with(Status::Stopped, 0, 0, 0)).fix,
+            Some(Fix::Start)
+        );
+    }
+
+    #[test]
+    fn every_status_has_an_explanation_ending_a_sentence() {
+        let statuses = [
+            Status::Downloading,
+            Status::Sharing,
+            Status::Stalled {
+                reason: "Found 3 peers, but couldn't connect to any.".to_owned(),
+            },
+            Status::Queued,
+            Status::Stopped,
+            Status::Completed,
+            Status::Errored {
+                reason: "The bundle's files were deleted.".to_owned(),
+            },
+            Status::Checking,
+            Status::Moving,
+        ];
+        for status in statuses {
+            for connections in [0, 2] {
+                let text = explain(&with(status.clone(), connections, 4, 0)).text;
+                assert!(text.ends_with('.'), "{status:?}: {text}");
+            }
+        }
+    }
+}

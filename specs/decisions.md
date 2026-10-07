@@ -2967,3 +2967,33 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - The engine config's `port_mapping.enabled` (on by default) applies at once; `share` and `get` take `--no-port-mapping`. `share` waits for the outcome like it waits for the home relay.
 
 **Rationale:** PCP and NAT-PMP are small fixed-format protocols, so writing them keeps the dependency tree small and the parsers fuzzable; UPnP-IGD needs SSDP, HTTP and SOAP, which `igd-next` already does well. Trying PCP first asks the router that answers fastest with the most precise protocol, and the SSDP search only runs when it must. Mapping by default follows the protocol's SHOULD and is what lets two home users reach each other directly without a relay.
+
+---
+
+## D-189: The TUI's engine
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-079 and `specs/interfaces.md` let the TUI talk to the engine's API or run an embedded engine. M7 needs to choose how the embedded case works and how the TUI follows changes.
+
+**Options for the embedded engine:** call `Engine` directly, behind a trait shared with the API client; run the engine in the TUI's process and serve its API there, the TUI using the API either way (chosen). **For following changes:** poll `GET /v1/transfers`; follow `GET /v1/events`, resuming with `Last-Event-ID` (chosen).
+
+**Decision:**
+
+- `tempest tui` uses the daemon if one answers. Otherwise it opens the engine, which runs transfers, and serves its API as the daemon would, recording it in the data directory. The engine stops when the TUI quits.
+- The TUI follows the event stream and reopens it after a second when it breaks, resuming after the last numbered event. While it is broken the screen says so.
+- Requests the TUI sends return no state of their own; the change shows when its event arrives.
+
+**Rationale:** One path to the engine means one set of behaviors to test, and the event stream's resume and reset rules already cover a client that falls behind or reconnects. Serving the API from the TUI's engine also lets `tempest list`, `share` and `get` reach it while the TUI runs, as they would a daemon.
+
+---
+
+## D-190: Narrow lists drop ↑ first
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-138 drops columns in reverse priority (↑ first, then ETA), while the TUI sketch in `specs/interfaces.md` said ETA, then ↑.
+
+**Decision:** D-138's order holds: ↑, then ETA, ↓ and size go as the terminal narrows; name, progress and status stay. Peers and ratio fill extra width after ↑. The sketch's text now points to D-138.
+
+**Rationale:** Time left answers one of the list's four questions ("how long"), and ↑ answers none of them.

@@ -1,0 +1,14 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "draw(&connecting, 80, 10).backend()"
+---
+"  Transfers   Share   Catalog   Settings     connecting…  ↓–     ↑–     [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+"  Name               Size Progress            ↓     ↑    ETA Status        Peers"
+"                            Connecting to the engine…                           "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"                                                                                "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" 1-4 areas  T theme  q quit  ? help                                             "

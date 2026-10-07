@@ -15,6 +15,7 @@ tempest-protocol.workspace = true
 tempest-relay.workspace = true
 tempest-sim.workspace = true
 tempest-tracker.workspace = true
+tempest-tui.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true

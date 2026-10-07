@@ -1,0 +1,24 @@
+[package]
+name = "tempest-tui"
+description = "Tempest's terminal UI, a client of the engine's API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tempest-engine.workspace = true
+tempest-protocol.workspace = true
+
+ratatui.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+unicode-width.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

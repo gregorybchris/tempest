@@ -37,7 +37,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `sim` | Discrete-event simulator, scenarios, DuckDB results | `core` |
 | `ui-kit` | Shared design system for the web UIs (D-076) | (none) |
 | `web` | Client web UI | `ui-kit` |
-| `tui` | Terminal UI | (engine API) |
+| `tui` | Terminal UI | `engine` (its API client and types) |
 | `sim-web` | Simulation results UI | `ui-kit` |
 | `tracker` | Tracker server: peer-list service, catalog | `protocol`, `ui-kit` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |

@@ -108,7 +108,7 @@ The detail panel opens as a right-hand drawer on wide windows and as a full-scre
   j/k move  enter detail  space start/stop  / filter  a add  : command  ? help
 ```
 
-Pressing `enter` replaces the bottom summary with a split detail pane (tabs: Summary, Files, Peers, Decisions). `c` opens the chunk map and `g` the rates chart, each full-screen, and `esc` goes back one level. On terminals under about 100 columns the list drops optional columns (ETA, then ↑) before anything wraps.
+Pressing `enter` replaces the bottom summary with a split detail pane (tabs: Summary, Files, Peers, Decisions). `c` opens the chunk map and `g` the rates chart, each full-screen, and `esc` goes back one level. Narrow terminals drop optional columns in D-138's order before anything wraps.
 
 **Navigation**
 

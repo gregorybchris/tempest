@@ -42,8 +42,10 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
         }
         Status::Downloading => {
             let mut text = format!("Downloading from {}.", connected(transfer));
-            if let Some(eta) = transfer.eta {
-                text.push_str(&format!(" About {} left.", words::duration(eta)));
+            match transfer.eta {
+                Some(eta) if eta < 60 => text.push_str(" Less than a minute left."),
+                Some(eta) => text.push_str(&format!(" About {} left.", words::duration(eta))),
+                None => {}
             }
             Explanation::new(text, None)
         }
@@ -112,6 +114,11 @@ mod tests {
         assert_eq!(
             explain(&downloading).text,
             "Downloading from 7 of 12 peers, 2 through relays. About 3 minutes left."
+        );
+        downloading.eta = Some(59);
+        assert_eq!(
+            explain(&downloading).text,
+            "Downloading from 7 of 12 peers, 2 through relays. Less than a minute left."
         );
         assert_eq!(
             explain(&with(Status::Downloading, 1, 1, 1)).text,

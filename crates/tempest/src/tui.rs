@@ -47,10 +47,13 @@ pub fn tui(args: TuiArgs) -> Result<()> {
         };
         let (stop, stopped) = oneshot::channel::<()>();
         let stopping = engine.clone();
-        let serving = tokio::spawn(server.serve(engine.clone(), async move {
-            let _ = stopped.await;
-            stopping.shutdown().await;
-        }));
+        let serving = tokio::spawn(server.with_ui(crate::web::router()).serve(
+            engine.clone(),
+            async move {
+                let _ = stopped.await;
+                stopping.shutdown().await;
+            },
+        ));
         let result = match ApiClient::for_data_dir(&data_dir) {
             Ok(Some(client)) => tempest_tui::run(client, Origin::Embedded)
                 .await

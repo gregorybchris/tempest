@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use tempest_engine::api::server::{ApiServer, TOKEN_FILE};
-use tempest_engine::{Engine, EngineError};
+use tempest_engine::{Engine, EngineConfig, EngineError};
 use tempest_protocol::RelayIdentity;
 
 use crate::engine::EngineArgs;
@@ -22,7 +22,7 @@ pub struct DaemonArgs {
     relay: Vec<RelayIdentity>,
 }
 
-fn parse_setting(text: &str) -> Result<(String, Value), String> {
+pub fn parse_setting(text: &str) -> Result<(String, Value), String> {
     let (key, value) = text
         .split_once('=')
         .ok_or_else(|| "expected KEY=VALUE".to_owned())?;
@@ -38,9 +38,15 @@ pub fn daemon(args: DaemonArgs) -> Result<()> {
             .with_context(|| format!("--set {key}"))?;
     }
     config.relays.known.extend(args.relay);
-    let data_dir = config.data_dir()?;
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
-    runtime.block_on(async {
+    runtime.block_on(run(config, |_| {}))
+}
+
+/// Runs the engine and serves its API and the web UI until Ctrl-C, calling `ready` with the
+/// API's URL once it serves.
+pub async fn run(config: EngineConfig, ready: impl FnOnce(&str)) -> Result<()> {
+    let data_dir = config.data_dir()?;
+    {
         let engine = match Engine::open(config).await {
             Err(EngineError::Busy(dir)) => {
                 return Err(anyhow!(
@@ -66,6 +72,7 @@ pub fn daemon(args: DaemonArgs) -> Result<()> {
             eprintln!("cert      SHA-256 {fingerprint}");
             eprintln!("token     in {}", data_dir.join(TOKEN_FILE).display());
         }
+        ready(server.url());
         eprintln!("running; press Ctrl-C to stop");
         let stopping = engine.clone();
         let shutdown = async move {
@@ -75,10 +82,13 @@ pub fn daemon(args: DaemonArgs) -> Result<()> {
             // Event streams end with it, so the API can finish.
             stopping.shutdown().await;
         };
-        server.serve(engine, shutdown).await?;
+        server
+            .with_ui(crate::web::router())
+            .serve(engine, shutdown)
+            .await?;
         eprintln!("stopped");
         Ok(())
-    })
+    }
 }
 
 /// Waits for Ctrl-C, or on Unix for SIGTERM too.

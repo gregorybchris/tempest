@@ -43,7 +43,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `sim-web` | Simulation results UI | `ui-kit` |
 | `tracker` | Tracker server: peer-list service, catalog | `protocol`, `ui-kit` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
-| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI | most of the above |
+| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI; embeds the web UI's built files (D-201) | most of the above |
 
 `protocol` and `core` must never depend on async runtimes, sockets, the clock or global randomness. `protocol` is the code other implementers should be able to read alongside the spec.
 

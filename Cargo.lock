@@ -4373,6 +4373,7 @@ name = "tempest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "serde_json",
  "tempest-core",
@@ -4572,6 +4573,25 @@ dependencies = [
  "proptest",
  "send_wrapper",
  "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "tempest-web"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "leptos",
+ "proptest",
+ "send_wrapper",
+ "serde",
+ "serde_json",
+ "tempest-api",
+ "tempest-protocol",
+ "tempest-ui-kit",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

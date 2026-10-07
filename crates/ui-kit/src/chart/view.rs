@@ -400,7 +400,7 @@ pub fn Sparkline(
 }
 
 /// The width of `node` in pixels, kept up to date as it resizes.
-fn use_width(node: NodeRef<Div>) -> RwSignal<f64> {
+pub fn use_width(node: NodeRef<Div>) -> RwSignal<f64> {
     let width = RwSignal::new(DEFAULT_WIDTH);
     node.on_load(move |element| {
         let measured = element.clone();

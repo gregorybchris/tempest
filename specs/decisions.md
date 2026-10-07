@@ -3171,3 +3171,44 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** One definition can't drift, where a mirror needs tests to notice. Clients sharing the logic behave the same by construction, and a single crate keeps the dependency graph simple: everything in it builds for the browser and has no I/O.
 
+---
+
+## D-201: Building the web UI and embedding it in the binary
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-079 ships one `tempest` binary, and the engine serves the client web UI. The UI is WebAssembly built by trunk, a separate tool, and a plain `cargo build` must keep working without it.
+
+**Options:** a build script that runs trunk; trunk run by hand or by CI into `crates/web/dist`, which the binary embeds when present (chosen); serving the files from disk at run time. **For a binary built without them:** fail the build; serve a page that says how to build the UI (chosen).
+
+**Decision:**
+
+- `trunk build --release --cargo-profile web` in `crates/web` builds the UI. The `web` profile optimizes for size, with LTO and `panic = "abort"`, and trunk runs `wasm-opt`.
+- The `tempest` crate's build script embeds every file in `crates/web/dist` and reruns when it changes. The engine's server takes the UI's routes from the binary: `/` and each file, with content-named files cached for good and the rest revalidated. Every other path stays the API's.
+- The UI's files are served without the API's access checks, since they hold no data, and no other page may frame them. With remote access on (D-125), the page has no way yet to present the token, so the UI is for local use until it gains one.
+- Without the files, `/` explains how to build them and points to the TUI.
+- `tempest web` opens the UI of a daemon that answers, or else runs the engine as the daemon would until Ctrl-C. The daemon and the TUI's own engine serve the UI too.
+- CI builds the UI this way and tests the binary serving it.
+
+**Rationale:** Nested cargo builds in a build script are slow, fight over the target directory and fail without trunk, while an optional folder keeps every native build and test working. Embedding keeps the one-binary promise and works offline.
+
+---
+
+## D-202: The web UI follows the engine and the keyboard
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The web UI needs live updates, a clear state when the engine is gone, and the TUI's keys where they make sense in a browser (D-119, D-191). A browser's `EventSource` reconnects on its own schedule, gives up on an error answer, and can't send `Last-Event-ID` on a new stream.
+
+**Options for reconnecting:** the browser's own reconnection; closing a broken stream and opening a new one after a backoff (chosen), which needs another way to resume. **For resuming:** always start over with a snapshot; `GET /v1/events?after=N` beside the header (chosen).
+
+**Decision:**
+
+- The engine accepts `?after=` where `Last-Event-ID` isn't given; the header wins if both are. The page reconnects after 1, 2, 4, 8, then 15 seconds, resuming after the last numbered event, and says plainly while the engine can't be reached, with a button to try now.
+- Events are applied in batches a tenth of a second apart. Rows follow D-199's rule: each has its own signal, which one pass updates after each batch, and the cursor is a selector.
+- Columns that don't fit are hidden with one class on the table, so a resize redraws no rows. Widths are pixels; the order is the TUI's (D-138).
+- Keys follow one table, as in the TUI. `tab` keeps its meaning in a browser, so the detail's tabs are `h`/`l` and the arrows. `f` and `s` focus the status and sort pickers. `esc` closes a dialog, leaves a field, goes back one level of the detail, then clears the filters. Keys are ignored while typing or with ctrl, alt or meta held.
+- The theme is read from the `ui` settings once the engine answers and saved when changed (D-195). Share and Catalog say they are in the TUI for now; Settings holds the theme.
+
+**Rationale:** An explicit backoff gives the page one place to know the engine is gone and to say so, and a query parameter is the only way a new `EventSource` can resume. The rest keeps the TUI's habits without fighting the browser's own keys.
+

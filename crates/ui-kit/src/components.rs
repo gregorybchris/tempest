@@ -663,10 +663,11 @@ pub fn Dialog(
     }
 }
 
-/// Calls `on_close` when `esc` is pressed while `open`.
+/// Calls `on_close` when `esc` is pressed while `open`, unless a handler that ran first, such as
+/// an app's own key handling, has already dealt with it by preventing its default.
 fn close_on_escape(open: Signal<bool>, on_close: Callback<()>) {
     let handle = window_event_listener(ev::keydown, move |e| {
-        if e.key() == "Escape" && open.get_untracked() {
+        if e.key() == "Escape" && open.get_untracked() && !e.default_prevented() {
             e.prevent_default();
             on_close.run(());
         }

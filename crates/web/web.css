@@ -1,0 +1,289 @@
+/* The client web UI's layout; components and themes come from the UI kit's stylesheet. */
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.theme-button {
+  color: var(--dim);
+  font-size: var(--text-lg);
+  padding: 2px 6px;
+}
+
+.theme-button:hover {
+  color: var(--fg);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- The engine's connection ---------- */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2) var(--gap-4);
+  padding: var(--gap-2) var(--gap-4);
+  border-bottom: 1px solid var(--line);
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 8%, var(--bg));
+}
+
+/* ---------- Transfers ---------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2) var(--gap-3);
+  padding: var(--gap-3) var(--gap-4);
+}
+
+.toolbar .search {
+  flex: 1 1 220px;
+  max-width: 380px;
+}
+
+.toolbar .search .input {
+  width: 100%;
+}
+
+.toolbar .select {
+  width: auto;
+}
+
+.toolbar__count {
+  font-size: var(--text-xs);
+}
+
+.toolbar__spacer {
+  flex: 1;
+}
+
+.list {
+  padding: 0 var(--gap-4) var(--gap-5);
+}
+
+.transfers tbody tr {
+  cursor: pointer;
+}
+
+.transfers .col-progress .progress {
+  width: 150px;
+}
+
+.transfers td.col-status {
+  width: 132px;
+}
+
+.transfers .col-tags .chip + .chip {
+  margin-left: 4px;
+}
+
+.row__name {
+  color: var(--fg);
+}
+
+/* Columns that don't fit the window (D-138); `columns.rs` decides which. */
+.hide-name .col-name,
+.hide-size .col-size,
+.hide-progress .col-progress,
+.hide-down .col-down,
+.hide-up .col-up,
+.hide-eta .col-eta,
+.hide-status .col-status,
+.hide-peers .col-peers,
+.hide-ratio .col-ratio,
+.hide-category .col-category,
+.hide-tags .col-tags,
+.hide-added .col-added {
+  display: none;
+}
+
+/* ---------- The detail ---------- */
+
+.detail {
+  display: grid;
+  gap: var(--gap-4);
+}
+
+.explain {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  padding: var(--gap-3);
+  border-left: 2px solid var(--tone);
+  background: color-mix(in srgb, var(--tone) 6%, transparent);
+}
+
+.explain__text {
+  flex: 1;
+  margin: 0;
+  color: var(--fg);
+}
+
+.detail__controls,
+.detail__deeper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+}
+
+.detail__deeper kbd {
+  margin: 0 0 0 6px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px var(--gap-4);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  padding-top: 2px;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.facts dd .chip + .chip {
+  margin-left: 4px;
+}
+
+.facts__link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+.facts__path {
+  overflow-wrap: anywhere;
+  color: var(--dim);
+}
+
+.cell-progress {
+  width: 160px;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.decisions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.decisions li {
+  display: grid;
+  grid-template-columns: 64px 92px minmax(0, 1fr);
+  gap: var(--gap-2);
+}
+
+.decisions__kind {
+  color: var(--down);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deeper__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+}
+
+.deeper__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 400;
+}
+
+/* ---------- Dialogs and other areas ---------- */
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  color: var(--dim);
+}
+
+.help td {
+  white-space: normal;
+}
+
+.help__keys {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.area {
+  display: grid;
+  gap: var(--gap-4);
+  max-width: 880px;
+  padding: var(--gap-4);
+}
+
+.area__stack {
+  display: grid;
+  gap: var(--gap-3);
+}
+
+.hints {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+}
+
+/* Phones: no meters or key hints, and room for the bottom navigation (D-136). */
+@media (max-width: 640px) {
+  .meters,
+  .hints {
+    display: none;
+  }
+
+  .app {
+    padding-bottom: 52px;
+  }
+
+  .toolbar .search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .toolbar__spacer {
+    display: none;
+  }
+
+  .transfers .col-progress .progress {
+    width: 112px;
+  }
+
+  .decisions li {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .decisions__kind {
+    display: none;
+  }
+}

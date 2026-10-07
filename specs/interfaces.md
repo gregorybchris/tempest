@@ -150,6 +150,10 @@ The key map in outline:
 
 The TUI is minimal but powerful, giving quick access to every essential feature.
 
+## Client web UI
+
+The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web` opens it. It shares the TUI's logic through the `api` crate (D-200): the event-following model, finding, column priorities, explanations and saved views. Its keys come from one table, as the TUI's do, and match them where both have the command; what differs, and how the page follows the engine, is in D-202.
+
 ## Visualization ideas
 
 These come from the research, to try in the prototype:

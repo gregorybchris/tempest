@@ -11,6 +11,7 @@ mod sim;
 mod tracker;
 mod transfers;
 mod tui;
+mod web;
 
 use std::process::ExitCode;
 
@@ -42,7 +43,11 @@ enum Command {
     /// Open the terminal UI, on the daemon if one is running, or else on an engine of its own
     /// that stops when it quits.
     Tui(tui::TuiArgs),
-    /// Run the engine, which does every transfer and serves the API that the CLI and UIs use.
+    /// Open the web UI, on the daemon if one is running, or else on an engine run here until
+    /// Ctrl-C.
+    Web(web::WebArgs),
+    /// Run the engine, which does every transfer and serves the API that the CLI and UIs use,
+    /// and the web UI.
     Daemon(daemon::DaemonArgs),
     /// Simulate swarms.
     #[command(subcommand)]
@@ -63,6 +68,7 @@ fn main() -> ExitCode {
         Command::Stop(args) => transfers::stop(args),
         Command::Remove(args) => transfers::remove(args),
         Command::Tui(args) => tui::tui(args),
+        Command::Web(args) => web::web(args),
         Command::Daemon(args) => daemon::daemon(args),
         Command::Sim(command) => sim::sim(command),
         Command::Tracker(args) => tracker::tracker(args),

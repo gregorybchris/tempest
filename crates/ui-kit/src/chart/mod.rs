@@ -11,4 +11,4 @@ pub use line::{
     Color, Hover, HoverRow, LineData, LinePlot, Series, SeriesPaths, Unit, XAxis, sparkline, zoom,
 };
 pub use scale::{Layout, Scale, Tick, ago_ticks, area_path, band_path, line_path, nice_ticks};
-pub use view::{BarChart, LineChart, Sparkline};
+pub use view::{BarChart, LineChart, Sparkline, use_width};

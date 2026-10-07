@@ -46,6 +46,8 @@ jobs:
         run: |
           targets=$(cargo +nightly fuzz list)
           test -n "$targets"
+          # The prebuilt cargo-fuzz is a musl binary that defaults to its own target.
+          host=$(rustc +nightly -vV | sed -n 's/^host: //p')
           for target in $targets; do
-            cargo +nightly fuzz run "$target" -- -max_total_time=30
+            cargo +nightly fuzz run --target "$host" "$target" -- -max_total_time=30
           done

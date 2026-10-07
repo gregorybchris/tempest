@@ -1810,3 +1810,41 @@ The full field list is in `protocol/trackers.md`.
 - Feedback on one, starting with the planned layout rethink, is considered for the other wherever it makes sense.
 - Full parity is not a goal. Each keeps its natural affordances: the TUI is keyboard-first and dense, and the web UI has pointer interactions and richer charts.
 - The client layout rethink happens before M7, so the TUI and web UI start from the same layout thinking.
+
+---
+
+## D-120: Implementation scope for the workflow
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:** A Claude workflow implements milestones M1 through M9 in one run. M10 (the learning guide) remains deferred (D-091). Before the run, open questions are worked through with the owner.
+
+---
+
+## D-121: License
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:** `MIT OR Apache-2.0`, the Rust ecosystem's standard dual license.
+
+---
+
+## D-122: Toolchain
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:**
+
+- `rust-toolchain.toml` pins the latest stable Rust.
+- Nightly is used only where a tool requires it, such as `cargo-fuzz`.
+
+---
+
+## D-123: Crate names and CI
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:**
+
+- Crates are named `tempest-*` (e.g. `tempest-protocol`, `tempest-core`). Their folders keep short names under `crates/`.
+- GitHub Actions CI runs from the first commit of code: formatting, clippy, tests and `cargo-deny`.

@@ -33,7 +33,7 @@ impl Session {
                 message.message_type()
             )));
         }
-        let max_open = self.config.max_open_requests as usize;
+        let max_open = self.config.upload.max_open_requests as usize;
         let conn = self.conns.get_mut(&id).expect("open");
         if conn.open_incoming() >= max_open {
             let message = "too many open requests".to_owned();
@@ -60,7 +60,9 @@ impl Session {
             return Ok(());
         };
         let (start, count) = (request.start, request.count);
-        let refusal = if count > self.config.max_request_chunks {
+        // While superseeding, only the chunks announced to the requester are offered.
+        let offered = conn.offer.as_ref().map_or(&bundle.have, |o| &o.announced);
+        let refusal = if count > self.config.upload.max_request_chunks {
             Some((
                 RejectReason::Invalid,
                 "count exceeds max_request_chunks".to_owned(),
@@ -69,7 +71,7 @@ impl Session {
             Some((RejectReason::Invalid, error.to_string()))
         } else if !conn.we_serve {
             Some((RejectReason::Busy, "not serving you now".to_owned()))
-        } else if !bundle.span(start, count).all(|c| bundle.have.contains(c)) {
+        } else if !bundle.span(start, count).all(|c| offered.contains(c)) {
             Some((RejectReason::DontHave, String::new()))
         } else {
             None
@@ -110,6 +112,7 @@ impl Session {
         };
         conn.incoming.remove(&stream);
         conn.sent.record(now, incoming.bytes);
+        conn.exchanged_at = now;
         let peer = conn.peer();
         self.uploading -= 1;
         self.uploaded += incoming.bytes;
@@ -123,7 +126,9 @@ impl Session {
                 bytes: incoming.bytes,
             },
         );
+        self.record_sent(now, incoming.start, incoming.count);
         self.pump_uploads(now);
+        self.check_linger(now);
     }
 
     /// Starts sending queued Data while upload slots are free, in the upload strategy's order.
@@ -135,16 +140,12 @@ impl Session {
                 .and_then(|c| c.incoming.get(stream))
                 .is_some_and(|i| !i.sending)
         });
-        if self.upload_queue.is_empty() || self.uploading >= self.config.upload_slots {
+        let slots = self.config.upload.parallel_responses;
+        if self.upload_queue.is_empty() || self.uploading >= slots {
             return;
         }
-        let peers = self.peer_views(now);
-        let ctx = UploadContext {
-            now,
-            complete: self.complete,
-            peers: &peers,
-        };
-        while self.uploading < self.config.upload_slots && !self.upload_queue.is_empty() {
+        let mut peers = self.peer_views(now);
+        while self.uploading < slots && !self.upload_queue.is_empty() {
             let queue: Vec<QueuedUpload> = self
                 .upload_queue
                 .iter()
@@ -154,6 +155,11 @@ impl Session {
                     bytes: self.conns[&conn].incoming[&stream].bytes,
                 })
                 .collect();
+            let ctx = UploadContext {
+                now,
+                complete: self.complete,
+                peers: &peers,
+            };
             let index = self.uploader.next_upload(&queue, &ctx);
             let (id, stream) = self.upload_queue.remove(index);
             let incoming = self
@@ -163,6 +169,9 @@ impl Session {
                 .expect("queued uploads are pending");
             incoming.sending = true;
             let (start, count) = (incoming.start, incoming.count);
+            if let Some(view) = peers.iter_mut().find(|p| p.conn == id) {
+                view.in_progress += incoming.bytes;
+            }
             self.uploading += 1;
             self.actions.push(Action::Respond {
                 conn: id,
@@ -182,8 +191,15 @@ impl Session {
                 peer: c.peer(),
                 wants: c.they_want,
                 serving: c.we_serve,
+                complete: c.is_complete(),
                 received: c.received.total(),
                 sent: c.sent.total(),
+                in_progress: c
+                    .incoming
+                    .values()
+                    .filter(|i| i.sending)
+                    .map(|i| i.bytes)
+                    .sum(),
                 receive_rate: c.received.rate(now),
                 send_rate: c.sent.rate(now),
             })

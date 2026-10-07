@@ -6,8 +6,10 @@ use tempest_protocol::message::{HaveUpdate, Hello};
 use tempest_protocol::{Message, PeerId, RangeList};
 
 use crate::chunks::ChunkSet;
+use crate::config::Config;
 use crate::io::{ConnInfo, OutRequest, RequestId, StreamId};
 use crate::meter::Meter;
+use crate::pipeline::{DeliveryRate, RttEstimate};
 use crate::time::Time;
 
 /// One connection, from the opening sequence until it closes.
@@ -33,7 +35,28 @@ pub(super) struct Conn {
     /// Whether this peer said it is serving the other peer.
     pub we_serve: bool,
     /// This peer's open requests on the connection.
-    pub out: BTreeMap<RequestId, OutRequest>,
+    pub out: BTreeMap<RequestId, Outgoing>,
+    /// How many requests this peer keeps open with the other peer, once decided.
+    pub in_flight: Option<u32>,
+    /// The other peer's round-trip time.
+    pub rtt: RttEstimate,
+    /// The rate the other peer delivers Data to this peer at.
+    pub delivery: DeliveryRate,
+    /// Whether the other peer is snubbing this peer: it sent no Data for too long while
+    /// requests were open.
+    pub snubbed: bool,
+    /// When the other peer last made progress on this peer's chunk requests: sent Data, or got
+    /// its first open request after having none.
+    pub progress_at: Time,
+    /// When Data last went either way.
+    pub exchanged_at: Time,
+    /// When this peer may next send Peers.
+    pub next_peers: Option<Time>,
+    /// Whether the other peer has lacked chunks while connected, so that it having every chunk
+    /// now means it received them.
+    pub was_incomplete: bool,
+    /// While superseeding: the chunks announced to the other peer, and the range offered to it.
+    pub offer: Option<Offer>,
     /// No requests are sent on the connection before this time, after a Reject.
     pub retry_at: Option<Time>,
     /// Whether the other peer refused this peer the manifest.
@@ -48,6 +71,25 @@ pub(super) struct Conn {
     pub received: Meter,
     /// Bytes of Data sent.
     pub sent: Meter,
+}
+
+/// One of this peer's open requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Outgoing {
+    pub request: OutRequest,
+    pub sent_at: Time,
+    /// Bytes received on the connection when the request was sent, to measure the delivery
+    /// rate when its response arrives.
+    pub received_before: u64,
+}
+
+/// What a superseeding peer has announced to one other peer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Offer {
+    /// Every chunk announced to it.
+    pub announced: ChunkSet,
+    /// The range it was offered last, until it has every chunk of it.
+    pub pending: Option<(u32, u32)>,
 }
 
 /// An accepted request for chunks, waiting for or using an upload slot.
@@ -73,7 +115,7 @@ pub(super) enum Holdings {
 }
 
 impl Conn {
-    pub fn new(info: ConnInfo, rate_window: std::time::Duration) -> Self {
+    pub fn new(info: ConnInfo, config: &Config, now: Time) -> Self {
         Self {
             info,
             sent_opening: false,
@@ -89,13 +131,22 @@ impl Conn {
             serving_us: false,
             we_serve: false,
             out: BTreeMap::new(),
+            in_flight: None,
+            rtt: RttEstimate::default(),
+            delivery: DeliveryRate::default(),
+            snubbed: false,
+            progress_at: now,
+            exchanged_at: now,
+            next_peers: None,
+            was_incomplete: false,
+            offer: None,
             retry_at: None,
             lacks_manifest: false,
             held: Vec::new(),
             incoming: BTreeMap::new(),
             sent_candidates: false,
-            received: Meter::new(rate_window),
-            sent: Meter::new(rate_window),
+            received: Meter::new(config.upload.rate_window, now),
+            sent: Meter::new(config.upload.rate_window, now),
         }
     }
 
@@ -110,6 +161,19 @@ impl Conn {
     /// Whether requests may be sent on the connection at `now`.
     pub fn may_request(&self, now: Time) -> bool {
         self.is_open() && self.retry_at.is_none_or(|t| t <= now)
+    }
+
+    /// Whether the other peer has every chunk, as far as this peer knows.
+    pub fn is_complete(&self) -> bool {
+        matches!(&self.holdings, Holdings::Known(set) if set.is_full())
+    }
+
+    /// This peer's open chunk requests on the connection, as `(start, count)`.
+    pub fn chunk_requests(&self) -> impl Iterator<Item = (RequestId, u32, u32)> + '_ {
+        self.out.iter().filter_map(|(&id, out)| match out.request {
+            OutRequest::Chunks { start, count } => Some((id, start, count)),
+            OutRequest::Manifest => None,
+        })
     }
 
     /// The number of the other peer's requests that are open: held or accepted.

@@ -7,25 +7,28 @@
 //!
 //! - [`session`]: [`Session`], one peer's participation in one bundle's swarm.
 //! - [`io`]: what drivers report to a session and the [`Action`]s it asks for.
-//! - [`config`]: settings and strategy choices.
-//! - [`select`]: chunk selection strategies.
+//! - [`config`]: settings, strategy choices and profiles.
+//! - [`select`]: chunk selection strategies, over the [`availability`] index.
+//! - [`pipeline`]: how many requests to keep open with each provider.
 //! - [`upload`]: upload strategies.
 //! - [`event`]: decision events with their reasons (D-006).
 //! - [`content`]: an in-memory bundle store for tests and simulation.
 
+pub mod availability;
 pub mod chunks;
 pub mod config;
 pub mod content;
 pub mod event;
 pub mod io;
 pub mod meter;
+pub mod pipeline;
 pub mod select;
 pub mod session;
 pub mod time;
 pub mod upload;
 
 pub use chunks::ChunkSet;
-pub use config::Config;
+pub use config::{Config, Profile, Settings};
 pub use event::{Event, EventKind};
 pub use io::{Action, ConnId, ConnInfo, Inbound, Reply, RequestId, Response, StreamId};
 pub use session::{LocalPeer, Session, SessionError};

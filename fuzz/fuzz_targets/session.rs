@@ -1,6 +1,6 @@
-//! Drives a session with arbitrary connections, messages, responses and timers, as a misbehaving
-//! peer or a confused driver might. The session must never panic, including on the overflow
-//! checks guarding its accounting.
+//! Drives a session with arbitrary connections, messages, responses and timers, under arbitrary
+//! strategies, as a misbehaving peer or a confused driver might. The session must never panic,
+//! including on the overflow checks guarding its accounting.
 
 #![no_main]
 
@@ -9,14 +9,15 @@ use std::time::Duration;
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
+use tempest_core::config::{ChunkSelection, Endgame, Upload, WhenComplete};
 use tempest_core::content::MemoryContent;
 use tempest_core::io::{Closed, ConnInfo, Direction, PathKind};
 use tempest_core::{
     Config, ConnId, Inbound, LocalPeer, RequestId, Response, Session, StreamId, Time,
 };
 use tempest_protocol::message::{
-    GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, Reject, RejectReason, Request,
-    Serving, Want, split_message_frame,
+    GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, PeerRecord, Peers, Reject,
+    RejectReason, Request, Serving, Want, split_message_frame,
 };
 use tempest_protocol::tree::VerifyError;
 use tempest_protocol::{Hash, Message, RangeList};
@@ -24,7 +25,19 @@ use tempest_protocol::{Hash, Message, RangeList};
 #[derive(Debug, Arbitrary)]
 struct Input {
     complete: bool,
+    strategies: Strategies,
     ops: Vec<Op>,
+}
+
+#[derive(Debug, Arbitrary)]
+struct Strategies {
+    selection: u8,
+    upload: u8,
+    endgame: u8,
+    round_robin: bool,
+    superseed: bool,
+    adaptive: bool,
+    direct_send: bool,
 }
 
 #[derive(Debug, Arbitrary)]
@@ -62,8 +75,14 @@ enum Op {
         peer: u8,
     },
     Wait {
+        millis: u32,
+    },
+    Rtt {
+        conn: u8,
         millis: u16,
     },
+    Position(u8),
+    AddPeers(u8),
 }
 
 #[derive(Debug, Arbitrary)]
@@ -77,6 +96,7 @@ enum Msg {
     HaveUpdate(Vec<u8>, Vec<u8>),
     Want(bool),
     Serving(bool),
+    Peers(u8),
     Request {
         start: u8,
         count: u8,
@@ -140,6 +160,9 @@ fn message(msg: Msg) -> Option<Message> {
         }),
         Msg::Want(wanted) => Message::Want(Want { wanted }),
         Msg::Serving(serving) => Message::Serving(Serving { serving }),
+        Msg::Peers(count) => Message::Peers(Peers {
+            peers: (0..count % 51).map(record).collect(),
+        }),
         Msg::Request { start, count } => Message::Request(Request {
             start: u32::from(start),
             count: u32::from(count),
@@ -150,6 +173,49 @@ fn message(msg: Msg) -> Option<Message> {
             Message::decode(frame).ok()?
         }
     })
+}
+
+fn record(n: u8) -> PeerRecord {
+    PeerRecord {
+        peer_id: Hash::new([n % 8 + 3; 32]),
+        addresses: Vec::new(),
+        relay: None,
+    }
+}
+
+fn config(strategies: &Strategies) -> Config {
+    let mut config = Config::default();
+    config.connections.max = 4;
+    config.connections.max_known_peers = 6;
+    config.upload.max_open_requests = 4;
+    config.upload.parallel_responses = 2;
+    config.strategies.chunk_selection = match strategies.selection % 4 {
+        0 => ChunkSelection::RarestFirst,
+        1 => ChunkSelection::Random,
+        2 => ChunkSelection::Sequential,
+        _ => ChunkSelection::Streaming,
+    };
+    config.strategies.upload = match strategies.upload % 4 {
+        0 => Upload::Bittorrent,
+        1 => Upload::Propshare,
+        2 => Upload::Fairtorrent,
+        _ => Upload::Cooperative,
+    };
+    config.strategies.endgame = match strategies.endgame % 3 {
+        0 => Endgame::Limited,
+        1 => Endgame::Classic,
+        _ => Endgame::Off,
+    };
+    config.strategies.when_complete = if strategies.round_robin {
+        WhenComplete::RoundRobin
+    } else {
+        WhenComplete::Unchanged
+    };
+    config.strategies.superseed = strategies.superseed;
+    config.requests.adaptive = strategies.adaptive;
+    config.requests.chunks = 4;
+    config.lingering.direct_send = strategies.direct_send;
+    config
 }
 
 fn response(resp: Resp) -> Response {
@@ -177,12 +243,7 @@ fuzz_target!(|input: Input| {
         addresses: Vec::new(),
         relay: None,
     };
-    let config = Config {
-        max_connections: 4,
-        max_open_requests: 4,
-        upload_slots: 2,
-        ..Config::default()
-    };
+    let config = config(&input.strategies);
     let mut session = if input.complete {
         let all = RangeList::from_chunks(0..44);
         Session::with_manifest(config, local, content.manifest().clone(), &all, 0).unwrap()
@@ -257,10 +318,19 @@ fuzz_target!(|input: Input| {
             Op::DialFailed { peer } => {
                 session.handle_dial_failed(now, Hash::new([peer % 4 + 3; 32]))
             }
+            Op::Rtt { conn: c, millis } => {
+                session.handle_rtt(now, conn(c), Duration::from_millis(u64::from(millis)));
+            }
+            Op::Position(chunk) => session.set_playback_position(now, u32::from(chunk)),
+            Op::AddPeers(count) => session.add_peers(now, (0..count % 12).map(record)),
             Op::Wait { millis } => {
                 now += Duration::from_millis(u64::from(millis));
                 if session.next_timer().is_some_and(|t| t <= now) {
                     session.handle_timer(now);
+                    // A driver calls back at the next timer, so it must move on.
+                    if let Some(next) = session.next_timer() {
+                        assert!(next > now, "timer at {next} not after {now}");
+                    }
                 }
             }
         }

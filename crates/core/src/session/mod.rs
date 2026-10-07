@@ -6,19 +6,22 @@
 //! Decision events (D-006) come out of [`Session::poll_events`].
 //!
 //! The session is split by role: this module handles connections and the control stream,
-//! `download` sends requests and handles their responses, and `upload` answers the other peers'
-//! requests and decides whom to serve.
+//! `download` sends requests and handles their responses, `upload` answers the other peers'
+//! requests and decides whom to serve, `superseed` hides chunks while superseeding, and
+//! `manage` keeps the connection count, peer exchange and lingering in check.
 
 mod bundle;
 mod conn;
 mod download;
+mod manage;
+mod superseed;
 mod upload;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rand::SeedableRng;
-use rand::seq::IteratorRandom;
 use tempest_protocol::message::{
     Candidates, GoodbyeReason, Have, HaveUpdate, Hello, MAX_CANDIDATES, PeerRecord,
 };
@@ -27,16 +30,17 @@ use tempest_protocol::{Address, BundleId, Manifest, Message, PeerId, RangeList};
 
 use self::bundle::Bundle;
 use self::conn::{Conn, Holdings, buffer_update, have_as_update};
+use self::superseed::Superseed;
 use crate::Rng;
 use crate::chunks::ChunkSet;
-use crate::config::{Config, ConfigError};
+use crate::config::{Config, ConfigError, WhenComplete};
 use crate::event::{CloseCause, Event, EventKind};
 use crate::io::{
     Action, Closed, ConnId, ConnInfo, Direction, Inbound, OutRequest, RequestId, StreamId,
 };
 use crate::select::ChunkSelector;
 use crate::time::Time;
-use crate::upload::UploadStrategy;
+use crate::upload::{RoundRobin, UploadStrategy};
 
 /// This peer, as it describes itself to others.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,18 +77,35 @@ pub struct Session {
     known: BTreeMap<PeerId, KnownPeer>,
     dialing: BTreeSet<PeerId>,
     banned: BTreeSet<PeerId>,
+    /// The earliest time a known peer may be dialed, as of the last dialing decision. It may be
+    /// stale, but only too early, which costs one wasted timer.
+    next_dial: Option<Time>,
+    /// When a session at its connection limit next checks for an idle connection to drop.
+    next_conn_review: Time,
     /// The one ManifestRequest in flight, if any.
     manifest_request: Option<(ConnId, RequestId)>,
     next_request: u64,
+    /// The chunk a media player is at, for the streaming strategy.
+    position: u32,
+    /// Whether endgame has started, so that it is announced once.
+    endgame: bool,
     /// Accepted chunk requests waiting for an upload slot, in arrival order. Entries whose
     /// request was reset or whose connection closed are skipped.
     upload_queue: Vec<(ConnId, StreamId)>,
     /// Data responses being sent.
     uploading: u32,
     complete: bool,
+    /// Whether this peer had every chunk from the start, as the origin of a bundle does.
+    started_complete: bool,
+    /// Whether a peer that lacked chunks while connected has received all of them.
+    delivered: bool,
+    /// Since when no connected peer has wanted anything from this peer.
+    idle_since: Option<Time>,
     stopped: bool,
     downloaded: u64,
+    duplicate: u64,
     uploaded: u64,
+    superseed: Option<Superseed>,
     selector: Box<dyn ChunkSelector>,
     uploader: Box<dyn UploadStrategy>,
     rng: Rng,
@@ -126,8 +147,8 @@ impl Session {
     ) -> Result<Self, SessionError> {
         config.validate()?;
         Ok(Self {
-            selector: config.chunk_selection.build(),
-            uploader: config.upload.build(),
+            selector: config.strategies.chunk_selection.build(&config.selection),
+            uploader: config.strategies.upload.build(&config.upload),
             config,
             local,
             bundle_id,
@@ -136,14 +157,23 @@ impl Session {
             known: BTreeMap::new(),
             dialing: BTreeSet::new(),
             banned: BTreeSet::new(),
+            next_dial: None,
+            next_conn_review: Time::ZERO,
             manifest_request: None,
             next_request: 0,
+            position: 0,
+            endgame: false,
             upload_queue: Vec::new(),
             uploading: 0,
             complete: false,
+            started_complete: false,
+            delivered: false,
+            idle_since: None,
             stopped: false,
             downloaded: 0,
+            duplicate: 0,
             uploaded: 0,
+            superseed: None,
             rng: Rng::seed_from_u64(seed),
             actions: Vec::new(),
             events: Vec::new(),
@@ -151,6 +181,8 @@ impl Session {
     }
 
     /// A session that has the manifest and the chunks in `have` (and every empty file's chunk).
+    ///
+    /// If that is every chunk and superseeding is configured, the session superseeds.
     pub fn with_manifest(
         config: Config,
         local: LocalPeer,
@@ -161,11 +193,21 @@ impl Session {
         let mut session = Self::new(config, local, manifest.bundle_id(), seed)?;
         let bundle = Bundle::new(manifest, have).map_err(|_| SessionError::HaveOutOfRange)?;
         session.complete = bundle.is_complete();
+        session.started_complete = session.complete;
+        if session.complete && session.config.strategies.superseed {
+            session.superseed = Some(Superseed::new(&bundle));
+        }
         session.bundle = Some(bundle);
+        session.uploader = session.upload_strategy();
         Ok(session)
     }
 
     // ----- Accessors -----
+
+    /// The settings.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
 
     /// The bundle's ID.
     pub fn bundle_id(&self) -> BundleId {
@@ -187,9 +229,25 @@ impl Session {
         self.complete
     }
 
-    /// Payload bytes of verified Data received.
+    /// Whether this peer has stopped sharing: it was shut down or finished lingering.
+    pub fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
+    /// Whether this peer is superseeding.
+    pub fn is_superseeding(&self) -> bool {
+        self.superseed.is_some()
+    }
+
+    /// Payload bytes of verified Data received, including duplicates.
     pub fn downloaded(&self) -> u64 {
         self.downloaded
+    }
+
+    /// Payload bytes of verified Data received for chunks this peer already had, from
+    /// duplicate endgame requests.
+    pub fn duplicate(&self) -> u64 {
+        self.duplicate
     }
 
     /// Payload bytes of Data sent.
@@ -202,9 +260,14 @@ impl Session {
         self.conns.len()
     }
 
+    /// The number of peers this session may dial.
+    pub fn known_peer_count(&self) -> usize {
+        self.known.len()
+    }
+
     /// The request this peer sent as `request` on `conn`, if it is still open.
     pub fn request(&self, conn: ConnId, request: RequestId) -> Option<OutRequest> {
-        self.conns.get(&conn)?.out.get(&request).copied()
+        Some(self.conns.get(&conn)?.out.get(&request)?.request)
     }
 
     /// Verifies Data received for the chunk request `request` on `conn` against the manifest.
@@ -247,18 +310,32 @@ impl Session {
 
     /// When the session next needs [`Session::handle_timer`], if ever.
     pub fn next_timer(&self) -> Option<Time> {
-        let retries = self.conns.values().filter_map(|c| c.retry_at);
+        if self.stopped {
+            return None;
+        }
+        let per_conn = self.conns.values().flat_map(|c| {
+            let snub = c
+                .chunk_requests()
+                .next()
+                .map(|_| c.progress_at + self.config.requests.snub_timeout);
+            [c.retry_at, snub, c.next_peers]
+        });
         let review = self.uploader.next_review();
-        let dial = if self.may_dial() {
-            self.dial_candidates().map(|(_, k)| k.next_attempt).min()
-        } else {
-            None
-        };
-        retries.chain(review).chain(dial).min()
+        let dial = self.next_dial.filter(|_| self.may_dial());
+        let conn_review =
+            (self.at_connection_limit() && !self.complete).then_some(self.next_conn_review);
+        let linger = self.linger_deadline();
+        per_conn
+            .flatten()
+            .chain([review, dial, conn_review, linger].into_iter().flatten())
+            .min()
     }
 
     /// Reports that time has reached `now`.
     pub fn handle_timer(&mut self, now: Time) {
+        if self.stopped {
+            return;
+        }
         let due: Vec<ConnId> = self
             .conns
             .iter_mut()
@@ -271,26 +348,42 @@ impl Session {
         for id in due {
             self.fill(now, id);
         }
+        self.check_snubs(now);
         self.request_manifest(now);
         if self.uploader.next_review().is_some_and(|t| t <= now) {
             self.review_serving(now);
         }
+        self.share_peers(now);
+        self.review_connections(now);
         self.maybe_dial(now);
+        self.check_linger(now);
     }
 
     /// Adds peers this session may dial, such as from a tracker, a link or peer exchange.
+    ///
+    /// Once `connections.max_known_peers` are known, each new peer replaces a random known one
+    /// that isn't connected or being dialed.
     pub fn add_peers(&mut self, now: Time, peers: impl IntoIterator<Item = PeerRecord>) {
         for record in peers {
             if record.peer_id == self.local.peer_id || self.banned.contains(&record.peer_id) {
                 continue;
             }
-            self.known
-                .entry(record.peer_id)
-                .and_modify(|k| k.record = record.clone())
-                .or_insert(KnownPeer {
+            if let Some(known) = self.known.get_mut(&record.peer_id) {
+                known.record = record;
+                continue;
+            }
+            if self.known.len() >= self.config.connections.max_known_peers as usize
+                && !self.forget_a_known_peer()
+            {
+                continue;
+            }
+            self.known.insert(
+                record.peer_id,
+                KnownPeer {
                     record,
                     next_attempt: now,
-                });
+                },
+            );
         }
         self.maybe_dial(now);
     }
@@ -299,7 +392,7 @@ impl Session {
     pub fn handle_dial_failed(&mut self, now: Time, peer: PeerId) {
         self.dialing.remove(&peer);
         if let Some(known) = self.known.get_mut(&peer) {
-            known.next_attempt = now + self.config.redial_delay;
+            known.next_attempt = now + self.config.connections.redial_delay;
         }
         self.emit(now, EventKind::DialFailed { peer });
         self.maybe_dial(now);
@@ -318,14 +411,16 @@ impl Session {
                 path: info.path,
             },
         );
+        let mut made_room = false;
         let refusal = if self.stopped {
             Some((GoodbyeReason::ShuttingDown, ""))
         } else if self.banned.contains(&info.peer) {
             Some((GoodbyeReason::BadData, "banned for sending bad data"))
         } else if info.peer == self.local.peer_id {
             Some((GoodbyeReason::Done, "connected to itself"))
-        } else if self.conns.len() >= self.config.max_connections as usize {
-            Some((GoodbyeReason::TooManyConnections, ""))
+        } else if self.at_connection_limit() {
+            made_room = self.make_room(now);
+            (!made_room).then_some((GoodbyeReason::TooManyConnections, ""))
         } else {
             None
         };
@@ -344,13 +439,17 @@ impl Session {
             return;
         }
 
-        let mut state = Conn::new(info, self.config.rate_window);
+        let mut state = Conn::new(info, &self.config, now);
         if let Some(bundle) = &self.bundle {
             state.holdings = Holdings::Known(ChunkSet::new(bundle.layout.chunk_count()));
         }
+        state.offer = self.new_offer();
         self.conns.insert(conn, state);
         if info.direction == Direction::Dialed {
             self.send_opening(conn);
+        }
+        if made_room {
+            self.after_removal(now);
         }
     }
 
@@ -394,13 +493,24 @@ impl Session {
         self.after_removal(now);
     }
 
+    /// Reports the transport's round-trip time for a connection, which replaces the session's
+    /// own estimate from request timing.
+    pub fn handle_rtt(&mut self, now: Time, conn: ConnId, rtt: Duration) {
+        if let Some(state) = self.conns.get_mut(&conn) {
+            state.rtt.report(rtt);
+            self.fill(now, conn);
+        }
+    }
+
+    /// Moves the playback position, which the streaming strategy requests from.
+    pub fn set_playback_position(&mut self, now: Time, chunk: u32) {
+        self.position = chunk;
+        self.fill_all(now);
+    }
+
     /// Closes every connection with `shutting_down` and stops dialing or accepting.
     pub fn shutdown(&mut self, now: Time) {
-        self.stopped = true;
-        let conns: Vec<ConnId> = self.conns.keys().copied().collect();
-        for conn in conns {
-            self.close(now, conn, GoodbyeReason::ShuttingDown, String::new());
-        }
+        self.stop(now, GoodbyeReason::ShuttingDown, "");
     }
 
     // ----- Connections -----
@@ -418,19 +528,29 @@ impl Session {
             bundle_id: self.bundle_id,
             capabilities: Vec::new(),
             client: self.config.client.clone(),
-            max_request_chunks: self.config.max_request_chunks,
-            max_open_requests: self.config.max_open_requests,
+            max_request_chunks: self.config.upload.max_request_chunks,
+            max_open_requests: self.config.upload.max_open_requests,
             addresses: self.local.addresses.clone(),
             relay: self.local.relay,
         };
-        let ranges = self
-            .bundle
-            .as_ref()
-            .map(|b| b.have.to_ranges())
-            .unwrap_or_default();
+        let state = self.conns.get_mut(&conn).expect("open");
+        let ranges = match (&state.offer, &self.bundle) {
+            (Some(offer), _) => offer.announced.to_ranges(),
+            (None, Some(bundle)) => bundle.have.to_ranges(),
+            (None, None) => RangeList::new(),
+        };
+        state.sent_opening = true;
         self.send(conn, Message::Hello(hello));
         self.send(conn, Message::Have(Have { ranges }));
-        self.conns.get_mut(&conn).expect("open").sent_opening = true;
+    }
+
+    /// Stops sharing: closes every connection and stops dialing or accepting.
+    fn stop(&mut self, now: Time, reason: GoodbyeReason, message: &str) {
+        self.stopped = true;
+        let conns: Vec<ConnId> = self.conns.keys().copied().collect();
+        for conn in conns {
+            self.close(now, conn, reason, message.to_owned());
+        }
     }
 
     /// Closes a connection because of `fail`, banning the peer for bad data (D-067).
@@ -448,8 +568,21 @@ impl Session {
     }
 
     fn close(&mut self, now: Time, conn: ConnId, reason: GoodbyeReason, message: String) {
+        if self.close_quietly(now, conn, reason, message) {
+            self.after_removal(now);
+        }
+    }
+
+    /// Closes a connection without reacting to its removal. Returns whether it was open.
+    fn close_quietly(
+        &mut self,
+        now: Time,
+        conn: ConnId,
+        reason: GoodbyeReason,
+        message: String,
+    ) -> bool {
         let Some(state) = self.remove_conn(now, conn) else {
-            return;
+            return false;
         };
         self.actions.push(Action::Close {
             conn,
@@ -459,21 +592,19 @@ impl Session {
         let peer = state.peer();
         let cause = CloseCause::Local { reason, message };
         self.emit(now, EventKind::Closed { conn, peer, cause });
-        self.after_removal(now);
+        true
     }
 
     /// Forgets a connection, releasing everything it held.
     fn remove_conn(&mut self, now: Time, conn: ConnId) -> Option<Conn> {
         let state = self.conns.remove(&conn)?;
         if let Some(bundle) = &mut self.bundle {
-            for request in state.out.values() {
-                if let OutRequest::Chunks { start, count } = *request {
-                    bundle.release(start, count);
-                }
+            for (_, start, count) in state.chunk_requests() {
+                bundle.release(start, count);
             }
             if let Holdings::Known(set) = &state.holdings {
                 for chunk in set.iter() {
-                    bundle.availability[chunk as usize] -= 1;
+                    bundle.availability.decrement(chunk);
                 }
             }
         }
@@ -482,24 +613,31 @@ impl Session {
         }
         self.uploading -= state.incoming.values().filter(|i| i.sending).count() as u32;
         if let Some(known) = self.known.get_mut(&state.peer()) {
-            known.next_attempt = now + self.config.redial_delay;
+            known.next_attempt = now + self.config.connections.redial_delay;
         }
         Some(state)
     }
 
     /// Reacts to a connection going away: its requests and upload slots are free for others.
     fn after_removal(&mut self, now: Time) {
+        if self.stopped {
+            return;
+        }
         self.request_manifest(now);
         self.review_serving(now);
         self.pump_uploads(now);
         self.fill_all(now);
         self.maybe_dial(now);
+        self.update_idle(now);
+        self.check_linger(now);
+    }
+
+    fn at_connection_limit(&self) -> bool {
+        self.conns.len() + self.dialing.len() >= self.config.connections.max as usize
     }
 
     fn may_dial(&self) -> bool {
-        !self.stopped
-            && !self.complete
-            && self.conns.len() + self.dialing.len() < self.config.max_connections as usize
+        !self.stopped && !self.complete && !self.at_connection_limit()
     }
 
     /// Known peers that could be dialed, ignoring when.
@@ -512,20 +650,30 @@ impl Session {
 
     /// Dials random known peers until the connection limit. Complete peers wait to be dialed.
     fn maybe_dial(&mut self, now: Time) {
+        use rand::seq::IteratorRandom;
+
         if !self.may_dial() {
             return;
         }
-        let room = self.config.max_connections as usize - self.conns.len() - self.dialing.len();
-        let eligible: Vec<PeerId> = self
+        let room = self.config.connections.max as usize - self.conns.len() - self.dialing.len();
+        let (eligible, later): (Vec<_>, Vec<_>) = self
             .dial_candidates()
-            .filter(|(_, k)| k.next_attempt <= now)
-            .map(|(&peer, _)| peer)
-            .collect();
-        for peer in eligible.into_iter().choose_multiple(&mut self.rng, room) {
+            .map(|(&peer, known)| (peer, known.next_attempt))
+            .partition(|&(_, at)| at <= now);
+        let chosen = eligible.iter().map(|&(peer, _)| peer);
+        let chosen = chosen.choose_multiple(&mut self.rng, room);
+        let leftover = eligible.len() > chosen.len();
+        for peer in chosen {
             self.dialing.insert(peer);
             self.actions
                 .push(Action::Dial(self.known[&peer].record.clone()));
         }
+        // With eligible peers left over, the limit is reached and dialing waits for room.
+        self.next_dial = if leftover {
+            Some(now)
+        } else {
+            later.iter().map(|&(_, at)| at).min()
+        };
     }
 
     /// Keeps one of several open connections with the same peer. Only the peer with the lower
@@ -544,6 +692,18 @@ impl Session {
         for &(_, _, id) in open.iter().skip(1) {
             let message = "keeping another connection".to_owned();
             self.close(now, id, GoodbyeReason::Duplicate, message);
+        }
+    }
+
+    /// The upload strategy for this peer's state: superseeding, complete or downloading.
+    fn upload_strategy(&self) -> Box<dyn UploadStrategy> {
+        if self.superseed.is_some() {
+            Box::new(RoundRobin::superseeding())
+        } else if self.complete && self.config.strategies.when_complete == WhenComplete::RoundRobin
+        {
+            Box::new(RoundRobin::new())
+        } else {
+            self.config.strategies.upload.build(&self.config.upload)
         }
     }
 
@@ -568,6 +728,7 @@ impl Session {
             Message::Want(want) => {
                 conn.they_want = want.wanted;
                 self.review_serving(now);
+                self.update_idle(now);
                 Ok(())
             }
             Message::Serving(serving) => {
@@ -621,6 +782,9 @@ impl Session {
         self.on_holdings(id, have_as_update(have.ranges))?;
         let conn = self.conns.get_mut(&id).expect("open");
         conn.opened_at = Some(now);
+        if self.config.connections.peer_exchange {
+            conn.next_peers = Some(now);
+        }
         let peer = conn.peer();
         self.emit(now, EventKind::Opened { conn: id, peer });
         self.resolve_duplicates(now, peer);
@@ -635,6 +799,8 @@ impl Session {
         self.request_manifest(now);
         self.review_serving(now);
         self.fill(now, id);
+        self.share_peers(now);
+        self.after_holdings(now, id);
         Ok(())
     }
 
@@ -645,12 +811,13 @@ impl Session {
             self.request_manifest(now);
         }
         self.fill(now, id);
+        self.after_holdings(now, id);
         Ok(())
     }
 
     /// Applies a Have or HaveUpdate, or buffers it until the manifest arrives.
     fn on_holdings(&mut self, id: ConnId, update: HaveUpdate) -> Outcome {
-        let max = self.config.max_pending_ranges;
+        let max = self.config.connections.max_pending_ranges as usize;
         let conn = self.conns.get_mut(&id).expect("open");
         if !update.added.is_empty() {
             // A peer that has chunks has the manifest.
@@ -688,15 +855,45 @@ impl Session {
         }
         for chunk in update.added.chunks() {
             set.insert(chunk);
-            bundle.availability[chunk as usize] += 1;
+            bundle.availability.increment(chunk);
             conn.interesting += u32::from(!bundle.have.contains(chunk));
         }
         for chunk in update.removed.chunks() {
             set.remove(chunk);
-            bundle.availability[chunk as usize] -= 1;
+            bundle.availability.decrement(chunk);
             conn.interesting -= u32::from(!bundle.have.contains(chunk));
         }
+        if !set.is_full() {
+            conn.was_incomplete = true;
+        }
         Ok(())
+    }
+
+    /// Reacts to what an open connection's peer has: superseeding offers, delivery of a direct
+    /// send, and closing connections between two complete peers. May close the connection.
+    fn after_holdings(&mut self, now: Time, id: ConnId) {
+        let Some(conn) = self.conns.get(&id) else {
+            return;
+        };
+        if !conn.is_open() || self.bundle.is_none() {
+            return;
+        }
+        let peer_complete = conn.is_complete();
+        if peer_complete && conn.was_incomplete {
+            self.delivered = true;
+        }
+        if self.superseed.is_some() {
+            if peer_complete {
+                self.end_superseeding(now, crate::event::SuperseedEnd::AnotherCopy);
+            } else {
+                self.offer_next(now, id);
+            }
+        }
+        if self.complete && peer_complete {
+            let message = "both peers have every chunk".to_owned();
+            self.close(now, id, GoodbyeReason::Done, message);
+        }
+        self.check_linger(now);
     }
 
     /// Sends Want when whether this peer wants the other peer's chunks changes.

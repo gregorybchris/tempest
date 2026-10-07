@@ -1,21 +1,26 @@
-//! A minimal test driver: sessions joined by an instant, lossless network.
+//! A small test driver: sessions joined by a simple timed network.
 //!
-//! Messages are delivered one at a time in the order they were sent. Time only moves when nothing
-//! is in flight, jumping to the earliest timer. Each peer stores real bytes in a
-//! [`MemoryContent`] and verifies every Data it receives.
+//! Each node has a one-way latency, added at both ends of a link, and optionally an upload rate:
+//! Data leaves a node one response at a time at that rate. Everything else is instant. With no
+//! latency and no upload rate, messages are delivered one at a time in the order they were sent,
+//! and time only moves to fire timers. Each peer stores real bytes in a [`MemoryContent`] and
+//! verifies every Data it receives.
 
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
+use std::time::Duration;
 
 use tempest_core::content::MemoryContent;
-use tempest_core::io::{Closed, ConnInfo, Direction, PathKind};
+use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
 use tempest_core::{
-    Action, Config, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response, Session,
-    StreamId, Time,
+    Action, Config, ConnId, Event, EventKind, Inbound, LocalPeer, Reply, RequestId, Response,
+    Session, StreamId, Time,
 };
 use tempest_protocol::message::{Data, ManifestMessage, PeerRecord};
 use tempest_protocol::{Hash, PeerId, RangeList};
+
+pub const CHUNK: usize = 16 * 1024;
 
 pub fn peer_id(n: u8) -> PeerId {
     Hash::new([n; 32])
@@ -42,6 +47,24 @@ pub fn file_bytes(seed: u64, len: usize) -> Vec<u8> {
         .collect()
 }
 
+/// A bundle with one file of each size in `sizes`.
+pub fn bundle(sizes: &[usize]) -> MemoryContent {
+    let files = sizes
+        .iter()
+        .enumerate()
+        .map(|(i, &size)| (format!("file-{i}"), file_bytes(i as u64, size)))
+        .collect();
+    MemoryContent::new("bundle", files)
+}
+
+pub fn at(seconds: f64) -> Time {
+    Time::ZERO + Duration::from_secs_f64(seconds)
+}
+
+pub fn far_future() -> Time {
+    at(3600.0)
+}
+
 pub struct Node {
     pub id: PeerId,
     pub session: Session,
@@ -49,6 +72,29 @@ pub struct Node {
     pub events: Vec<Event>,
     /// Flip a byte of every Data this peer sends.
     pub corrupt: bool,
+    /// Never send the Data this peer's session asks to send.
+    pub mute: bool,
+    /// Added to every message to or from this node.
+    pub latency: Duration,
+    /// Bytes per second this node sends Data at, or unlimited.
+    pub upload_rate: Option<u64>,
+    /// When this node's uplink finishes the Data it is sending.
+    uplink_free: Time,
+}
+
+impl Node {
+    /// When this node completed, if it did.
+    pub fn completed_at(&self) -> Option<Time> {
+        self.events
+            .iter()
+            .find(|e| e.kind == EventKind::Completed)
+            .map(|e| e.time)
+    }
+
+    /// The events matching `pick`.
+    pub fn events_where(&self, pick: impl Fn(&EventKind) -> bool) -> Vec<&Event> {
+        self.events.iter().filter(|e| pick(&e.kind)).collect()
+    }
 }
 
 enum Delivery {
@@ -69,7 +115,9 @@ pub struct Swarm {
     pub nodes: Vec<Node>,
     /// Each connection end, by its node and ID, mapped to the other end.
     links: BTreeMap<(usize, ConnId), (usize, ConnId)>,
-    queue: VecDeque<Delivery>,
+    /// Deliveries by time, then by the order they were scheduled.
+    queue: BTreeMap<(Time, u64), Delivery>,
+    scheduled: u64,
     next_conn: u64,
 }
 
@@ -79,7 +127,8 @@ impl Swarm {
             now: Time::ZERO,
             nodes: Vec::new(),
             links: BTreeMap::new(),
-            queue: VecDeque::new(),
+            queue: BTreeMap::new(),
+            scheduled: 0,
             next_conn: 0,
         }
     }
@@ -116,6 +165,10 @@ impl Swarm {
             content,
             events: Vec::new(),
             corrupt: false,
+            mute: false,
+            latency: Duration::ZERO,
+            upload_rate: None,
+            uplink_free: Time::ZERO,
         });
         self.nodes.len() - 1
     }
@@ -124,6 +177,14 @@ impl Swarm {
     pub fn introduce(&mut self, node: usize, others: &[usize]) {
         let records: Vec<_> = others.iter().map(|&o| record(self.nodes[o].id)).collect();
         self.nodes[node].session.add_peers(self.now, records);
+    }
+
+    /// Tells every node in `group` about every other.
+    pub fn introduce_all(&mut self, group: &[usize]) {
+        for &node in group {
+            let others: Vec<usize> = group.iter().copied().filter(|&o| o != node).collect();
+            self.introduce(node, &others);
+        }
     }
 
     /// Runs until nothing is in flight and no timer is due before `until`.
@@ -135,22 +196,27 @@ impl Swarm {
             if self.perform_actions() {
                 continue;
             }
-            if let Some(delivery) = self.queue.pop_front() {
-                self.deliver(delivery);
-                continue;
-            }
-            let Some(next) = self
+            let delivery = self.queue.first_key_value().map(|(&(t, _), _)| t);
+            let timer = self
                 .nodes
                 .iter()
                 .filter_map(|n| n.session.next_timer())
-                .min()
-            else {
-                break;
+                .min();
+            let next = match (delivery, timer) {
+                (Some(d), Some(t)) => d.min(t),
+                (Some(d), None) => d,
+                (None, Some(t)) => t,
+                (None, None) => break,
             };
             if next > until {
                 break;
             }
             self.now = self.now.max(next);
+            if delivery == Some(next) {
+                let (_, delivery) = self.queue.pop_first().expect("present");
+                self.deliver(delivery);
+                continue;
+            }
             for node in &mut self.nodes {
                 if node.session.next_timer().is_some_and(|t| t <= self.now) {
                     node.session.handle_timer(self.now);
@@ -160,6 +226,11 @@ impl Swarm {
         for node in &mut self.nodes {
             node.events.extend(node.session.poll_events());
         }
+    }
+
+    fn schedule(&mut self, at: Time, delivery: Delivery) {
+        self.queue.insert((at, self.scheduled), delivery);
+        self.scheduled += 1;
     }
 
     fn perform_actions(&mut self) -> bool {
@@ -180,12 +251,16 @@ impl Swarm {
         self.links.get(&(node, conn)).copied()
     }
 
+    fn latency(&self, a: usize, b: usize) -> Duration {
+        self.nodes[a].latency + self.nodes[b].latency
+    }
+
     fn perform(&mut self, i: usize, action: Action) {
+        let now = self.now;
         match action {
             Action::Dial(record) => {
                 let Some(j) = self.nodes.iter().position(|n| n.id == record.peer_id) else {
-                    self.queue
-                        .push_back(Delivery::DialFailed(i, record.peer_id));
+                    self.schedule(now, Delivery::DialFailed(i, record.peer_id));
                     return;
                 };
                 let (a, b) = (ConnId(self.next_conn), ConnId(self.next_conn + 1));
@@ -198,15 +273,20 @@ impl Swarm {
                     path: PathKind::Direct,
                 };
                 let (pi, pj) = (self.nodes[i].id, self.nodes[j].id);
-                self.queue
-                    .push_back(Delivery::Connected(i, a, info(pj, Direction::Dialed)));
-                self.queue
-                    .push_back(Delivery::Connected(j, b, info(pi, Direction::Accepted)));
+                let arrive = now + self.latency(i, j);
+                self.schedule(
+                    arrive,
+                    Delivery::Connected(i, a, info(pj, Direction::Dialed)),
+                );
+                self.schedule(
+                    arrive,
+                    Delivery::Connected(j, b, info(pi, Direction::Accepted)),
+                );
             }
             Action::Send { conn, message } => {
                 if let Some((j, c)) = self.other_end(i, conn) {
-                    self.queue
-                        .push_back(Delivery::Inbound(j, c, Inbound::Control(message)));
+                    let arrive = now + self.latency(i, j);
+                    self.schedule(arrive, Delivery::Inbound(j, c, Inbound::Control(message)));
                 }
             }
             Action::Request {
@@ -219,7 +299,8 @@ impl Swarm {
                         stream: StreamId(request.0),
                         message: message.message(),
                     };
-                    self.queue.push_back(Delivery::Inbound(j, c, inbound));
+                    let arrive = now + self.latency(i, j);
+                    self.schedule(arrive, Delivery::Inbound(j, c, inbound));
                 }
             }
             Action::Cancel { conn, request } => {
@@ -227,7 +308,8 @@ impl Swarm {
                     let inbound = Inbound::RequestReset {
                         stream: StreamId(request.0),
                     };
-                    self.queue.push_back(Delivery::Inbound(j, c, inbound));
+                    let arrive = now + self.latency(i, j);
+                    self.schedule(arrive, Delivery::Inbound(j, c, inbound));
                 }
             }
             Action::Respond {
@@ -239,7 +321,9 @@ impl Swarm {
                     return;
                 };
                 let request = RequestId(stream.0);
+                let arrive = now + self.latency(i, j);
                 let response = match reply {
+                    Reply::Data { .. } if self.nodes[i].mute => return,
                     Reply::Data { start, count } => {
                         let mut data = self.nodes[i].content.data(start, count);
                         if self.nodes[i].corrupt
@@ -247,17 +331,32 @@ impl Swarm {
                         {
                             *byte ^= 1;
                         }
-                        self.queue.push_back(Delivery::Data {
-                            to: j,
-                            conn: c,
-                            request,
-                            data,
-                        });
-                        self.queue.push_back(Delivery::Inbound(
-                            i,
-                            conn,
-                            Inbound::DataSent { stream },
-                        ));
+                        let node = &mut self.nodes[i];
+                        let sent = match node.upload_rate {
+                            Some(rate) => {
+                                let begin = node.uplink_free.max(now);
+                                let secs = data.chunks.len() as f64 / rate as f64;
+                                begin + Duration::from_secs_f64(secs)
+                            }
+                            None => now,
+                        };
+                        node.uplink_free = sent;
+                        // The sender learns it finished sending no later than the data
+                        // arrives.
+                        self.schedule(
+                            sent,
+                            Delivery::Inbound(i, conn, Inbound::DataSent { stream }),
+                        );
+                        let arrive = sent + self.latency(i, j);
+                        self.schedule(
+                            arrive,
+                            Delivery::Data {
+                                to: j,
+                                conn: c,
+                                request,
+                                data,
+                            },
+                        );
                         return;
                     }
                     Reply::Manifest => Response::Manifest(ManifestMessage {
@@ -266,7 +365,7 @@ impl Swarm {
                     Reply::Reject(reject) => Response::Reject(reject),
                 };
                 let inbound = Inbound::Response { request, response };
-                self.queue.push_back(Delivery::Inbound(j, c, inbound));
+                self.schedule(arrive, Delivery::Inbound(j, c, inbound));
             }
             Action::Close {
                 conn,
@@ -276,7 +375,8 @@ impl Swarm {
                 if let Some((j, c)) = self.links.remove(&(i, conn)) {
                     self.links.remove(&(j, c));
                     let closed = Closed::Goodbye { reason, message };
-                    self.queue.push_back(Delivery::Closed(j, c, closed));
+                    let arrive = now + self.latency(i, j);
+                    self.schedule(arrive, Delivery::Closed(j, c, closed));
                 }
             }
             Action::StoreManifest { manifest, .. } => {
@@ -312,7 +412,7 @@ impl Swarm {
                     return;
                 };
                 if check.is_ok() {
-                    let Some(tempest_core::io::OutRequest::Chunks { start, count }) =
+                    let Some(OutRequest::Chunks { start, count }) =
                         node.session.request(conn, request)
                     else {
                         unreachable!("verified requests are chunk requests");
@@ -333,7 +433,7 @@ impl Swarm {
     }
 }
 
-fn local(peer_id: PeerId) -> LocalPeer {
+pub fn local(peer_id: PeerId) -> LocalPeer {
     LocalPeer {
         peer_id,
         addresses: Vec::new(),

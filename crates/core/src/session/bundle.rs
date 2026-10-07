@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tempest_protocol::tree::{TreeNode, data_len};
 use tempest_protocol::{ChunkLayout, Manifest, RangeList};
 
+use crate::availability::Availability;
 use crate::chunks::ChunkSet;
 
 #[derive(Debug)]
@@ -14,10 +15,12 @@ pub(super) struct Bundle {
     pub layout: ChunkLayout,
     /// Chunks this peer has.
     pub have: ChunkSet,
-    /// Chunks this peer lacks and hasn't requested.
+    /// Chunks this peer lacks and has no open request for.
     pub needed: ChunkSet,
-    /// For each chunk, how many open connections' peers have it.
-    pub availability: Vec<u32>,
+    /// For each chunk, how many open requests ask for it. Above 1 only during endgame.
+    pub requests: Vec<u32>,
+    /// How many open connections' peers have each chunk.
+    pub availability: Availability,
 }
 
 /// `have` reaches past the bundle's last chunk.
@@ -34,22 +37,20 @@ impl Bundle {
             return Err(OutOfRange);
         }
         let mut have = ChunkSet::from_ranges(count, have);
-        for file in layout.files() {
-            let size = manifest.entries()[file.entry].as_file().map(|f| f.size);
-            if size == Some(0) {
-                have.insert(file.first_chunk);
-            }
+        for chunk in empty_file_chunks(&manifest, &layout) {
+            have.insert(chunk);
         }
-        let mut needed = ChunkSet::full(count);
-        for chunk in have.iter() {
-            needed.remove(chunk);
+        let mut needed = ChunkSet::new(count);
+        for chunk in have.iter_missing().collect::<Vec<_>>() {
+            needed.insert(chunk);
         }
         Ok(Self {
             manifest,
             layout,
             have,
             needed,
-            availability: vec![0; count as usize],
+            requests: vec![0; count as usize],
+            availability: Availability::new(count),
         })
     }
 
@@ -74,8 +75,13 @@ impl Bundle {
     }
 
     /// The largest Request of at most `max_count` chunks that contains `chunk` and holds only
-    /// chunks that are needed and that `provider` has. `chunk` itself must be one.
-    pub fn request_around(&self, chunk: u32, max_count: u32, provider: &ChunkSet) -> (u32, u32) {
+    /// chunks that pass `accept`. `chunk` itself must pass.
+    pub fn request_around(
+        &self,
+        chunk: u32,
+        max_count: u32,
+        accept: impl Fn(u32) -> bool,
+    ) -> (u32, u32) {
         let location = self.layout.locate(chunk).expect("chunk in the bundle");
         let file = self.layout.files()[location.file];
         let mut count = max_count;
@@ -83,35 +89,66 @@ impl Bundle {
             let position = location.position - location.position % count;
             let start = file.first_chunk + position;
             let fits = TreeNode::for_range(file.chunk_count.into(), position, count).is_ok();
-            if fits
-                && self
-                    .span(start, count)
-                    .all(|i| self.needed.contains(i) && provider.contains(i))
-            {
+            if fits && self.span(start, count).all(&accept) {
                 return (start, count);
             }
-            debug_assert!(count > 1, "a single needed chunk is always requestable");
+            debug_assert!(count > 1, "a single accepted chunk is always requestable");
             count /= 2;
         }
     }
 
-    /// Marks a request's chunks as requested.
+    /// Counts a new request for a range's chunks.
     pub fn mark_requested(&mut self, start: u32, count: u32) {
         for chunk in self.span(start, count) {
+            self.requests[chunk as usize] += 1;
             self.needed.remove(chunk);
         }
     }
 
-    /// Makes a request's chunks that are still missing needed again.
+    /// Uncounts a request that ended, however it ended. Chunks that are still missing and no
+    /// longer requested are needed again.
     pub fn release(&mut self, start: u32, count: u32) {
         for chunk in self.span(start, count) {
-            if !self.have.contains(chunk) {
+            let requests = &mut self.requests[chunk as usize];
+            *requests -= 1;
+            if *requests == 0 && !self.have.contains(chunk) {
                 self.needed.insert(chunk);
             }
         }
     }
 
+    /// Stores a range's chunks, returning the ones that are new and the number of payload bytes
+    /// of the ones already stored.
+    pub fn store(&mut self, start: u32, count: u32) -> (Vec<u32>, u64) {
+        let mut added = Vec::new();
+        let mut duplicate = 0;
+        for chunk in self.span(start, count) {
+            if self.have.insert(chunk) {
+                added.push(chunk);
+            } else {
+                duplicate += self.data_len(chunk, 1);
+            }
+        }
+        (added, duplicate)
+    }
+
     pub fn is_complete(&self) -> bool {
         self.have.is_full()
     }
+
+    /// Whether every missing chunk has an open request, so that endgame applies (D-061).
+    pub fn in_endgame(&self) -> bool {
+        !self.is_complete() && self.needed.is_empty()
+    }
+}
+
+/// The chunk of each empty file, which every peer with the manifest has.
+pub(super) fn empty_file_chunks<'a>(
+    manifest: &'a Manifest,
+    layout: &'a ChunkLayout,
+) -> impl Iterator<Item = u32> + 'a {
+    layout.files().iter().filter_map(|file| {
+        let size = manifest.entries()[file.entry].as_file().map(|f| f.size);
+        (size == Some(0)).then_some(file.first_chunk)
+    })
 }

@@ -2202,3 +2202,135 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - **Candidates** is answered with this peer's own direct addresses. Hole punching itself is left to the driver.
 
 **Rationale:** Each choice is the simplest that avoids busy loops or unbounded memory, and each can be revisited with simulation data.
+
+---
+
+## D-150: Settings keys and overrides
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-005 calls for profiles plus per-setting overrides, and the simulator's scenario files vary settings by dotted key (`specs/simulation.md`). The key names were undecided.
+
+**Options:** one flat list of settings; settings grouped by topic and addressed by dotted key; a free-form string map interpreted by each strategy.
+
+**Decision:**
+
+- Settings are grouped by topic: `strategies` (which strategy makes each decision), then one group per topic for parameters (`selection`, `requests`, `endgame`, `upload`, `connections`, `lingering`). A setting's key is its group and name, such as `strategies.chunk_selection` or `upload.reciprocal_slots`. The core's `Config` type is the source of truth for the list.
+- Strategy names are written in kebab case (`rarest-first`, `bittorrent`), and durations as a number and a unit (`"10s"`, `"250ms"`), or a bare number of seconds.
+- A profile and a map of overrides together resolve to a config. An unknown key, a key naming a whole group, or a value out of range is an error, and leaves the config unchanged.
+- Strategy choice and strategy parameters are separate keys, so an experiment can vary the strategy without restating its parameters.
+
+**Rationale:** Grouping keeps the list readable as it grows, and the same keys serve scenario files, a settings screen and a CLI. A free-form map would push validation into every strategy.
+
+---
+
+## D-151: Profile names and contents
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `specs/strategies.md` left profile names and their settings open, suggesting "balanced", "background", "classic BitTorrent" and "cooperative".
+
+**Options:** the suggested names; names after use cases only ("public", "direct", "trusted"); names after strategies only.
+
+**Decision:** Five profiles, each a complete config:
+
+- `balanced` (default): the defaults in `specs/strategies.md`.
+- `classic`: the classic BitTorrent client as a baseline: one-chunk requests, a fixed pipeline of 5, classic endgame, and the same upload strategy once complete.
+- `cooperative`: serve everyone (Cooperative upload) and keep sharing.
+- `background`: polite sharing: 20 connections, 2 uploads at once, 2 reciprocity slots, and a shorter idle timeout for lingering.
+- `streaming`: the streaming-window chunk selection.
+
+**Rationale:** The suggested names cover beginners' choices and the simulator's baselines. `streaming` is added because it is the one user-facing reason to change chunk selection.
+
+---
+
+## D-152: Adaptive pipelining
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-060 keeps "measured rate × round-trip time" bytes requested from each provider, but how to measure either was open.
+
+**Options for the rate:** a sliding-window average of bytes received; the delivery rate of each response (BBR-style); libtorrent's "rate × fixed queue time".
+
+**Decision:**
+
+- **Requests kept open** = ⌈factor × delivery rate × RTT ÷ full request size⌉, with factor 2, at least 2, and at most the provider's `max_open_requests` less headroom. Before the first measurement, 4. A snubbing provider (D-153) gets 1. Each change is a decision event with its reason.
+- **Delivery rate:** for each Data response, the bytes received from that provider between sending the request and receiving its response, divided by that time. The estimate is the largest of the last 8 samples.
+- **RTT:** the smallest time from sending any request to its response, unless the driver reports the transport's RTT through `Session::handle_rtt`, which then replaces it.
+- A setting turns adaptation off, keeping a fixed number of requests open.
+
+**Rationale:** A factor above 1 lets a pipeline-limited provider's measured rate grow, so the pipeline roughly doubles every round trip until the link is the limit. A sliding-window rate lagged so far behind that ramp-up took seconds in simulation; per-response samples cover exactly one round trip. Response times include the provider's queueing, so the minimum is the best estimate of RTT the core has on its own.
+
+---
+
+## D-153: Endgame and snubbing details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-061 sets the endgame strategies; which chunk to duplicate first, when to cancel, and what to do about a provider that never answers were open.
+
+**Decision:**
+
+- **Endgame picks** the missing chunk with the fewest open requests that the provider has, at random among equals, and never asks one provider twice for a chunk. Requests grow around it like any other, so they shrink as fewer chunks qualify.
+- **Cancelling:** when Data arrives, every other open request whose chunks are now all stored is cancelled by resetting its stream. A request that still covers a missing chunk stays open.
+- **An `off` endgame** strategy, which never duplicates requests, exists as an experimental contrast.
+- **Snubbing:** a provider that sends no Data for 60 s while requests to it are open is snubbing. Its requests are cancelled and become available to others, and until it sends Data again it gets one request at a time, only for chunks no other connected peer has.
+
+**Options for snubbing:** no timeout (requests wait forever); cancel and keep requesting normally; cancel and restrict the provider (chosen).
+
+**Rationale:** Duplicating the least-requested chunks first spreads the extra copies evenly. Restricting a snubbing provider to chunks nobody else has keeps it useful without letting it hold up chunks others could send: without the restriction, a provider that never answers could take the last chunk again after every timeout.
+
+---
+
+## D-154: Upload strategy details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-051, D-062 and D-063 name the upload strategies; their behavior between reviews, how PropShare divides upload, and what "round-robin" means for a complete peer were open.
+
+**Decision:**
+
+- **BitTorrent:** at each review (10 s), the 4 interested peers with the highest receive rate over 20 s are served, ranked at random among equal rates, so the slots are filled even before anyone has uploaded. One more interested peer is served optimistically, rotated every 30 s. Between reviews, the strategy only stops serving peers that want nothing more and fills free slots at random, so a newcomer is served without waiting for the next review.
+- **PropShare:** serves every interested peer that uploaded to this peer within the rate window, plus 1 optimistic peer rotated every 30 s. Responses are ordered so that each contributor's share of upload follows its share of what this peer received, with 20% of upload kept for optimistic peers (the share Levin et al. use).
+- **FairTorrent:** serves every interested peer and answers next the peer with the largest deficit (received minus sent, counting Data being sent).
+- **Round-robin (complete peers):** serves every interested peer and answers their requests in turn: the next response goes to the peer whose last one was longest ago.
+- A setting chooses whether a complete peer switches to round-robin or keeps its downloading strategy.
+
+**Rationale:** Serving and ordering are the two levers the session gives a strategy: Serving says who may request, and the order of responses divides the upload. Rotating Serving over time, as BitTorrent seeds do, would leave most requesters waiting; answering in turn spreads a complete peer's upload, which rarest-first then spreads further.
+
+---
+
+## D-155: How superseeding works
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-063 has a brand-new bundle's only complete copy offer each chunk to only one peer until every chunk has been sent once. How to "offer" was open.
+
+**Options:** reject requests for chunks already sent to someone; hide chunks from Have and announce them one range at a time (BitTorrent's approach).
+
+**Decision:**
+
+- A session that starts with every chunk superseeds if the setting is on. Its Have lists only empty files' chunks, which every Have must include. Have means "chunks the sender has and is willing to provide" (`protocol/messages.md`), so hiding the rest is allowed.
+- Each connected peer is offered one range of the configured request size, with a HaveUpdate, preferring chunks not yet sent and not on offer to anyone else. When the peer announces the whole range, it is offered another.
+- Requests for chunks not announced to the requester are rejected with `dont_have`.
+- Superseeding ends when every chunk has been sent once, or when a connected peer turns out to have every chunk. The rest is then announced to everyone and the complete peer's upload strategy takes over.
+
+**Rationale:** Rejecting requests would waste requesters' round trips, since rarest-first makes many of them pick the same chunks. Offering the next range when the recipient has the last one, rather than when a third peer has it as in BitTorrent, is simpler and still sends each chunk once.
+
+---
+
+## D-156: Connection, peer exchange and lingering details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-064 to D-066 set the connection limit, lingering and direct-send rules; the protocol limits Peers to 50 records at most once a minute. The details were open.
+
+**Decision:**
+
+- **Idle connections:** a connection is idle when no Data has gone either way for 60 s and no request is open in either direction. At the limit, a new connection replaces the idle one with the highest RTT (unknown counts as highest); without an idle one it is refused with `too_many_connections`. An incomplete peer at its limit with peers waiting to be dialed also drops one idle connection every 30 s.
+- **Two complete peers:** the peer that learns, from a Have or HaveUpdate, that the other has every chunk while it has every chunk too closes the connection with `done`. A peer that has just completed doesn't close, so its last HaveUpdate isn't cut off.
+- **Peer exchange:** Peers is sent when a connection opens and then every 60 s, with up to 50 of the other connected peers chosen at random, using the addresses from their Hello. At most 1,000 peers are remembered for dialing; a new one replaces a random one that isn't connected or being dialed.
+- **Lingering** applies only to a session that downloaded: one that started complete, such as the origin, shares until told to stop. It stops when uploaded ≥ 1.0 × downloaded, or when no connected peer has wanted anything for 10 minutes, unless set to keep sharing. Stopping closes every connection with `done`.
+- **Direct sends:** the sender stops once a peer that lacked chunks while connected has every chunk and no connected peer still lacks any.
+
+**Rationale:** Each rule uses only what a session observes and keeps its state bounded. The timing values are starting points for simulation.

@@ -1,17 +1,21 @@
-//! The requester's side: fetching the manifest, requesting chunks and handling responses.
+//! The requester's side: fetching the manifest, requesting chunks, endgame, and handling
+//! responses.
 
 use std::sync::Arc;
 
+use rand::Rng as _;
 use tempest_protocol::hash::manifest_hash;
 use tempest_protocol::message::{GoodbyeReason, HaveUpdate, ManifestMessage, RejectReason};
+use tempest_protocol::tree::CHUNK_SIZE;
 use tempest_protocol::{Decode, Manifest, Message, RangeList};
 
 use super::bundle::Bundle;
-use super::conn::Holdings;
+use super::conn::{Holdings, Outgoing};
 use super::{Fail, Outcome, Session, violation};
 use crate::chunks::ChunkSet;
-use crate::event::{Event, EventKind};
+use crate::event::{CancelReason, Event, EventKind, SelectReason};
 use crate::io::{Action, ConnId, OutRequest, RequestId, Response};
+use crate::pipeline::{Provider, requests_in_flight};
 use crate::select::SelectContext;
 use crate::time::Time;
 
@@ -30,7 +34,12 @@ impl Session {
         };
         let request = next_id(&mut self.next_request);
         let conn = self.conns.get_mut(&id).expect("open");
-        conn.out.insert(request, OutRequest::Manifest);
+        let outgoing = Outgoing {
+            request: OutRequest::Manifest,
+            sent_at: now,
+            received_before: conn.received.total(),
+        };
+        conn.out.insert(request, outgoing);
         self.manifest_request = Some((id, request));
         self.actions.push(Action::Request {
             conn: id,
@@ -47,7 +56,9 @@ impl Session {
         }
     }
 
-    /// Requests chunks from a provider until its share of requests in flight is used.
+    /// Requests chunks from a provider until it has as many requests open as its pipeline
+    /// should hold (D-060). Once every missing chunk is requested, requests chunks again from
+    /// other providers as the endgame strategy allows (D-061).
     pub(super) fn fill(&mut self, now: Time, id: ConnId) {
         let Some(bundle) = &mut self.bundle else {
             return;
@@ -55,35 +66,126 @@ impl Session {
         let Some(conn) = self.conns.get_mut(&id) else {
             return;
         };
-        if !conn.serving_us || !conn.may_request(now) {
+        if !conn.serving_us || !conn.may_request(now) || bundle.is_complete() {
             return;
         }
         let (Some(hello), Holdings::Known(provider)) = (&conn.hello, &conn.holdings) else {
             return;
         };
-        let headroom_limit = hello
-            .max_open_requests
-            .saturating_sub(self.config.request_headroom)
-            .max(1);
-        let limit = self.config.requests_in_flight.min(headroom_limit) as usize;
-        let max_count = self.config.request_chunks.min(hello.max_request_chunks);
         let peer = conn.info.peer;
+        let max_count = self.config.requests.chunks.min(hello.max_request_chunks);
+        let limit = hello
+            .max_open_requests
+            .saturating_sub(self.config.requests.headroom)
+            .max(1);
+        let (target, reason) = requests_in_flight(
+            &self.config.requests,
+            Provider {
+                rate: conn.delivery.get(),
+                rtt: conn.rtt.get(),
+                request_bytes: u64::from(max_count) * CHUNK_SIZE as u64,
+                limit,
+                snubbed: conn.snubbed,
+            },
+        );
+        if conn.in_flight != Some(target) {
+            conn.in_flight = Some(target);
+            self.events.push(Event {
+                time: now,
+                kind: EventKind::InFlightChanged {
+                    conn: id,
+                    peer,
+                    requests: target,
+                    reason,
+                },
+            });
+        }
+        if !bundle.in_endgame() {
+            self.endgame = false;
+        }
+        let max_copies = self
+            .config
+            .strategies
+            .endgame
+            .max_copies(&self.config.endgame);
+        let idle_before = conn.chunk_requests().next().is_none();
 
-        while conn.out.len() < limit {
-            let ctx = SelectContext {
-                have: &bundle.have,
-                needed: &bundle.needed,
-                provider,
-                availability: &bundle.availability,
+        while conn.out.len() < target as usize {
+            let pick = if bundle.needed.is_empty() {
+                None
+            } else if conn.snubbed {
+                // A snubbing provider gets only chunks nobody else has, so that it can't hold
+                // up chunks others could send.
+                let only_here = bundle.availability.level(1);
+                only_here
+                    .and_then(|level| {
+                        ChunkSet::random_common(&[level, &bundle.needed, provider], &mut self.rng)
+                    })
+                    .map(|chunk| {
+                        let needed = &bundle.needed;
+                        let range = bundle.request_around(chunk, 1, |c| {
+                            needed.contains(c) && provider.contains(c)
+                        });
+                        (range, SelectReason::Rarest { holders: 1 })
+                    })
+            } else {
+                let ctx = SelectContext {
+                    have: &bundle.have,
+                    needed: &bundle.needed,
+                    provider,
+                    availability: &bundle.availability,
+                    position: self.position,
+                };
+                self.selector
+                    .select(&ctx, &mut self.rng)
+                    .map(|(chunk, reason)| {
+                        let needed = &bundle.needed;
+                        let range = bundle.request_around(chunk, max_count, |c| {
+                            needed.contains(c) && provider.contains(c)
+                        });
+                        (range, reason)
+                    })
             };
-            let Some((chunk, reason)) = self.selector.select(&ctx, &mut self.rng) else {
+            let pick = match pick {
+                Some(pick) => Some(pick),
+                None if bundle.in_endgame() => {
+                    let open: Vec<_> = conn
+                        .chunk_requests()
+                        .map(|(_, start, count)| bundle.span(start, count))
+                        .collect();
+                    let eligible = |c: u32| {
+                        !bundle.have.contains(c)
+                            && provider.contains(c)
+                            && bundle.requests[c as usize] < max_copies
+                            && !open.iter().any(|r| r.contains(&c))
+                    };
+                    endgame_pick(bundle, eligible, &mut self.rng).map(|(chunk, copies)| {
+                        let range = bundle.request_around(chunk, max_count, eligible);
+                        (range, SelectReason::Endgame { copies })
+                    })
+                }
+                None => None,
+            };
+            let Some(((start, count), reason)) = pick else {
                 break;
             };
-            let (start, count) = bundle.request_around(chunk, max_count, provider);
+            if matches!(reason, SelectReason::Endgame { .. }) && !self.endgame {
+                self.endgame = true;
+                let missing = bundle.layout.chunk_count() - bundle.have.len();
+                self.events.push(Event {
+                    time: now,
+                    kind: EventKind::EndgameStarted { missing },
+                });
+            }
             bundle.mark_requested(start, count);
             let request = next_id(&mut self.next_request);
             let message = OutRequest::Chunks { start, count };
-            conn.out.insert(request, message);
+            let outgoing = Outgoing {
+                request: message,
+                sent_at: now,
+                received_before: conn.received.total(),
+            };
+            conn.out.insert(request, outgoing);
             self.actions.push(Action::Request {
                 conn: id,
                 request,
@@ -100,6 +202,59 @@ impl Session {
                 },
             });
         }
+        if idle_before && conn.chunk_requests().next().is_some() {
+            conn.progress_at = now;
+        }
+    }
+
+    /// Cancels every chunk request to providers that have sent no Data for too long, and gives
+    /// them one request at a time until they do.
+    pub(super) fn check_snubs(&mut self, now: Time) {
+        let timeout = self.config.requests.snub_timeout;
+        let snubbing: Vec<ConnId> = self
+            .conns
+            .iter()
+            .filter(|(_, c)| c.chunk_requests().next().is_some() && c.progress_at + timeout <= now)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in &snubbing {
+            let conn = self.conns.get_mut(id).expect("listed");
+            conn.snubbed = true;
+            let peer = conn.peer();
+            self.emit(now, EventKind::Snubbed { conn: *id, peer });
+            let requests: Vec<_> = self.conns[id].chunk_requests().collect();
+            for (request, start, count) in requests {
+                self.cancel(now, *id, request, start, count, CancelReason::Snubbed);
+            }
+        }
+        if !snubbing.is_empty() {
+            self.fill_all(now);
+        }
+    }
+
+    /// Resets one of this peer's chunk requests and makes its chunks available to others.
+    fn cancel(
+        &mut self,
+        now: Time,
+        id: ConnId,
+        request: RequestId,
+        start: u32,
+        count: u32,
+        reason: CancelReason,
+    ) {
+        let conn = self.conns.get_mut(&id).expect("open");
+        conn.out.remove(&request);
+        let peer = conn.peer();
+        self.release(start, count);
+        self.actions.push(Action::Cancel { conn: id, request });
+        let kind = EventKind::Cancelled {
+            conn: id,
+            peer,
+            start,
+            count,
+            reason,
+        };
+        self.emit(now, kind);
     }
 
     pub(super) fn on_response(
@@ -110,14 +265,16 @@ impl Session {
         response: Response,
     ) -> Outcome {
         let conn = self.conns.get_mut(&id).expect("open");
-        let Some(sent) = conn.out.remove(&request) else {
+        let Some(outgoing) = conn.out.remove(&request) else {
             // A response racing a cancel, or one already handled.
             return Ok(());
         };
+        let sent = outgoing.request;
+        conn.rtt.sample(now.since(outgoing.sent_at));
         let peer = conn.peer();
         match (sent, response) {
             (OutRequest::Chunks { start, count }, Response::Data(Ok(()))) => {
-                self.on_chunks(now, id, start, count);
+                self.on_chunks(now, id, (start, count), &outgoing);
                 Ok(())
             }
             (OutRequest::Chunks { start, count }, Response::Data(Err(error))) => {
@@ -128,7 +285,7 @@ impl Session {
                 })
             }
             (OutRequest::Chunks { start, count }, Response::Reject(reject)) => {
-                conn.retry_at = Some(now + self.config.retry_delay);
+                conn.retry_at = Some(now + self.config.requests.retry_delay);
                 let reason = reject.reason;
                 self.emit(
                     now,
@@ -151,7 +308,7 @@ impl Session {
                 if reject.reason == RejectReason::DontHave {
                     conn.lacks_manifest = true;
                 } else {
-                    conn.retry_at = Some(now + self.config.retry_delay);
+                    conn.retry_at = Some(now + self.config.requests.retry_delay);
                 }
                 let reason = reject.reason;
                 self.emit(
@@ -189,17 +346,18 @@ impl Session {
             .release(start, count);
     }
 
-    /// Records verified chunks, tells every peer, and keeps requesting.
-    fn on_chunks(&mut self, now: Time, id: ConnId, start: u32, count: u32) {
+    /// Records verified chunks, cancels requests they make redundant, tells every peer, and
+    /// keeps requesting.
+    fn on_chunks(&mut self, now: Time, id: ConnId, (start, count): (u32, u32), sent: &Outgoing) {
         let bundle = self
             .bundle
             .as_mut()
             .expect("chunk requests need the manifest");
-        let added: Vec<u32> = bundle
-            .span(start, count)
-            .filter(|&chunk| bundle.have.insert(chunk))
-            .collect();
+        let (added, duplicate) = bundle.store(start, count);
+        bundle.release(start, count);
         let bytes = bundle.data_len(start, count);
+        // Other requests still open for a new chunk are endgame duplicates.
+        let duplicates = added.iter().any(|&c| bundle.requests[c as usize] > 0);
         for conn in self.conns.values_mut() {
             if let Holdings::Known(set) = &conn.holdings {
                 let lost = added.iter().filter(|&&c| set.contains(c)).count() as u32;
@@ -210,7 +368,13 @@ impl Session {
 
         let conn = self.conns.get_mut(&id).expect("open");
         conn.received.record(now, bytes);
+        let delivered = conn.received.total() - sent.received_before;
+        conn.delivery.sample(delivered, now.since(sent.sent_at));
+        conn.progress_at = now;
+        conn.exchanged_at = now;
+        conn.snubbed = false;
         self.downloaded += bytes;
+        self.duplicate += duplicate;
         let peer = conn.peer();
         self.emit(
             now,
@@ -220,16 +384,52 @@ impl Session {
                 start,
                 count,
                 bytes,
+                duplicate,
             },
         );
+        if duplicates {
+            self.cancel_redundant(now);
+        }
 
         self.announce(RangeList::from_chunks(added));
         if complete && !self.complete {
-            self.complete = true;
-            self.emit(now, EventKind::Completed);
-            self.review_serving(now);
+            self.on_complete(now);
         }
-        self.fill(now, id);
+        if duplicates {
+            self.fill_all(now);
+        } else {
+            self.fill(now, id);
+        }
+    }
+
+    /// Cancels every chunk request whose chunks this peer now has.
+    fn cancel_redundant(&mut self, now: Time) {
+        let bundle = self.bundle.as_ref().expect("manifest known");
+        let redundant: Vec<_> = self
+            .conns
+            .iter()
+            .flat_map(|(&id, c)| c.chunk_requests().map(move |r| (id, r)))
+            .filter(|&(_, (_, start, count))| {
+                bundle.span(start, count).all(|c| bundle.have.contains(c))
+            })
+            .collect();
+        for (id, (request, start, count)) in redundant {
+            self.cancel(now, id, request, start, count, CancelReason::Duplicate);
+        }
+    }
+
+    /// This peer has every chunk: switch to the complete peer's upload strategy.
+    ///
+    /// Connections with peers that are complete too stay open: those peers close them when
+    /// this peer's HaveUpdate shows it complete, so the announcement isn't cut off.
+    fn on_complete(&mut self, now: Time) {
+        self.complete = true;
+        self.emit(now, EventKind::Completed);
+        self.uploader = self.upload_strategy();
+        self.idle_since = None;
+        self.update_idle(now);
+        self.review_serving(now);
+        self.check_linger(now);
     }
 
     /// Sends a HaveUpdate for newly stored chunks, and updates Want everywhere.
@@ -294,13 +494,41 @@ impl Session {
 
         self.announce(empty_files);
         if self.bundle.as_ref().is_some_and(Bundle::is_complete) {
-            self.complete = true;
-            self.emit(now, EventKind::Completed);
+            self.on_complete(now);
         }
         self.review_serving(now);
         self.fill_all(now);
         Ok(())
     }
+}
+
+/// The endgame's next chunk: among the chunks `eligible` accepts, one with the fewest open
+/// requests, chosen at random. Returns it with its number of open requests.
+fn endgame_pick(
+    bundle: &Bundle,
+    eligible: impl Fn(u32) -> bool,
+    rng: &mut crate::Rng,
+) -> Option<(u32, u32)> {
+    let mut best: Option<(u32, u32)> = None;
+    let mut ties = 0u32;
+    for chunk in bundle.have.iter_missing().filter(|&c| eligible(c)) {
+        let copies = bundle.requests[chunk as usize];
+        match best {
+            Some((_, fewest)) if copies > fewest => {}
+            Some((_, fewest)) if copies == fewest => {
+                // Reservoir sampling breaks ties uniformly.
+                ties += 1;
+                if rng.random_range(0..ties) == 0 {
+                    best = Some((chunk, copies));
+                }
+            }
+            _ => {
+                best = Some((chunk, copies));
+                ties = 1;
+            }
+        }
+    }
+    best
 }
 
 /// Takes the next request ID from a session's counter.

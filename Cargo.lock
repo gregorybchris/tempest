@@ -526,6 +526,8 @@ dependencies = [
  "proptest",
  "rand",
  "rand_chacha",
+ "serde",
+ "serde_json",
  "tempest-protocol",
  "thiserror",
 ]

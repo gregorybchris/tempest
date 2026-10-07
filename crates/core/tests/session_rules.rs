@@ -369,11 +369,9 @@ fn a_peer_without_the_chunks_says_dont_have() {
 
 #[test]
 fn open_requests_and_upload_slots_are_limited() {
-    let config = Config {
-        max_open_requests: 2,
-        upload_slots: 1,
-        ..Config::default()
-    };
+    let mut config = Config::default();
+    config.upload.max_open_requests = 2;
+    config.upload.parallel_responses = 1;
     let mut session = complete(config);
     open(&mut session, RangeList::new());
     control(&mut session, C, Message::Want(Want { wanted: true }));
@@ -583,4 +581,92 @@ fn ranges_must_fit_when_starting_with_a_manifest() {
         0,
     );
     assert!(result.is_err());
+}
+
+#[test]
+fn a_superseeding_peer_announces_only_what_it_offers() {
+    let mut config = Config::default();
+    config.strategies.superseed = true;
+    let mut session = complete(config);
+    assert!(session.is_superseeding());
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    let sent = sent(&session.poll_actions());
+    // Have hides everything; a HaveUpdate then offers the first file's 3 chunks.
+    assert_eq!(sent[1], Message::Have(Have::default()));
+    assert!(sent.contains(&Message::HaveUpdate(HaveUpdate {
+        added: ranges(0..3),
+        removed: RangeList::new(),
+    })));
+    request(&mut session, 1, chunks(8, 1));
+    request(&mut session, 2, chunks(0, 4));
+    let replies = replies(&session.poll_actions());
+    assert_eq!(reject_reason(&replies[0].1), Some(RejectReason::DontHave));
+    assert_eq!(replies[1], (2, Reply::Data { start: 0, count: 4 }));
+
+    // Once the peer has them, it is offered the next range.
+    let update = HaveUpdate {
+        added: ranges(0..3),
+        removed: RangeList::new(),
+    };
+    control(&mut session, C, Message::HaveUpdate(update));
+    assert!(
+        self::sent(&session.poll_actions()).contains(&Message::HaveUpdate(HaveUpdate {
+            added: ranges(3..19),
+            removed: RangeList::new(),
+        }))
+    );
+}
+
+#[test]
+fn known_peers_are_capped() {
+    let mut config = Config::default();
+    config.connections.max_known_peers = 3;
+    config.connections.max = 1;
+    let mut session = Session::new(config, local(5), content().manifest().bundle_id(), 0).unwrap();
+    let records = (10..30).map(|n| common::record(peer_id(n)));
+    session.add_peers(Time::ZERO, records);
+    assert_eq!(session.known_peer_count(), 3);
+}
+
+#[test]
+fn peer_exchange_respects_the_protocol_limits() {
+    let bundle_id = content().manifest().bundle_id();
+    let mut config = Config::default();
+    config.connections.max = 100;
+    let mut session = complete(config);
+    for n in 0..60u8 {
+        let conn = ConnId(u64::from(n));
+        connect(&mut session, conn, peer_id(100 + n), Direction::Accepted);
+        control(&mut session, conn, Message::Hello(hello(bundle_id)));
+        control(&mut session, conn, Message::Have(Have::default()));
+    }
+    let shared = |actions: &[Action]| -> Vec<(ConnId, usize)> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Send {
+                    conn,
+                    message: Message::Peers(peers),
+                } => Some((*conn, peers.peers.len())),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = shared(&session.poll_actions());
+    // Each connection hears about the peers connected before it, up to 50.
+    assert_eq!(first.len(), 59);
+    assert!(first.iter().all(|&(_, n)| n <= 50));
+    assert_eq!(first.last(), Some(&(ConnId(59), 50)));
+
+    // Nothing more until a minute has passed.
+    let soon = Time::ZERO + Duration::from_secs(59);
+    session.handle_timer(soon);
+    assert!(shared(&session.poll_actions()).is_empty());
+    let minute = session.next_timer().unwrap();
+    assert_eq!(minute, Time::ZERO + Duration::from_secs(60));
+    session.handle_timer(minute);
+    let again = shared(&session.poll_actions());
+    assert_eq!(again.len(), 60);
+    assert!(again.iter().all(|&(_, n)| n == 50));
 }

@@ -70,7 +70,10 @@ How long to keep sharing after finishing (D-065, D-066).
 
 - A chunk that fails verification proves the sender misbehaved, because the transport guarantees integrity. Close the connection with Goodbye (`bad_data`) and refuse that peer ID for this bundle (D-067).
 
+## Settings and profiles
+
+Every strategy choice and parameter is a setting with a dotted key, and named profiles set them all (D-150, D-151). The details each strategy settled during implementation are in D-152 to D-156.
+
 ## Open questions
 
-- Profile names and the exact settings each profile chooses (e.g. "balanced", "background", "classic BitTorrent", "cooperative").
 - Exact default values for timing parameters, to be tuned with simulation.

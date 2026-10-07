@@ -131,6 +131,52 @@ impl ChunkSet {
             })
     }
 
+    /// The indexes below the capacity that are not in the set, in increasing order.
+    pub fn iter_missing(&self) -> impl Iterator<Item = u32> + '_ {
+        let capacity = self.capacity;
+        self.words.iter().enumerate().flat_map(move |(w, &bits)| {
+            let base = w as u32 * 64;
+            BitIter(!bits & valid_bits(capacity, w)).map(move |b| base + b)
+        })
+    }
+
+    /// The number of indexes in every set of `sets`, which must share one capacity.
+    pub fn count_common(sets: &[&ChunkSet]) -> u32 {
+        common_words(sets).map(|(_, bits)| bits.count_ones()).sum()
+    }
+
+    /// An index in every set of `sets`, chosen uniformly at random, or `None` if they have none
+    /// in common. The sets must share one capacity; listing the sparsest first is fastest.
+    pub fn random_common(sets: &[&ChunkSet], rng: &mut crate::Rng) -> Option<u32> {
+        use rand::Rng as _;
+        let count = Self::count_common(sets);
+        if count == 0 {
+            return None;
+        }
+        let mut skip = rng.random_range(0..count);
+        for (w, bits) in common_words(sets) {
+            let ones = bits.count_ones();
+            if skip < ones {
+                let bit = BitIter(bits).nth(skip as usize).expect("counted");
+                return Some(w as u32 * 64 + bit);
+            }
+            skip -= ones;
+        }
+        unreachable!("counted {count} common indexes")
+    }
+
+    /// The lowest index at or after `from` that is in every set of `sets`, which must share one
+    /// capacity.
+    pub fn first_common(sets: &[&ChunkSet], from: u32) -> Option<u32> {
+        common_words(sets)
+            .skip_while(|&(w, _)| w < word(from))
+            .flat_map(|(w, bits)| {
+                let base = w as u32 * 64;
+                BitIter(bits).map(move |b| base + b)
+            })
+            .find(|&index| index >= from)
+    }
+
     /// The set as a canonical range list.
     pub fn to_ranges(&self) -> RangeList {
         let mut ranges = Vec::new();
@@ -158,6 +204,33 @@ fn word(index: u32) -> usize {
 
 fn bit(index: u32) -> u64 {
     1 << (index % 64)
+}
+
+/// The words of the intersection of `sets`, with their positions, skipping empty words.
+///
+/// A word is skipped as soon as it is empty, so listing the sparsest set first is fastest.
+fn common_words<'a>(sets: &'a [&'a ChunkSet]) -> impl Iterator<Item = (usize, u64)> + 'a {
+    let words = sets.first().map_or(0, |s| s.words.len());
+    debug_assert!(sets.iter().all(|s| s.words.len() == words));
+    (0..words).filter_map(move |w| {
+        let mut bits = !0u64;
+        for set in sets {
+            bits &= set.words[w];
+            if bits == 0 {
+                return None;
+            }
+        }
+        Some((w, bits))
+    })
+}
+
+/// The bits of word `w` that hold indexes below `capacity`.
+fn valid_bits(capacity: u32, w: usize) -> u64 {
+    let base = w as u32 * 64;
+    match capacity.saturating_sub(base) {
+        n if n >= 64 => !0,
+        n => (1u64 << n) - 1,
+    }
 }
 
 /// The positions of the set bits in a word, lowest first.
@@ -222,6 +295,38 @@ mod tests {
             };
             let expected: Vec<u32> = a.intersection(&b).copied().collect();
             prop_assert_eq!(set(&a).intersection(&set(&b)).collect::<Vec<_>>(), expected);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn common_helpers_match_the_model(
+            capacity in 1..300u32,
+            a in proptest::collection::btree_set(0..300u32, 0..150),
+            b in proptest::collection::btree_set(0..300u32, 0..150),
+            from in 0..320u32,
+            seed: u64,
+        ) {
+            use rand::SeedableRng;
+            let set = |s: &BTreeSet<u32>| {
+                let mut set = ChunkSet::new(capacity);
+                s.iter().filter(|&&i| i < capacity).for_each(|&i| { set.insert(i); });
+                set
+            };
+            let (sa, sb) = (set(&a), set(&b));
+            let common: BTreeSet<u32> = sa.iter().filter(|&i| sb.contains(i)).collect();
+            prop_assert_eq!(ChunkSet::count_common(&[&sa, &sb]) as usize, common.len());
+            prop_assert_eq!(
+                ChunkSet::first_common(&[&sa, &sb], from),
+                common.range(from..).next().copied()
+            );
+            let mut rng = crate::Rng::seed_from_u64(seed);
+            match ChunkSet::random_common(&[&sa, &sb], &mut rng) {
+                Some(index) => prop_assert!(common.contains(&index)),
+                None => prop_assert!(common.is_empty()),
+            }
+            let missing: BTreeSet<u32> = (0..capacity).filter(|i| !sa.contains(*i)).collect();
+            prop_assert_eq!(sa.iter_missing().collect::<BTreeSet<_>>(), missing);
         }
     }
 

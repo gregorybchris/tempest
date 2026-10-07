@@ -292,6 +292,16 @@ impl ApiClient {
             .await
     }
 
+    /// Replaces a transfer's own settings, by dotted key.
+    pub async fn set_transfer_settings(
+        &self,
+        id: BundleId,
+        settings: &BTreeMap<String, Value>,
+    ) -> Result<TransferInfo, ClientError> {
+        let path = format!("/transfers/{id}/settings");
+        self.send(Method::PUT, &path, Some(settings)).await
+    }
+
     /// The engine's settings.
     pub async fn settings(&self) -> Result<SettingsView, ClientError> {
         self.get("/settings").await
@@ -305,9 +315,34 @@ impl ApiClient {
         self.send(Method::PATCH, "/settings", Some(changes)).await
     }
 
+    /// Undoes the change made through the API to the setting at the dotted `key`, so the
+    /// config file's value applies again.
+    pub async fn reset_setting(&self, key: &str) -> Result<SettingsView, ClientError> {
+        self.send(Method::DELETE, &format!("/settings/{key}"), None::<&()>)
+            .await
+    }
+
     /// Every category.
     pub async fn categories(&self) -> Result<BTreeMap<String, Category>, ClientError> {
         self.get("/categories").await
+    }
+
+    /// Adds the category `name`, or changes its save folder.
+    pub async fn set_category_folder(
+        &self,
+        name: &str,
+        save_folder: PathBuf,
+    ) -> Result<Category, ClientError> {
+        let path = format!("/categories/{}", encode_segment(name));
+        self.send(Method::PUT, &path, Some(&Category { save_folder }))
+            .await
+    }
+
+    /// Removes the category `name`; transfers in it have none.
+    pub async fn remove_category(&self, name: &str) -> Result<(), ClientError> {
+        let path = format!("/categories/{}", encode_segment(name));
+        self.exchange(Method::DELETE, &path, None::<&()>).await?;
+        Ok(())
     }
 
     /// Opens the event stream, resuming after the event numbered `after` if given.
@@ -341,6 +376,20 @@ impl ApiClient {
             url: self.base.clone(),
         })
     }
+}
+
+/// `text` as one segment of a URL's path: every byte but unreserved ones percent-encoded.
+fn encode_segment(text: &str) -> String {
+    let mut encoded = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(char::from(byte));
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 /// The error an unsuccessful answer with `status` and `body` stands for.

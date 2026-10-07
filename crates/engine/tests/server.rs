@@ -201,3 +201,58 @@ async fn clients_follow_and_resume_the_event_stream() {
 
     server.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_change_settings_categories_and_a_transfers_own_settings() {
+    use std::collections::BTreeMap;
+
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let api = ApiSettings {
+        port: 0,
+        ..ApiSettings::default()
+    };
+    let (_engine, server) = serve(config(dir.path(), api)).await;
+    let client = ApiClient::for_data_dir(dir.path()).unwrap().expect("found");
+
+    let changes = BTreeMap::from([
+        ("ui.theme".to_owned(), json!("beige")),
+        ("queue.max_active_uploads".to_owned(), json!(2)),
+    ]);
+    let view = client.change_settings(&changes).await.unwrap();
+    assert_eq!(view.settings.ui.theme, "beige");
+    assert_eq!(view.changed.len(), 2);
+    let view = client.reset_setting("ui.theme").await.unwrap();
+    assert_eq!(view.settings.ui.theme, "green");
+    assert_eq!(view.settings.queue.max_active_uploads, Some(2));
+
+    // Names that need encoding in a path survive the trip.
+    let folder = dir.path().join("films");
+    client
+        .set_category_folder("films & tv/4k", folder.clone())
+        .await
+        .unwrap();
+    let categories = client.categories().await.unwrap();
+    assert_eq!(categories["films & tv/4k"].save_folder, folder);
+    client.remove_category("films & tv/4k").await.unwrap();
+    assert!(client.categories().await.unwrap().is_empty());
+
+    let added = client.add(&add(1)).await.unwrap();
+    let own = BTreeMap::from([
+        ("limits.upload".to_owned(), json!(4096)),
+        ("sharing.ratio".to_owned(), json!(1.5)),
+    ]);
+    let changed = client.set_transfer_settings(added.id, &own).await.unwrap();
+    assert_eq!(changed.settings, own);
+    let refused = client
+        .set_transfer_settings(
+            added.id,
+            &BTreeMap::from([("limits.upload".to_owned(), json!(0))]),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, ClientError::Refused(_)), "{refused:?}");
+
+    server.stop().await;
+}

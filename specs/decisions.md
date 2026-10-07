@@ -3073,3 +3073,18 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - The rates chart draws the TUI's own once-a-second samples, kept for ten minutes, as braille lines for ↓ and ↑. The time axis spans at least a minute, and the rate axis tops out at a round number above the peak.
 
 **Rationale:** One meaning per key per screen keeps the k9s/lazygit habit of keys that follow focus, and the hint bar and help, read from the same table, always show what `g` does where you are. The TUI samples every transfer's rates from the event stream already, so a history route would only matter to a client that just started.
+
+---
+
+## D-195: Clients keep their look and views in the engine's settings
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The TUI's theme should survive a restart, and D-118's custom columns and saved views need a home. The TUI and the web UI share these choices by design (D-119).
+
+**Options:** a file of the TUI's own in the user's config folder; the browser's storage for the web UI and a file for the TUI; a `ui` group in the engine's settings (chosen).
+
+**Decision:** The engine's settings gain a `ui` group: the theme's name, the list's optional columns (`null` for the clients' default) and the saved views, each a name with a filter, a status and a sort. Clients change it through `PATCH /v1/settings` like any setting; it applies at once and is kept in the state database. The engine checks only that views have distinct names; names a client doesn't know are ignored there. The TUI takes the theme in once, at the start, so another client's choice never repaints it mid-session, and takes columns and views whenever no change of its own awaits an answer.
+
+**Rationale:** The settings already persist, validate and reach every client, local or remote, with no new file format. One choice follows the user across interfaces and machines that share an engine.
+

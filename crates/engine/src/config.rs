@@ -53,6 +53,52 @@ pub struct EngineConfig {
     pub sharing: SharingLimits,
     /// What to run when a transfer completes or fails.
     pub notifications: NotificationSettings,
+    /// How the TUI and the web UI look, kept here so every client shares it (D-195).
+    pub ui: UiSettings,
+}
+
+/// The clients' look and saved views. The engine only keeps them: names it doesn't know are
+/// left for the clients to ignore.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UiSettings {
+    /// The palette: `green`, `amber`, `vector` or `beige` (D-089).
+    pub theme: String,
+    /// The transfers list's optional columns to show, by name; `null` for the clients'
+    /// default. Name, progress and status always show.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Vec<String>>,
+    /// Saved views of the transfers list.
+    pub views: Vec<SavedView>,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            theme: "green".to_owned(),
+            columns: None,
+            views: Vec::new(),
+        }
+    }
+}
+
+/// A saved view of the transfers list: its filters and order, under a name.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SavedView {
+    /// The view's name.
+    pub name: String,
+    /// The filter as typed: words matching the name, `#word` a tag.
+    pub query: String,
+    /// The status to show only, such as `downloading`, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// What to sort by, such as `size`; empty for queue order.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub sort: String,
+    /// Against the sort's natural direction.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reversed: bool,
 }
 
 /// Speed limits over every transfer together, in bytes per second, `null` for none.
@@ -571,6 +617,18 @@ impl EngineConfig {
                 "the first item must name a program",
             ));
         }
+        let mut names = std::collections::HashSet::new();
+        for view in &self.ui.views {
+            if view.name.trim().is_empty() {
+                return Err(invalid("ui.views", "every view needs a name"));
+            }
+            if !names.insert(view.name.as_str()) {
+                return Err(invalid(
+                    "ui.views",
+                    format!("two views are named {:?}", view.name),
+                ));
+            }
+        }
         if let Some(url) = self.trackers.iter().find(|url| !is_http_url(url)) {
             return Err(invalid(
                 "trackers",
@@ -926,6 +984,25 @@ notifications: { command: [sh, -c, "echo done"] }
         assert!(error("limits.nope", json!(1)).contains("limits.nope"));
         assert!(error("sharing.ratio", json!(-1)).contains("sharing.ratio"));
         assert!(error("sharing.time", json!("soon")).contains("sharing.time"));
+    }
+
+    #[test]
+    fn the_clients_look_and_views_are_kept_and_apply_at_once() {
+        let default = EngineConfig::default();
+        assert_eq!(default.ui.theme, "green");
+        let mut changed = default.clone();
+        changed.set("ui.theme", json!("amber")).unwrap();
+        changed.set("ui.columns", json!(["size", "tags"])).unwrap();
+        let views = json!([{ "name": "Music", "query": "#music", "sort": "size" }]);
+        changed.set("ui.views", views).unwrap();
+        assert_eq!(changed.ui.views[0].status, None);
+        assert!(changed.restart_required(&default).is_empty());
+        let text = changed.to_yaml();
+        assert_eq!(EngineConfig::from_yaml(&text).unwrap(), changed, "{text}");
+
+        let twice = json!([{ "name": "a" }, { "name": "a" }]);
+        assert!(changed.set("ui.views", twice).is_err());
+        assert!(changed.set("ui.views", json!([{ "name": " " }])).is_err());
     }
 
     #[test]

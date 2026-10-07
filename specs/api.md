@@ -51,7 +51,7 @@ A chunk map's cells cover consecutive chunks in order, their sizes differing by 
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link and dates.
 
-Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers, relays and port mapping apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
+Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers, relays, port mapping and the clients' `ui` settings (D-195) apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
 
 ## Events
 

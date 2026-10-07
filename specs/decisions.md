@@ -2468,3 +2468,17 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - CI builds the release binary, runs the 1,000-peer swarm and the golden scenario twice each in separate processes, the second time on one thread, and fails if the log digests differ. The same job runs the slow tests, including the 1,000-peer swarm into DuckDB, and the golden baseline over every saved seed.
 
 **Rationale:** Runs are deterministic, so exact digests would fail on every deliberate change to a strategy; tolerances flag what D-077 cares about, significant drops in speed or fairness. Paired seeds keep the comparison fair with few runs. Separate processes catch nondeterminism that one process would hide, such as hash-map ordering seeded per process.
+
+---
+
+## D-164: An unreproduced failure of the 1,000-peer DuckDB test
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** One run of `cargo test --release -p tempest-sim -- --include-ignored` failed in `results.rs` with the panic message lost; reruns passed.
+
+**Investigation:** The full command passed 20 times in a row, and the `results` binary passed 20 times more with four copies running at once to add load. Nothing in `tempest-sim` or `tempest-core` uses hash-map iteration order, wall clocks or global randomness. Run IDs are fixed by position, so thread scheduling doesn't change what lands in the database. The tests share no files: the swarm test uses its own temporary directory and the others use in-memory databases.
+
+**Decision:** No code change. The cause is unknown, most likely machine load or a one-off outside the test code. If CI shows the failure again, keep the full panic message first: a digest mismatch would mean the recorder perturbs the engine; a DuckDB error would point to shared state.
+
+**Rationale:** A speculative change would hide the cause without confirming it. The determinism job in CI already compares digests across separate processes and thread counts.

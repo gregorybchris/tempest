@@ -33,6 +33,7 @@ POST /tempest/v1/announce
 | `event` | string | `started`, `update`, `completed` or `stopped` |
 | `complete` | boolean | Whether the peer has the whole bundle |
 | `num_want` | integer | OPTIONAL. How many peers the client would like, default 50 |
+| `listing` | object | OPTIONAL. Asks the tracker to list the bundle in its catalog; see [Listing](#listing) |
 
 ### Response (HTTP 200)
 
@@ -91,6 +92,33 @@ POST /tempest/v1/announce
 - **Periodic announces.** The tracker can stay simple and stateless and serve very large numbers of peers. Swarm counts are at most one interval stale.
 - **No signatures.** Announces carry no proof of the peer ID. A forged listing only wastes connection attempts, because connecting verifies the peer ID through TLS ([connections.md](connections.md#peer-identity)).
 - **`your_ip`.** It tells a peer its public IP address, which helps with reaching peers behind routers. Only the IP is reported: the request arrives over HTTPS (TCP), whose source port says nothing about the router's UDP mapping for the peer's QUIC socket.
+
+## Listing
+
+A tracker MAY run a catalog: a website that lists bundles. A bundle is listed only when a peer that shares it asks, by adding `listing` to its announces:
+
+```text
+"listing": { "sig": "ad66ac47…acdd0d" }
+```
+
+`sig` is the 64-byte Ed25519 signature, as 128 lowercase hexadecimal characters, made with the key of the announcing peer ID over the **listing message**: the 19 bytes of the ASCII text `tempest listing v1` followed by a zero byte, then the 32-byte bundle ID.
+
+- A client SHOULD include `listing` in every announce for a bundle its user chose to list on that tracker, and MUST NOT include it otherwise.
+- A tracker without a catalog MUST ignore `listing`.
+- A tracker with a catalog MUST verify the signature against `peer`. If it fails, the tracker MUST refuse the announce with `invalid_request`. Otherwise it MAY list the bundle, attributed to the peer ID. What it lists and how is up to the catalog.
+
+**Test vector.** RFC 8032's first test key (secret key `9d61b19d…1cae7f60`, peer ID `d75a9801…f707511a`) signs the listing message of bundle `3f9a` followed by 60 zeros:
+
+```text
+message   74656d70657374206c697374696e67207631003f9a000000000000000000000000000000000000000000000000000000000000
+signature ad66ac47ca8e640246582dcc0000087592145360a7a7f3b7385efd630f83a2aa706008afbc7f1499e94be591e8e4948f372ed9d26c7077f4a1c8205e86acdd0d
+```
+
+**Rationale.**
+
+- **Opt-in.** Peers use trackers to find each other for private bundles too. Listing only what sharers ask for keeps those private, and keeps operators from indexing everything announced.
+- **A signature.** Announces are otherwise unsigned, and a forged one only wastes connection attempts. A listing is attributed to a key, so the key's owner must have asked for it.
+- **The bundle only.** The signature doesn't change between announces, so a client computes it once. Replaying it can only repeat a request the key's owner already made.
 
 ## Bundle stats
 

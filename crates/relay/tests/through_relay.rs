@@ -371,6 +371,7 @@ async fn a_relay_a_tracker_recommends_becomes_home_and_is_announced() {
         event: AnnounceEvent::Started,
         complete: false,
         num_want: 50,
+        listing: None,
     };
     let heard = async {
         loop {

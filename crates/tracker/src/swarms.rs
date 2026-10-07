@@ -330,6 +330,7 @@ mod tests {
             event,
             complete: false,
             num_want: 50,
+            listing: None,
         }
     }
 

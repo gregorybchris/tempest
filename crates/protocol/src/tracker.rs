@@ -65,6 +65,75 @@ pub struct AnnounceRequest {
     /// How many peers the client would like. Defaults to [`DEFAULT_NUM_WANT`].
     #[serde(default = "default_num_want")]
     pub num_want: u32,
+    /// Asks a tracker with a catalog to list the bundle. Absent unless the peer opted in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listing: Option<ListingRequest>,
+}
+
+/// The `listing` field of an announce: the peer's signature over [`listing_message`], which
+/// proves that the owner of the peer ID asked for the bundle to be listed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListingRequest {
+    /// The Ed25519 signature, by the announcing peer's key.
+    pub sig: Signature,
+}
+
+/// What a peer signs to ask for a bundle's listing: [`LISTING_CONTEXT`] followed by the bundle
+/// ID. It depends on the bundle alone, so a client computes the signature once.
+///
+/// ```
+/// use tempest_protocol::tracker::listing_message;
+/// let message = listing_message(&"3f9a".repeat(16).parse().unwrap());
+/// assert_eq!(&message[..19], b"tempest listing v1\0");
+/// assert_eq!(message.len(), 51);
+/// ```
+pub fn listing_message(bundle: &BundleId) -> Vec<u8> {
+    [LISTING_CONTEXT, bundle.as_bytes()].concat()
+}
+
+/// The prefix of [`listing_message`], which keeps its signatures from meaning anything else.
+pub const LISTING_CONTEXT: &[u8] = b"tempest listing v1\0";
+
+/// The length of an Ed25519 signature in bytes.
+pub const SIGNATURE_LEN: usize = 64;
+
+/// An Ed25519 signature. As text, 128 lowercase hexadecimal characters.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Signature(pub [u8; SIGNATURE_LEN]);
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
+    }
+}
+
+impl fmt::Debug for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Signature({self})")
+    }
+}
+
+/// Why text could not be parsed as a signature.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("a signature must be 128 lowercase hexadecimal characters")]
+pub struct ParseSignatureError;
+
+impl FromStr for Signature {
+    type Err = ParseSignatureError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 2 * SIGNATURE_LEN || !s.is_ascii() {
+            return Err(ParseSignatureError);
+        }
+        // Two hashes' worth of hex, parsed with the hash's strict rules.
+        let (first, second) = s.split_at(SIGNATURE_LEN);
+        let first: crate::Hash = first.parse().map_err(|_| ParseSignatureError)?;
+        let second: crate::Hash = second.parse().map_err(|_| ParseSignatureError)?;
+        let mut bytes = [0; SIGNATURE_LEN];
+        bytes[..32].copy_from_slice(first.as_bytes());
+        bytes[32..].copy_from_slice(second.as_bytes());
+        Ok(Self(bytes))
+    }
 }
 
 fn default_num_want() -> u32 {
@@ -215,6 +284,8 @@ mod tests {
 
     const BUNDLE: &str = "3f9a000000000000000000000000000000000000000000000000000000000000";
     const PEER: &str = "7c21000000000000000000000000000000000000000000000000000000000000";
+    const LISTING_SIG: &str = "ad66ac47ca8e640246582dcc0000087592145360a7a7f3b7385efd630f83a2aa\
+                               706008afbc7f1499e94be591e8e4948f372ed9d26c7077f4a1c8205e86acdd0d";
 
     fn request() -> serde_json::Value {
         json!({
@@ -241,8 +312,44 @@ mod tests {
                 event: AnnounceEvent::Started,
                 complete: false,
                 num_want: 50,
+                listing: None,
             }
         );
+    }
+
+    /// The test vector of `protocol/trackers.md`: RFC 8032's first test key signs the listing
+    /// message of bundle `3f9a00…`. The signature is checked by the tracker's tests.
+    #[test]
+    fn spec_listing_parses() {
+        let mut with_listing = request();
+        with_listing["listing"] = json!({ "sig": LISTING_SIG });
+        let parsed: AnnounceRequest = serde_json::from_value(with_listing).unwrap();
+        assert_eq!(parsed.listing.unwrap().sig.to_string(), LISTING_SIG);
+        assert_eq!(
+            hex::encode(listing_message(&parsed.bundle)),
+            "74656d70657374206c697374696e67207631003f9a\
+             000000000000000000000000000000000000000000000000000000000000"
+        );
+        // Absent when the peer didn't opt in, and then not serialized.
+        let plain: AnnounceRequest = serde_json::from_value(request()).unwrap();
+        assert!(!serde_json::to_string(&plain).unwrap().contains("listing"));
+    }
+
+    #[test]
+    fn malformed_listings_are_rejected() {
+        for listing in [
+            json!(true),
+            json!({}),
+            json!({ "sig": LISTING_SIG.to_uppercase() }),
+            json!({ "sig": &LISTING_SIG[2..] }),
+        ] {
+            let mut bad = request();
+            bad["listing"] = listing.clone();
+            assert!(
+                serde_json::from_value::<AnnounceRequest>(bad).is_err(),
+                "{listing}"
+            );
+        }
     }
 
     #[test]

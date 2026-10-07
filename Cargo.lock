@@ -4377,6 +4377,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "tempest-catalog-api",
  "tempest-core",
  "tempest-engine",
  "tempest-net",
@@ -4401,6 +4402,16 @@ dependencies = [
  "serde_json",
  "tempest-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tempest-catalog-api"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempest-protocol",
 ]
 
 [[package]]
@@ -4557,9 +4568,14 @@ dependencies = [
  "proptest",
  "rand 0.9.5",
  "rand_chacha",
+ "ring",
+ "rusqlite",
  "serde",
  "serde_json",
+ "tempest-catalog-api",
  "tempest-protocol",
+ "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "tower",
 ]

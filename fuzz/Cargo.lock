@@ -2038,6 +2038,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-catalog-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempest-protocol",
+]
+
+[[package]]
 name = "tempest-core"
 version = "0.1.0"
 dependencies = [
@@ -2084,6 +2092,7 @@ dependencies = [
  "libfuzzer-sys",
  "serde",
  "serde_json",
+ "tempest-catalog-api",
  "tempest-core",
  "tempest-engine",
  "tempest-net",
@@ -2157,9 +2166,13 @@ dependencies = [
  "getrandom 0.3.4",
  "rand 0.9.5",
  "rand_chacha",
+ "ring",
+ "rusqlite",
  "serde",
  "serde_json",
+ "tempest-catalog-api",
  "tempest-protocol",
+ "thiserror 2.0.21",
  "tokio",
 ]
 

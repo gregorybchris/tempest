@@ -2,13 +2,17 @@
 //!
 //! - [`swarms`]: who is in each swarm, and the rules for announces, without I/O.
 //! - [`server`]: the HTTP endpoints over those swarms.
+//! - [`catalog`]: the optional catalog of bundles their sharers chose to list, with accounts,
+//!   votes and comments, served beside the peer-list routes.
 //!
 //! The tracker serves plain HTTP. HTTPS comes from a reverse proxy in front of it (see
-//! [`Tracker::behind_proxy`]). A catalog of bundles can be added beside the peer-list routes.
+//! [`Tracker::behind_proxy`]).
 
+pub mod catalog;
 pub mod server;
 pub mod swarms;
 
+pub use catalog::{Catalog, CatalogConfig};
 pub use server::Tracker;
 pub use swarms::{Refusal, Swarms, TrackerConfig};
 

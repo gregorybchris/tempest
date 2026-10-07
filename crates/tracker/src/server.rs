@@ -13,10 +13,12 @@ use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use tempest_catalog_api::listing::Listing;
 use tempest_protocol::BundleId;
-use tempest_protocol::tracker::{API_PREFIX, AnnounceRequest, ErrorCode};
+use tempest_protocol::tracker::{API_PREFIX, AnnounceRequest, ErrorCode, listing_message};
 use tokio::net::TcpListener;
 
+use crate::catalog::{self, Catalog};
 use crate::swarms::{Refusal, Swarms, TrackerConfig};
 
 /// The largest request body accepted. An announce with every field at its limit is far smaller.
@@ -25,10 +27,12 @@ const MAX_BODY: usize = 16 * 1024;
 /// The longest the tracker waits between sweeps for silent peers.
 const MAX_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
-/// A tracker: its swarms and how it reads requests. Clones share the swarms.
+/// A tracker: its swarms, its catalog if it has one, and how it reads requests. Clones share
+/// the swarms and the catalog.
 #[derive(Debug, Clone)]
 pub struct Tracker {
     swarms: Arc<Mutex<Swarms>>,
+    catalog: Option<Arc<Mutex<Catalog>>>,
     behind_proxy: bool,
 }
 
@@ -38,8 +42,15 @@ impl Tracker {
         let seed = getrandom::u64()?;
         Ok(Self {
             swarms: Arc::new(Mutex::new(Swarms::new(config, seed))),
+            catalog: None,
             behind_proxy: false,
         })
+    }
+
+    /// The tracker with a catalog, served under `/catalog/v1/` beside the peer-list service.
+    pub fn with_catalog(mut self, catalog: Catalog) -> Self {
+        self.catalog = Some(Arc::new(Mutex::new(catalog)));
+        self
     }
 
     /// Whether requests come through a reverse proxy, such as one that terminates HTTPS. The
@@ -52,12 +63,16 @@ impl Tracker {
     /// The tracker's routes. Serve them with connect info, as [`Tracker::serve`] does, so the
     /// announce handler can observe the client's address.
     pub fn router(&self) -> Router {
-        Router::new()
+        let mut router = Router::new()
             .route(&format!("{API_PREFIX}announce"), post(announce))
             .route(&format!("{API_PREFIX}bundles/{{bundle}}"), get(stats))
+            .layer(DefaultBodyLimit::max(MAX_BODY));
+        if self.catalog.is_some() {
+            router = router.merge(catalog::routes::router());
+        }
+        router
             .fallback(not_found)
             .method_not_allowed_fallback(method_not_allowed)
-            .layer(DefaultBodyLimit::max(MAX_BODY))
             .with_state(self.clone())
     }
 
@@ -97,6 +112,51 @@ impl Tracker {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// The catalog, shared, if the tracker has one: for work beside the routes, such as
+    /// fetching listed bundles' manifests.
+    pub fn catalog_handle(&self) -> Option<Arc<Mutex<Catalog>>> {
+        self.catalog.clone()
+    }
+
+    /// The catalog. Only its routes call this, and they exist only with a catalog.
+    pub(crate) fn catalog(&self) -> MutexGuard<'_, Catalog> {
+        let catalog = self
+            .catalog
+            .as_ref()
+            .expect("catalog routes need a catalog");
+        // The store's writes are transactions, so a panic leaves nothing half done.
+        catalog
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Fills in the listings' swarm counts.
+    pub(crate) fn add_swarms(&self, listings: &mut [Listing]) {
+        let now = Instant::now();
+        let swarms = self.lock();
+        for listing in listings {
+            listing.swarm = swarms.stats(now, &listing.bundle);
+        }
+    }
+
+    pub(crate) fn is_behind_proxy(&self) -> bool {
+        self.behind_proxy
+    }
+
+    /// The authority the client reached the tracker at: `Host`, or behind a proxy the last
+    /// `X-Forwarded-Host`, which the proxy sets.
+    pub(crate) fn authority(&self, headers: &HeaderMap) -> Option<String> {
+        let header = |name: &str| {
+            let value = headers.get_all(name).iter().next_back()?.to_str().ok()?;
+            Some(value.rsplit(',').next()?.trim().to_owned())
+        };
+        let forwarded = self
+            .behind_proxy
+            .then(|| header("x-forwarded-host"))
+            .flatten();
+        forwarded.or_else(|| header("host"))
+    }
+
     /// The IP address the request came from.
     fn observed_ip(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
         let forwarded = || {
@@ -132,10 +192,34 @@ async fn announce(
         Ok(request) => request,
         Err(error) => return refuse(Refusal::new(ErrorCode::InvalidRequest, error.to_string())),
     };
+    // Only a tracker with a catalog reads `listing` (`protocol/trackers.md`).
+    let listing = request.listing.filter(|_| tracker.catalog.is_some());
+    if let Some(listing) = &listing
+        && !catalog::verify(
+            &request.peer,
+            &listing_message(&request.bundle),
+            &listing.sig,
+        )
+    {
+        let message = "the listing signature doesn't verify for this peer and bundle";
+        return refuse(Refusal::new(ErrorCode::InvalidRequest, message));
+    }
     let observed = tracker.observed_ip(peer, &headers);
     let result = tracker.lock().announce(Instant::now(), &request, observed);
     match result {
-        Ok(response) => json(StatusCode::OK, &response),
+        Ok(response) => {
+            if listing.is_some() {
+                let now = catalog::unix_now();
+                let listed = tracker
+                    .catalog()
+                    .request_listing(now, &request.bundle, &request.peer);
+                // The announce itself succeeded; the listing can be asked for again next time.
+                if let Err(error) = listed {
+                    eprintln!("cannot list {}: {error}", request.bundle);
+                }
+            }
+            json(StatusCode::OK, &response)
+        }
         Err(refusal) => refuse(refusal),
     }
 }
@@ -168,7 +252,7 @@ async fn method_not_allowed() -> Response {
     refuse(refusal)
 }
 
-fn refuse(refusal: Refusal) -> Response {
+pub(crate) fn refuse(refusal: Refusal) -> Response {
     let status = StatusCode::from_u16(refusal.status).unwrap_or(StatusCode::BAD_REQUEST);
     let mut response = json(status, &refusal.body);
     if let Some(after) = refusal.body.retry_after_secs {
@@ -179,7 +263,7 @@ fn refuse(refusal: Refusal) -> Response {
     response
 }
 
-fn json(status: StatusCode, body: &impl serde::Serialize) -> Response {
+pub(crate) fn json(status: StatusCode, body: &impl serde::Serialize) -> Response {
     let body = serde_json::to_vec(body).expect("the tracker's JSON types serialize");
     let content_type = HeaderValue::from_static("application/json");
     (status, [(header::CONTENT_TYPE, content_type)], body).into_response()

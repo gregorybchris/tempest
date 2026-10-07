@@ -8,12 +8,21 @@ use proptest::prelude::*;
 use tempest_protocol::relay::RelayHost;
 use tempest_protocol::tracker::{
     AnnounceEvent, AnnounceRequest, AnnounceResponse, BundleStats, ErrorCode, ErrorResponse,
-    PeerEntry,
+    ListingRequest, PeerEntry, Signature,
 };
 use tempest_protocol::{Address, Hash, RelayIdentity};
 
 fn any_hash() -> impl Strategy<Value = Hash> {
     any::<[u8; 32]>().prop_map(Hash::new)
+}
+
+fn any_signature() -> impl Strategy<Value = Signature> {
+    (any::<[u8; 32]>(), any::<[u8; 32]>()).prop_map(|(a, b)| {
+        let mut bytes = [0; 64];
+        bytes[..32].copy_from_slice(&a);
+        bytes[32..].copy_from_slice(&b);
+        Signature(bytes)
+    })
 }
 
 fn any_address() -> impl Strategy<Value = Address> {
@@ -39,9 +48,10 @@ fn any_request() -> impl Strategy<Value = AnnounceRequest> {
         any_event(),
         any::<bool>(),
         any::<u32>(),
+        proptest::option::of(any_signature()),
     )
         .prop_map(
-            |(bundle, peer, port, addrs, relay, event, complete, num_want)| AnnounceRequest {
+            |(bundle, peer, port, addrs, relay, event, complete, num_want, sig)| AnnounceRequest {
                 bundle,
                 peer,
                 port,
@@ -50,6 +60,7 @@ fn any_request() -> impl Strategy<Value = AnnounceRequest> {
                 event,
                 complete,
                 num_want,
+                listing: sig.map(|sig| ListingRequest { sig }),
             },
         )
 }

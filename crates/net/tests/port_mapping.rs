@@ -389,6 +389,7 @@ async fn the_external_address_is_announced() {
         event: AnnounceEvent::Started,
         complete: false,
         num_want: 50,
+        listing: None,
     };
     let heard = async {
         loop {

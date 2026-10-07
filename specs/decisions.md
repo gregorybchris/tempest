@@ -3255,3 +3255,36 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - The UI has four areas: Experiments, Runs, Compare and Baselines. Variants are picked into a comparison basket kept in the browser. Every view has a link.
 
 **Rationale:** Query functions in the simulator are tested against real recorded runs beside the code that writes them, and the HTTP layer stays thin. A tiny types crate keeps the simulator out of the browser. Short-lived read-only connections fit DuckDB's one-writer rule without making the UI and the simulator take turns by hand.
+
+---
+
+## D-205: The announce's listing field is a signature
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-129 adds an optional listing field to announces and attributes a listing to the key that asked. Announces are unsigned, so a bare flag would let anyone list a bundle in another peer's name.
+
+**Options:** a boolean flag, listing under the unverified peer ID; a catalog session token in the announce; the peer's Ed25519 signature over a fixed message naming the bundle (chosen).
+
+**Decision:** `listing` is `{ "sig": … }`, the announcing peer's signature over `tempest listing v1`, a zero byte and the bundle ID (`protocol/trackers.md`, with a test vector). A tracker without a catalog ignores it; one with a catalog refuses an announce whose signature fails. Clients include it in every announce for a bundle they chose to list there.
+
+**Rationale:** The peer key is the account key (D-128), so a signature proves the request without sessions in announces, and its owner needs no sign-in to list. It depends on the bundle only, so it is computed once and a stateless tracker catches up after a restart; a replay repeats only what the owner asked. Withdrawing is the catalog's business: a withdrawn listing stays withdrawn until its publisher edits it.
+
+---
+
+## D-206: Catalog accounts, sessions and storage
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-128 signs catalog users in with their Tempest key, but a browser doesn't hold the key. M9 also leaves the catalog's storage and API open.
+
+**Options:** **Browser sign-in:** the local engine signs for the page (cross-origin calls to localhost); a code shown in the page and signed by the user's client, like a device-code flow (chosen). **Storage:** SQLite (chosen, as the engine's state, D-082); files; an external database. **Types:** in `tracker`; a serde-only `catalog-api` crate shared with the client and the catalog UI (chosen, as D-200 and D-204).
+
+**Decision:**
+
+- A tracker runs a catalog only when its operator passes `--catalog FILE`; `--invites-required` and `tempest tracker invite` make invites, and `--category` replaces the default categories, which lead with D-031's legitimate uses.
+- Sign-in: `POST /catalog/v1/challenges` gives a typeable code and a poll secret. The key signs `tempest catalog sign-in v1`, a zero byte, the tracker's authority as the signer reached it, a zero byte and the code, and posts it to `/catalog/v1/sessions`, which answers with a session; the holder of the poll secret can collect that session once, as an `HttpOnly`, `SameSite=Strict` cookie. Codes last ten minutes and are kept in memory. Sessions last 30 days and are stored as hashes of their tokens.
+- Requests authenticate with a bearer token or the cookie. Bodies must be JSON with a JSON content type, so no cross-site form can act with a browser's session.
+- Listings are pending until the tracker knows the bundle's content, and only their publisher sees them then. The first key to ask keeps a bundle's listing. Publishers edit title, description, category and tags; signed-in accounts vote up or down and comment, and delete their own comments.
+
+**Rationale:** The key never leaves the client, and the device-code flow works from any browser. Signing the authority stops a tracker from passing on another tracker's code to sign in there as the user. SQLite needs no service to run, and the shared crate keeps the tracker, the client and the UI agreeing on every body and text rule.

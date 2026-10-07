@@ -422,6 +422,7 @@ impl AnnounceTask {
             event,
             complete,
             num_want: self.config.num_want,
+            listing: None,
         };
         let response = match self.client.announce(&self.tracker, &request).await {
             Ok(response) => response,

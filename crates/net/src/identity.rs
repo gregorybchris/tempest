@@ -15,6 +15,7 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use rustls::sign::SigningKey;
 use tempest_protocol::PeerId;
+use tempest_protocol::tracker::Signature;
 
 /// The PEM label of a PKCS#8 private key.
 const PEM_LABEL: &str = "PRIVATE KEY";
@@ -112,6 +113,19 @@ impl Identity {
         self.peer_id
     }
 
+    /// The key's Ed25519 signature over `message`, such as an announce's listing request or a
+    /// catalog sign-in (`protocol/trackers.md`).
+    pub fn sign(&self, message: &[u8]) -> Signature {
+        let pair = Ed25519KeyPair::from_pkcs8_maybe_unchecked(&self.pkcs8)
+            .expect("checked when the key was loaded");
+        Signature(
+            pair.sign(message)
+                .as_ref()
+                .try_into()
+                .expect("64-byte signature"),
+        )
+    }
+
     /// The private key as a rustls signing key.
     pub(crate) fn signing_key(&self) -> Arc<dyn SigningKey> {
         let der = PrivatePkcs8KeyDer::from(&self.pkcs8[..]);
@@ -146,6 +160,18 @@ mod tests {
 MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g
 -----END PRIVATE KEY-----
 ";
+
+    #[test]
+    fn signs_the_specs_listing_test_vector() {
+        let identity = Identity::from_pem(RFC_8032_PEM).unwrap();
+        let bundle = format!("3f9a{}", "0".repeat(60)).parse().unwrap();
+        let sig = identity.sign(&tempest_protocol::tracker::listing_message(&bundle));
+        assert_eq!(
+            sig.to_string(),
+            "ad66ac47ca8e640246582dcc0000087592145360a7a7f3b7385efd630f83a2aa\
+             706008afbc7f1499e94be591e8e4948f372ed9d26c7077f4a1c8205e86acdd0d"
+        );
+    }
 
     #[test]
     fn rfc_8032_key_has_the_expected_peer_id() {

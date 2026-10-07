@@ -42,7 +42,8 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `web` | Client web UI | `ui-kit`, `api` |
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
 | `sim-web` | Simulation results UI | `ui-kit`, `sim-api` |
-| `tracker` | Tracker server: peer-list service, catalog | `protocol`, `ui-kit` |
+| `catalog-api` | The tracker catalog API's types and text rules, shared by the tracker, the client and the catalog UI (D-206) | `protocol` |
+| `tracker` | Tracker server: peer-list service, catalog | `protocol`, `catalog-api`, `ui-kit` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
 | `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the results UI; embeds the web UIs' built files (D-201) | most of the above |
 

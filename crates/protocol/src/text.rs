@@ -26,4 +26,5 @@ serde_via_str!(
     crate::Address,
     crate::relay::RelayIdentity,
     crate::tracker::ErrorCode,
+    crate::tracker::Signature,
 );

@@ -36,6 +36,30 @@ Before heavy implementation, build a small test UI to decide whether Rust can me
 - **Must include:** a transfer list, a chunk map, live speed sparklines and one rich interactive chart, so chart quality is tested, not assumed.
 - **Fallback (D-088):** if Rust can't meet the bar, use a Vite + TypeScript + React frontend. All-Rust is strongly preferred.
 
+## Client features (v1)
+
+These apply to both the TUI and the client web UI (D-118). The dummy TUI in `prototypes/tui/` shows many of them.
+
+| Area | Features |
+| --- | --- |
+| Transfer controls | Start/stop, force start (bypasses the queue), remove (keep or delete files), rename, open download folder, recheck data |
+| Queue | Limits on active downloads and uploads; reorder queued transfers |
+| Limits | Global and per-transfer speed limits; alternative-limits mode (toggle or schedule); sharing limits (ratio or time) |
+| Organizing | Tags (many per transfer), categories (one per transfer, each with a default save folder), move storage |
+| Finding | Filter by name or tag; filter by status; sort by name, size, progress, status, ↓, ↑, peers serving us, time left, ratio, date added; custom columns; saved views |
+| Sharing | Create a bundle from a file or folder and get a `tempest:` link |
+| Notifications | On completion and on error |
+
+**Statuses:** downloading, sharing, stalled, queued, stopped, completed, errored, checking, moving.
+
+**Out for now:**
+
+- **Files:** file selection, priority, streaming and renaming.
+- **Adding and discovery:** watched folders, feeds and searching trackers.
+- **Monitoring:** a trackers tab, global stats and an event log.
+- **Peer management:** ban, add, disconnect and peer details.
+- **Automation and system integration:** these are out too.
+
 ## Leptos guidelines
 
 The web UIs use Leptos (D-117). Code written for them, by people or agents, follows these rules:

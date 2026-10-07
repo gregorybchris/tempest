@@ -1756,3 +1756,42 @@ The full field list is in `protocol/trackers.md`.
 - Keep a performance benchmark of a 1,536-cell live view in CI.
 - Keep UI logic in plain Rust modules so the framework layer stays thin.
 - Revisit if Leptos maintenance visibly stalls, e.g. no 0.9 release by mid-2027.
+
+---
+
+## D-118: Client feature set (v1)
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Context:** The owner reviewed qBittorrent-style features after trying the dummy TUI (`prototypes/tui/`). The same features apply to the TUI and the web UI.
+
+**In:**
+
+- **Transfer controls:**
+  - start/stop
+  - force start (bypasses the queue)
+  - remove, keeping or deleting files
+  - rename
+  - open the download folder
+- **Queue:** limits on active downloads and uploads; queued transfers can be reordered.
+- **Recheck:** re-verify data on disk against the manifest.
+- **Speed limits:** global and per transfer, plus an alternative-limits mode that can be toggled or scheduled.
+- **Sharing limits:** stop or remove a transfer at a ratio or after a sharing time.
+- **Organizing:**
+  - tags (many per transfer)
+  - categories (one per transfer, each with a default save folder)
+  - move storage
+  - custom columns and saved views
+- **Finding transfers:** filter by name or tag; filter by status; sort by name, size, progress, status, download rate, upload rate, peers serving us, time left, ratio and date added.
+- **Sharing:** create a bundle from a local file or folder and get a `tempest:` link (direct sends).
+- **Notifications:** notify when a transfer completes or errors.
+
+**Out for now:**
+
+- **Files:** file selection, file priority, streaming/preview, renaming files.
+- **Adding and discovery:** watched folders, feeds, tracker search from the client.
+- **Monitoring:** trackers tab, global stats, client-wide event log.
+- **Peer management:** ban, add, disconnect, peer details.
+- **Automation:** run a command on completion, start on login and tray icon, keep awake, battery and metered awareness.
+
+**Statuses:** downloading, sharing, stalled, queued, stopped, completed, errored, plus checking (recheck) and moving (move storage).

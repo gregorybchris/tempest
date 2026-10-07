@@ -86,12 +86,13 @@ fn media_type(path: &str) -> &'static str {
 }
 
 /// Whether trunk named the file after its contents, as in `web-5883c789b3a06503.css`, so that
-/// it can be cached for good.
+/// it can be cached for good. Trunk writes the 64-bit hash without leading zeros.
 fn hashed(path: &str) -> bool {
     let stem = path.rsplit_once('.').map_or(path, |(stem, _)| stem);
     let stem = stem.strip_suffix("_bg").unwrap_or(stem);
-    stem.rsplit_once('-')
-        .is_some_and(|(_, hash)| hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    stem.rsplit_once('-').is_some_and(|(_, hash)| {
+        (8..=16).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_hexdigit())
+    })
 }
 
 /// Whether the binary has the UI's files.
@@ -179,6 +180,7 @@ mod tests {
         assert!(hashed("web-5883c789b3a06503.css"));
         assert!(hashed("tempest-web-cf79489a2eb1c420_bg.wasm"));
         assert!(hashed("tempest-web-cf79489a2eb1c420.js"));
+        assert!(hashed("tempest-web-e9a8078f88ecbd2_bg.wasm"));
         assert!(!hashed("index.html"));
         assert!(!hashed("fonts/ibm-plex-mono-latin-400.woff2"));
         assert_eq!(media_type("a_bg.wasm"), "application/wasm");

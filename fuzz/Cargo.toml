@@ -1,0 +1,39 @@
+[package]
+name = "tempest-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+tempest-protocol = { path = "../crates/protocol" }
+
+# Keep the fuzz crate out of the main workspace: it builds only on nightly.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "frame"
+path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "primitives"
+path = "fuzz_targets/primitives.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verify_data"
+path = "fuzz_targets/verify_data.rs"
+test = false
+doc = false
+bench = false

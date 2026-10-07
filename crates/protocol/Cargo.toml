@@ -1,0 +1,19 @@
+[package]
+name = "tempest-protocol"
+description = "Wire types, encoding, chunk trees and proofs for the Tempest protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true

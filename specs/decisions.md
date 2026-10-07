@@ -2053,3 +2053,27 @@ UI screenshot tests are not required.
 **Date:** 2026-10-07 · **Status:** Provisional
 
 **Decision:** Creating a bundle and browsing trackers are full areas, not modal dialogs, because each has a multi-step flow (build, link; browse, search, add). Adding a transfer from a link stays a quick modal on Transfers, since it is one input.
+
+---
+
+## D-140: Strict decoding of non-canonical addresses and hex
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The spec says an IPv4 address MUST be encoded with family 4, and that hashes are written as lowercase hex, but not what a receiver does with an IPv4-mapped IPv6 address sent as family 6, or with uppercase hex.
+
+**Options:** accept and normalize; reject as a protocol violation.
+
+**Decision:** Reject both. Every value then has exactly one valid encoding, as the encoding section intends, and a decoded structure always re-encodes to the same bytes, which the fuzz targets check.
+
+---
+
+## D-141: Toolchain pin and minimum Rust version
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-122 pins the latest stable Rust. Crates also declare a minimum supported version (`rust-version`).
+
+**Options:** an older MSRV tested separately; MSRV equal to the pin.
+
+**Decision:** `rust-version` equals the pinned toolchain, and CI installs the toolchain from `rust-toolchain.toml`, so the pin is the one source of truth. An older MSRV would need its own CI job and is not useful for a binary distributed through releases.

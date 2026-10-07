@@ -1848,3 +1848,126 @@ The full field list is in `protocol/trackers.md`.
 
 - Crates are named `tempest-*` (e.g. `tempest-protocol`, `tempest-core`). Their folders keep short names under `crates/`.
 - GitHub Actions CI runs from the first commit of code: formatting, clippy, tests and `cargo-deny`.
+
+---
+
+## D-124: CLI vocabulary
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:** The CLI uses Tempest's own verbs:
+
+| Command | Purpose |
+| --- | --- |
+| `tempest share <path>` | Create a bundle and print its link |
+| `tempest get <link>` | Download a bundle |
+| `tempest list` | Show transfers |
+| `tempest start` / `stop` / `remove` | Control a transfer |
+| `tempest daemon` | Run the engine |
+| `tempest tui` | Open the terminal UI |
+| `tempest web` | Open the web UI |
+| `tempest relay` | Run a relay |
+| `tempest tracker` | Run a tracker |
+
+This replaces the placeholder command names in earlier roadmap text (`make`, `send`).
+
+---
+
+## D-125: Engine API access
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:**
+
+- The engine's API and web UI bind to localhost by default.
+- Remote access is an opt-in setting that requires a token or password and HTTPS.
+
+---
+
+## D-126: Default ports
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:** All ports are configurable.
+
+| Port | Use |
+| --- | --- |
+| UDP 4773 | Peers (QUIC) |
+| UDP 4774 | LAN discovery (D-099) |
+| UDP 4775 | Relays (D-108) |
+| TCP 4776 | Engine API and web UI |
+| TCP 4777 | Tracker |
+
+---
+
+## D-127: Undecided questions during implementation
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:**
+
+- When an implementing agent meets a design question no decision covers, it picks the option most consistent with existing decisions and continues.
+- It records the choice in this log with **Status: Provisional**, the options considered, and its rationale.
+- The owner reviews every provisional decision afterwards.
+
+---
+
+## D-128: Catalog accounts
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:**
+
+- Browsing a tracker catalog is open.
+- Publishing, comments and votes require signing in with a Tempest key: the client signs a challenge to prove ownership of its peer key. There are no passwords.
+- Operators may require invites.
+
+---
+
+## D-129: Catalog listing is opt-in
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Options considered:**
+
+- Opt-in listing
+- Explicit publish only
+- Auto-list everything announced
+
+**Decision:**
+
+- A bundle appears in a catalog only when its sharer opts in, via a per-tracker setting or `tempest share --publish`.
+- Opted-in announces carry a listing flag. The tracker then fetches the manifest from peers and lists the bundle automatically.
+- Title, description and category can be edited in the web form or the client.
+
+**Rationale:** Auto-listing everything would publish private bundles that only use the tracker to find peers, and would make operators index all content by default (D-031).
+
+**Implications:**
+
+- The tracker API (`protocol/trackers.md`) gains an optional listing field on announces.
+- The listing is attributed to the signed-in key that requested it.
+
+---
+
+## D-130: Catalog search and ranking
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Decision:**
+
+- Search uses Tantivy: relevance ranking, typo tolerance, and facets for categories and tags.
+- Ranking and sorting use live swarm health from the tracker's own announces, votes from signed-in users, and downloads over time (trending).
+
+---
+
+## D-131: Client layout direction
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Context:** The owner felt the M0 layout needed rethinking. The direction applies to both the TUI and the web UI (D-119).
+
+**Decision:**
+
+- **List first, detail on demand.** The transfers list is the main surface: full width, with more columns. A transfer's detail opens in a drawer or split only when selected or expanded.
+- **App-level navigation.** A clear navigation covers the app's areas, such as transfers, share, trackers/catalog and settings (limits, queue, categories).
+- **Less at once.** Everyday information comes first. The chunk map, charts, peers and decisions sit one level deeper.

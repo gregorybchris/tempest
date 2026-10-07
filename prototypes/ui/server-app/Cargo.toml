@@ -1,0 +1,9 @@
+[package]
+name = "server-app"
+version = "0.1.0"
+edition = "2021"
+description = "M0 prototype: server-rendered Tempest UI (axum + maud + Datastar)"
+
+[dependencies]
+proto-core = { path = "../proto-core" }
+maud = "0.27"

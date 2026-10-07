@@ -1,6 +1,5 @@
-# The golden regression scenario (D-077): a small, varied swarm whose metrics are checked
-# against saved baselines on every change. See crates/sim/tests/baseline.rs.
-name: golden
+# Golden (D-077): a small, varied swarm of mixed links, loss, churn and free riders.
+name: mixed
 description: 40 peers with mixed links, loss, churn and free riders on 2 origins.
 duration: 1h
 seeds: 20

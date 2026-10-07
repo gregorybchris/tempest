@@ -35,19 +35,20 @@ jobs:
       # the number of threads.
       - name: Determinism check
         run: |
-          for scenario in swarm-1000 golden home-routers; do
-            path=crates/sim/scenarios/$scenario.yaml
+          for path in crates/sim/scenarios/{swarm-1000,home-routers}.yaml crates/sim/scenarios/golden/*.yaml; do
+            scenario=$(basename "$path" .yaml)
             target/release/tempest sim run "$path" --no-db --digests "$scenario-1.tsv"
             target/release/tempest sim run "$path" --no-db --digests "$scenario-2.tsv" --jobs 1
             cmp "$scenario-1.tsv" "$scenario-2.tsv"
             cat "$scenario-1.tsv"
           done
-      # The slow tests, among them the 1,000-peer swarm into DuckDB and the validation scenarios,
-      # and the golden baseline over every saved seed.
+      # Every saved seed of every golden scenario, compared seed by seed (D-171). The check job
+      # runs the quick version.
+      - name: Golden baselines, long
+        run: target/release/tempest sim baseline --long
+      # The slow tests, among them the 1,000-peer swarm into DuckDB and the validation scenarios.
       - name: Slow simulation tests
         run: cargo test --release -p tempest-sim -- --include-ignored
-        env:
-          TEMPEST_BASELINE_SEEDS: 20
 
   deny:
     runs-on: ubuntu-latest

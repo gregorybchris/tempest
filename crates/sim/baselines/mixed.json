@@ -1,5 +1,5 @@
 {
-  "scenario": "golden",
+  "scenario": "mixed",
   "runs": {
     "1": {
       "completed": 38,
@@ -8,6 +8,7 @@
       "first_byte_p50_s": 1.439685602,
       "upload_utilization": 0.10954094000584388,
       "fairness": 0.8400559071187258,
+      "rarest_copies": 14.818181818181818,
       "overhead_bytes": 852344,
       "duplicate_bytes": 0
     },
@@ -18,6 +19,7 @@
       "first_byte_p50_s": 1.406415118,
       "upload_utilization": 0.10218201034620428,
       "fairness": 0.692673136897419,
+      "rarest_copies": 19.857142857142858,
       "overhead_bytes": 1042547,
       "duplicate_bytes": 0
     },
@@ -28,6 +30,7 @@
       "first_byte_p50_s": 1.363351172,
       "upload_utilization": 0.14799690491454076,
       "fairness": 0.8487313164175524,
+      "rarest_copies": 12.444444444444445,
       "overhead_bytes": 797352,
       "duplicate_bytes": 0
     },
@@ -38,6 +41,7 @@
       "first_byte_p50_s": 1.531080517,
       "upload_utilization": 0.12829030163341923,
       "fairness": 0.8165324494673277,
+      "rarest_copies": 15.142857142857142,
       "overhead_bytes": 911919,
       "duplicate_bytes": 0
     },
@@ -48,6 +52,7 @@
       "first_byte_p50_s": 1.42641487,
       "upload_utilization": 0.1029259625407889,
       "fairness": 0.7714136916655283,
+      "rarest_copies": 17.25,
       "overhead_bytes": 934159,
       "duplicate_bytes": 0
     },
@@ -58,6 +63,7 @@
       "first_byte_p50_s": 1.364269133,
       "upload_utilization": 0.18994962940702081,
       "fairness": 0.7736042927274808,
+      "rarest_copies": 16.6,
       "overhead_bytes": 972148,
       "duplicate_bytes": 0
     },
@@ -68,6 +74,7 @@
       "first_byte_p50_s": 1.407289787,
       "upload_utilization": 0.11032066071009718,
       "fairness": 0.7098331193838258,
+      "rarest_copies": 18.22222222222222,
       "overhead_bytes": 1037994,
       "duplicate_bytes": 0
     },
@@ -78,6 +85,7 @@
       "first_byte_p50_s": 1.392126153,
       "upload_utilization": 0.12093602649987521,
       "fairness": 0.7514005194442182,
+      "rarest_copies": 16.714285714285715,
       "overhead_bytes": 1097119,
       "duplicate_bytes": 0
     },
@@ -88,6 +96,7 @@
       "first_byte_p50_s": 1.435124875,
       "upload_utilization": 0.10077088526730282,
       "fairness": 0.7790160391369851,
+      "rarest_copies": 18.125,
       "overhead_bytes": 1092925,
       "duplicate_bytes": 0
     },
@@ -98,6 +107,7 @@
       "first_byte_p50_s": 1.4396856009999999,
       "upload_utilization": 0.129497775599093,
       "fairness": 0.7775543660390003,
+      "rarest_copies": 15.714285714285714,
       "overhead_bytes": 931964,
       "duplicate_bytes": 0
     },
@@ -108,6 +118,7 @@
       "first_byte_p50_s": 1.294442322,
       "upload_utilization": 0.14132071189512047,
       "fairness": 0.7861356184295032,
+      "rarest_copies": 16.666666666666668,
       "overhead_bytes": 1056947,
       "duplicate_bytes": 0
     },
@@ -118,6 +129,7 @@
       "first_byte_p50_s": 1.409774402,
       "upload_utilization": 0.11767683051445038,
       "fairness": 0.6982314607986118,
+      "rarest_copies": 17.125,
       "overhead_bytes": 976676,
       "duplicate_bytes": 0
     },
@@ -128,6 +140,7 @@
       "first_byte_p50_s": 1.362895385,
       "upload_utilization": 0.16293492132514575,
       "fairness": 0.7663442764186109,
+      "rarest_copies": 17.2,
       "overhead_bytes": 1079177,
       "duplicate_bytes": 0
     },
@@ -138,6 +151,7 @@
       "first_byte_p50_s": 1.212054594,
       "upload_utilization": 0.1307395211899608,
       "fairness": 0.7393085069366269,
+      "rarest_copies": 16.142857142857142,
       "overhead_bytes": 1019229,
       "duplicate_bytes": 0
     },
@@ -148,6 +162,7 @@
       "first_byte_p50_s": 1.35952128,
       "upload_utilization": 0.1340187883399387,
       "fairness": 0.8527166602499203,
+      "rarest_copies": 15.142857142857142,
       "overhead_bytes": 951026,
       "duplicate_bytes": 0
     },
@@ -158,6 +173,7 @@
       "first_byte_p50_s": 1.232699454,
       "upload_utilization": 0.15181054207526368,
       "fairness": 0.7951529152271906,
+      "rarest_copies": 13.4,
       "overhead_bytes": 790692,
       "duplicate_bytes": 0
     },
@@ -168,6 +184,7 @@
       "first_byte_p50_s": 1.155996862,
       "upload_utilization": 0.16704819184646166,
       "fairness": 0.7465260725794758,
+      "rarest_copies": 17.0,
       "overhead_bytes": 1006990,
       "duplicate_bytes": 0
     },
@@ -178,6 +195,7 @@
       "first_byte_p50_s": 1.269081936,
       "upload_utilization": 0.1734572390330973,
       "fairness": 0.7528120358683474,
+      "rarest_copies": 17.8,
       "overhead_bytes": 983991,
       "duplicate_bytes": 0
     },
@@ -188,6 +206,7 @@
       "first_byte_p50_s": 1.2399808,
       "upload_utilization": 0.07703108706263574,
       "fairness": 0.7762446144210148,
+      "rarest_copies": 16.833333333333332,
       "overhead_bytes": 897130,
       "duplicate_bytes": 0
     },
@@ -198,6 +217,7 @@
       "first_byte_p50_s": 1.324909263,
       "upload_utilization": 0.06815100148168059,
       "fairness": 0.8172081684849939,
+      "rarest_copies": 15.266666666666667,
       "overhead_bytes": 879837,
       "duplicate_bytes": 0
     }

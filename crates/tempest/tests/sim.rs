@@ -1,4 +1,4 @@
-//! `tempest sim run` on an example scenario and on a broken one.
+//! `tempest sim run` on an example scenario and on a broken one, and `tempest sim baseline`.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -135,4 +135,46 @@ fn a_bad_scenario_names_the_field() {
         stderr.contains("bad.yaml") && stderr.contains("line 3"),
         "{stderr}"
     );
+}
+
+#[test]
+fn baselines_are_saved_then_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let scenarios = dir.path().join("scenarios");
+    let baselines = dir.path().join("baselines");
+    std::fs::create_dir_all(&scenarios).unwrap();
+    std::fs::create_dir_all(&baselines).unwrap();
+    let scenario = scenarios.join("two-peers.yaml");
+    std::fs::copy(example("two-peers.yaml"), &scenario).unwrap();
+    let baseline = |extra: &[&str]| {
+        let mut args = vec![
+            "sim",
+            "baseline",
+            "--scenarios",
+            scenarios.to_str().unwrap(),
+            "--baselines",
+            baselines.to_str().unwrap(),
+        ];
+        args.extend(extra);
+        tempest(&args)
+    };
+
+    assert!(baseline(&["--update"]).status.success());
+    assert!(baselines.join("two-peers.json").exists());
+    for mode in [&[][..], &["--long"]] {
+        let output = baseline(mode);
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(output.status.success(), "{stdout}");
+        assert!(stdout.contains("completion p50") && !stdout.contains("REGRESSED"));
+    }
+
+    // A slower origin fails the check.
+    let text = std::fs::read_to_string(&scenario).unwrap();
+    std::fs::write(&scenario, text.replacen("up: 20Mbps", "up: 5Mbps", 1)).unwrap();
+    let output = baseline(&[]);
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("REGRESSED"), "{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("regressed: two-peers"), "{stderr}");
 }

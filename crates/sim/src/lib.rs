@@ -14,7 +14,7 @@
 //! - [`stats`]: medians with confidence intervals, and paired comparisons of variants (D-073).
 //! - [`strategic`]: the strategic client's upload strategy.
 //! - [`log`]: the event log and its digest.
-//! - [`baseline`]: golden baselines to check runs against (D-077).
+//! - [`baseline`]: golden scenarios and their baselines, to check runs against (D-077).
 //! - `results`: the DuckDB results database (D-075), with the `results` feature.
 
 pub mod baseline;

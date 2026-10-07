@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use anyhow::{Context as _, Result};
 use clap::Subcommand;
+use tempest_sim::baseline::{self, Mode};
 use tempest_sim::experiment::{Observer, run_all, seeds};
 use tempest_sim::log::Sink;
 use tempest_sim::results::{Database, Recorder, ScenarioFile};
@@ -20,6 +21,32 @@ pub enum SimCommand {
     /// Run every variant of a scenario with each of its seeds, record the results and print a
     /// summary.
     Run(RunArgs),
+    /// Check the golden scenarios against their saved baselines, or rewrite the baselines. Run
+    /// from the repository's root, or point to the directories.
+    Baseline(BaselineArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct BaselineArgs {
+    /// Run every saved seed and compare seed by seed, instead of a quick check of the first few.
+    #[arg(long)]
+    long: bool,
+    /// Run every saved seed and save the results as the new baselines.
+    #[arg(long, conflicts_with = "long")]
+    update: bool,
+    /// The directory of golden scenarios.
+    #[arg(
+        long,
+        value_name = "DIR",
+        default_value = "crates/sim/scenarios/golden"
+    )]
+    scenarios: PathBuf,
+    /// The directory of their baselines.
+    #[arg(long, value_name = "DIR", default_value = "crates/sim/baselines")]
+    baselines: PathBuf,
+    /// How many runs at once. Defaults to the number of CPUs.
+    #[arg(long, short)]
+    jobs: Option<NonZeroUsize>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -56,6 +83,7 @@ pub struct RunArgs {
 pub fn sim(command: SimCommand) -> Result<()> {
     match command {
         SimCommand::Run(args) => run(args),
+        SimCommand::Baseline(args) => baseline(args),
     }
 }
 
@@ -100,10 +128,7 @@ fn run(args: RunArgs) -> Result<()> {
         Some(seed) => vec![seed],
         None => seeds(&scenario),
     };
-    let jobs = args
-        .jobs
-        .or_else(|| std::thread::available_parallelism().ok())
-        .unwrap_or(NonZeroUsize::MIN);
+    let jobs = jobs(args.jobs);
     let variants = scenario.variants();
     let names: Vec<String> = variants.iter().map(|v| v.name()).collect();
     let reference = match &args.reference {
@@ -196,4 +221,42 @@ fn comparison(samples: &[Samples], reference: &str) -> String {
         "\nacross seeds: medians, and differences from the reference paired by seed\n\n{}",
         stats::table(&rows, bootstrap.confidence)
     )
+}
+
+fn jobs(jobs: Option<NonZeroUsize>) -> NonZeroUsize {
+    jobs.or_else(|| std::thread::available_parallelism().ok())
+        .unwrap_or(NonZeroUsize::MIN)
+}
+
+fn baseline(args: BaselineArgs) -> Result<()> {
+    let jobs = jobs(args.jobs);
+    let goldens = baseline::golden(&args.scenarios, &args.baselines)?;
+    anyhow::ensure!(
+        !goldens.is_empty(),
+        "{} has no golden scenarios",
+        args.scenarios.display()
+    );
+    let mode = if args.long { Mode::Long } else { Mode::Quick };
+    let mut regressed = Vec::new();
+    let mut improved = false;
+    for golden in &goldens {
+        let name = &golden.scenario.name;
+        let seeds = mode.seeds(&golden.scenario).len();
+        if args.update {
+            golden.update(jobs)?;
+            println!("{name}: saved {}", golden.baseline.display());
+            continue;
+        }
+        let checks = golden.check(mode, jobs)?;
+        println!("{name}, {seeds} seeds\n{}", baseline::table(&checks));
+        if checks.iter().any(|c| c.regressed) {
+            regressed.push(name.as_str());
+        }
+        improved |= checks.iter().any(|c| c.improved);
+    }
+    if improved {
+        println!("Some metrics improved: rerun with --update to save them.");
+    }
+    anyhow::ensure!(regressed.is_empty(), "regressed: {}", regressed.join(", "));
+    Ok(())
 }

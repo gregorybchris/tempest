@@ -2455,7 +2455,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-163: Golden baselines and the determinism check
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Provisional; the golden scenario set and the long check are amended by D-171
 
 **Context:** D-077 and D-132 call for golden scenarios against saved baselines, with a setting for longer runs; `specs/simulation.md` calls for a CI check that the same seed gives the same event log.
 
@@ -2590,3 +2590,22 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Between reviews, the BitTorrent strategy fills free slots with the waiting peers that upload to this peer fastest, ties at random. This amends D-154, which filled them at random.
 
 **Rationale:** Serving is how a provider says whom it will answer; answering after it said no undoes the decision. Ordering by rate keeps reciprocators ahead of peers that give nothing, while newcomers still get free slots when no reciprocator is waiting, and the optimistic slot. With both changes, free riders take about 15% longer than home peers in the free-rider validation scenario, against no difference under the cooperative strategy. Strategic clients (D-166) still finish meaningfully sooner than BitTorrent peers, by about 13%, but with more spread across seeds: their test now runs 20 seeds.
+
+---
+
+## D-171: A set of golden scenarios, checked quickly or seed by seed
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-163 had one golden scenario, predating the model of routers, relays, disks, Weibull sessions and strategic clients (D-165, D-166). D-132 asks for a quick check by default and a longer, more certain one.
+
+**Options for the long check:** the quick check's means over more seeds; the paired comparison of D-167, whose 2% minimum effect would fail small deliberate changes; a paired comparison with each metric's tolerance as its minimum effect (chosen). **For running it:** an environment variable read by the test, as before; a `tempest sim baseline` command (chosen), which also runs in release and rewrites the baselines.
+
+**Decision:**
+
+- Golden scenarios are the scenario files in one directory, each with one variant and named after its file. Each one's per-seed baseline is the JSON file of the same name in the baselines directory. A generic test finds them all. They cover a varied swarm, peers behind routers, heavy-tailed sessions with bad data, strategic clients and free riders, and a crowd arriving at once.
+- The quick check runs the first few seeds of each scenario and compares means with D-163's tolerances; it runs in the normal test job. The long check runs every saved seed and compares seed by seed: a metric regresses when the median per-seed change is worse than its tolerance and its bootstrap interval excludes no change. CI's simulation job runs it with the release binary. Update mode rewrites every baseline from every saved seed.
+- The rarest chunk's availability (D-168) is now a checked metric.
+- Tests cut every peer's upload to 60% and require each golden scenario to fail both checks on completion time.
+
+**Rationale:** One scenario per model feature keeps a regression in one feature from hiding in averages over others, and small swarms keep the quick check to a few seconds in debug. Medians of paired changes ignore one unusual seed, and the interval keeps noise from failing the check, while tolerances, not mere significance, decide what counts as a regression, as in D-163. A command rather than an environment variable makes the long check and updates a single, discoverable step between milestones.

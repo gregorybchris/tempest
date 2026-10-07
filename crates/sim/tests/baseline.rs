@@ -1,70 +1,108 @@
-//! The golden regression scenario against its saved baseline (D-077, D-132).
+//! The golden scenarios against their saved baselines (D-077, D-132), in quick mode.
 //!
-//! By default the first few seeds run, which takes about a second. For more certainty, set
-//! `TEMPEST_BASELINE_SEEDS` to run more, up to the scenario's `seeds`. After a deliberate
-//! change, set `TEMPEST_UPDATE_BASELINE=1` to rewrite the baseline from every seed.
+//! `tempest sim baseline` runs the same check, and with `--long` over every saved seed; after a
+//! deliberate change, `--update` rewrites the baselines.
 
-use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
-use tempest_sim::baseline::{Baseline, Metrics, table};
-use tempest_sim::experiment::run_all;
-use tempest_sim::{RunOptions, Scenario};
+use tempest_sim::Scenario;
+use tempest_sim::baseline::{Baseline, Golden, Mode, golden, measure, table};
+use tempest_sim::units::Rate;
 
-/// Seeds run by default.
-const DEFAULT_SEEDS: u64 = 5;
-
-fn path(dir: &str, file: &str) -> PathBuf {
-    [env!("CARGO_MANIFEST_DIR"), dir, file].iter().collect()
+fn goldens() -> Vec<Golden> {
+    let dir = |parts: &[&str]| -> PathBuf {
+        std::iter::once(env!("CARGO_MANIFEST_DIR"))
+            .chain(parts.iter().copied())
+            .collect()
+    };
+    let goldens = golden(&dir(&["scenarios", "golden"]), &dir(&["baselines"])).unwrap();
+    assert!(goldens.len() >= 5, "the golden scenarios are missing");
+    goldens
 }
 
-fn metrics(scenario: &Scenario, seeds: u64) -> BTreeMap<u64, Metrics> {
-    let seeds: Vec<u64> = (1..=seeds).collect();
-    let threads = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    run_all(scenario, &seeds, threads, RunOptions::default(), &())
-        .unwrap()
+fn threads() -> NonZeroUsize {
+    std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
+}
+
+/// `scenario` with every peer's upload cut to 60%.
+fn slowed(scenario: &Scenario) -> Scenario {
+    let mut slow = scenario.clone();
+    for class in &mut slow.peers {
+        let up = &mut class.bandwidth.up;
+        *up = Rate::bytes_per_second(up.get() * 0.6);
+    }
+    slow
+}
+
+/// Checks `scenario`'s runs in `mode` against the baseline of `golden`.
+fn check_runs(golden: &Golden, scenario: &Scenario, mode: Mode) -> String {
+    let baseline = Baseline::load(&golden.baseline).unwrap();
+    let current = measure(scenario, &mode.seeds(scenario), threads()).unwrap();
+    let checks = baseline.compare(&current, mode.method()).unwrap();
+    let report = table(&checks);
+    let slower = checks
         .iter()
-        .map(|r| (r.seed, Metrics::of(r, scenario)))
-        .collect()
+        .any(|c| c.regressed && c.metric.starts_with("completion"));
+    assert!(
+        slower,
+        "{} slowed didn't regress:\n{report}",
+        golden.scenario.name
+    );
+    report
 }
 
 #[test]
-fn golden_scenario_meets_its_baseline() {
-    let scenario = Scenario::load(&path("scenarios", "golden.yaml")).unwrap();
-    let file = path("baselines", "golden.json");
-    let stored = u64::from(scenario.seeds);
+fn golden_scenarios_meet_their_baselines() {
+    let goldens = goldens();
+    std::thread::scope(|scope| {
+        let checks: Vec<_> = goldens
+            .iter()
+            .map(|g| scope.spawn(move || (g, g.check(Mode::Quick, threads()))))
+            .collect();
+        for check in checks {
+            let (golden, checks) = check.join().unwrap();
+            let name = &golden.scenario.name;
+            let report = table(&checks.unwrap());
+            println!("{name}:\n{report}");
+            assert!(!report.contains("REGRESSED"), "{name} regressed:\n{report}");
+            if report.contains("improved") {
+                println!("Run `tempest sim baseline --update` to save the improvements.");
+            }
+        }
+    });
+}
 
-    if std::env::var_os("TEMPEST_UPDATE_BASELINE").is_some() {
-        let baseline = Baseline {
-            scenario: scenario.name.clone(),
-            runs: metrics(&scenario, stored),
-        };
-        let json = serde_json::to_string_pretty(&baseline).unwrap();
-        std::fs::write(&file, json + "\n").unwrap();
-        return;
+#[test]
+fn baselines_hold_every_seed() {
+    for golden in goldens() {
+        let baseline = Baseline::load(&golden.baseline).unwrap();
+        let seeds: Vec<u64> = baseline.runs.keys().copied().collect();
+        assert_eq!(baseline.scenario, golden.scenario.name);
+        assert_eq!(
+            seeds,
+            Mode::Long.seeds(&golden.scenario),
+            "{}",
+            baseline.scenario
+        );
     }
+}
 
-    let seeds = match std::env::var("TEMPEST_BASELINE_SEEDS") {
-        Ok(n) => n.parse().expect("TEMPEST_BASELINE_SEEDS is a number"),
-        Err(_) => DEFAULT_SEEDS,
-    };
-    assert!(
-        (1..=stored).contains(&seeds),
-        "the baseline has seeds 1 to {stored}"
-    );
-    let text = std::fs::read_to_string(&file).unwrap();
-    let baseline: Baseline = serde_json::from_str(&text).unwrap();
-    assert_eq!(baseline.scenario, scenario.name);
+#[test]
+fn a_slower_swarm_fails_the_quick_check() {
+    let goldens = goldens();
+    std::thread::scope(|scope| {
+        for golden in &goldens {
+            scope.spawn(move || check_runs(golden, &slowed(&golden.scenario), Mode::Quick));
+        }
+    });
+}
 
-    let checks = baseline.compare(&metrics(&scenario, seeds)).unwrap();
-    let report = table(&checks);
-    println!("golden scenario, seeds 1 to {seeds}:\n{report}");
-    assert!(
-        checks.iter().all(|c| !c.regressed),
-        "the golden scenario regressed:\n{report}"
-    );
-    if checks.iter().any(|c| c.improved) {
-        println!("Some metrics improved: rerun with TEMPEST_UPDATE_BASELINE=1 to save them.");
+#[test]
+#[ignore = "slow: every saved seed of every golden scenario; run with --include-ignored"]
+fn a_slower_swarm_fails_the_long_check() {
+    for golden in goldens() {
+        let report = check_runs(&golden, &slowed(&golden.scenario), Mode::Long);
+        println!("{} slowed:\n{report}", golden.scenario.name);
     }
 }

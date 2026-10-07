@@ -1,0 +1,35 @@
+# Golden (D-077): strategic clients (D-166) and free riders among fast and home peers that
+# leave once complete, under the BitTorrent upload strategy.
+name: strategic
+description: 40 peers of uneven upload in a flash crowd, with strategic clients and free riders.
+duration: 1h
+seeds: 20
+
+bundle:
+  files: [{ size: 8MiB }]
+
+network: { latency: 25ms }
+settings: { overrides: { lingering.ratio: 0.01 } }
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: fast
+    count: 6
+    bandwidth: { up: 50Mbps, down: 100Mbps }
+    arrivals: { pattern: flash-crowd, decay: 10s }
+  - class: home
+    count: 25
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 10s }
+  - class: strategic
+    count: 4
+    behavior: strategic
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 10s }
+  - class: free-rider
+    count: 4
+    behavior: free-rider
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 10s }

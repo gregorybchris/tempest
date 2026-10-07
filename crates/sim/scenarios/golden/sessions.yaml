@@ -1,0 +1,27 @@
+# Golden (D-077): peers arriving at random for heavy-tailed Weibull sessions (D-165), many
+# leaving before they complete, with peers sending bad data.
+name: sessions
+description: 40 peers arriving steadily for short, heavy-tailed sessions, with bad-data peers.
+duration: 1h
+seeds: 20
+
+bundle:
+  files: [{ size: 4MiB }]
+
+network: { latency: 30ms, loss: 0.2% }
+tracker: { peers: 20, interval: 1m }
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 10Mbps, down: 100Mbps }
+  - class: home
+    count: 36
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    arrivals: { pattern: poisson, interval: 2s }
+    churn: { session: 1m, shape: 0.6 }
+  - class: bad
+    count: 3
+    behavior: bad-data
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 20Mbps }

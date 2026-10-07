@@ -1,0 +1,38 @@
+# Golden (D-077): peers behind home routers, reached through a relay or by hole punching, with
+# slow disks and hashing (D-165).
+name: routers
+description: 40 peers, most behind routers, arriving at random on one public origin.
+duration: 1h
+seeds: 20
+
+bundle:
+  files: [{ size: 4MiB }]
+
+network: { latency: 20ms, loss: 0.2% }
+relay: { latency: 25ms, bandwidth: 8Mbps }
+tracker: { peers: 20, interval: 2m }
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: public
+    count: 8
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+    arrivals: { pattern: poisson, interval: 2s }
+  - class: home
+    count: 24
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    nat: { punchable: 60% }
+    arrivals: { pattern: poisson, interval: 1s }
+  - class: hidden
+    count: 4
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    nat: { relay: false }
+    arrivals: { pattern: poisson, interval: 5s }
+  - class: old-laptop
+    count: 4
+    bandwidth: { up: 10Mbps, down: 100Mbps }
+    disk: 2MB/s
+    hashing: 10MB/s
+    arrivals: { pattern: poisson, interval: 5s }

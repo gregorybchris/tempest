@@ -1,0 +1,20 @@
+# Golden (D-077): a crowd arriving at the same moment, which tests connection limits (D-169)
+# and how close the swarm comes to its total upload capacity.
+name: crowd
+description: 40 home peers fetch a release from one origin at the same moment, and stay.
+duration: 1h
+seeds: 20
+
+bundle:
+  files: [{ size: 4MiB }]
+
+network: { latency: 25ms }
+settings: { overrides: { lingering.keep_sharing: true } }
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: home
+    count: 40
+    bandwidth: { up: 10Mbps, down: 50Mbps }

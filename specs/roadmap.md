@@ -2,7 +2,7 @@
 
 Concrete milestones for building Tempest (D-092). Each milestone ends with something runnable. The protocol spec in `protocol/` is completed before implementation begins (D-093).
 
-Once the owner is happy with M0, the remaining milestones are implemented with a Claude workflow.
+The milestones after M0 are implemented with a Claude workflow.
 
 | # | Milestone | Done when you can… |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ Once the owner is happy with M0, the remaining milestones are implemented with a
 | **M4** | First real transfer | Run `tempest share ./folder` on one machine and `tempest get <link>` on another, on a LAN, using a link with a direct address over QUIC |
 | **M5** | Engine + public swarms | Run the daemon with its HTTP API, event stream and SQLite state. Swarms grow through the tracker's peer-list service, peer exchange and LAN discovery |
 | **M6** | Getting through routers | Port mapping, relays and hole punching, so direct sends work between two homes |
-| **M7** | Terminal UI | Use the k9s-style TUI against the engine, after the client layout rethink (shared with M8), starting from `prototypes/tui/` |
+| **M7** | Terminal UI | Use the k9s-style TUI against the engine, after the client layout rethink (shared with M8) |
 | **M8** | Web UIs | Use the client web UI and the simulation results UI, built on the shared `ui-kit` |
 | **M9** | Tracker catalog | Search, browse, rank and comment, with listings live from the network |
 | **M10** | Learning guide | Decide the guide's design (D-091), then build it |

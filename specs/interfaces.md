@@ -25,20 +25,13 @@ Guardrails from the research:
 - Check font licenses. VT323, IBM Plex Mono, JetBrains Mono and Departure Mono are free (OFL). The Ultimate Oldschool PC Font Pack needs attribution (CC BY-SA). Berkeley Mono is commercial.
 - Explain states in plain language. "No one online has this bundle right now" beats "Stalled".
 
-## The quality prototype (done)
+## Web framework
 
-M0 is complete: Leptos, Dioxus and server-rendered prototypes are in `prototypes/ui/`. All three met the bar, and Leptos was chosen (D-117). The original plan follows.
-
-Before heavy implementation, build a small test UI to decide whether Rust can meet the bar:
-
-- **Approaches compared (D-087):** Leptos, Dioxus, and server-rendered axum + Datastar/htmx.
-- **Palettes explored (D-089):** green phosphor, amber phosphor, neon vector, and beige-era computing (light).
-- **Must include:** a transfer list, a chunk map, live speed sparklines and one rich interactive chart, so chart quality is tested, not assumed.
-- **Fallback (D-088):** if Rust can't meet the bar, use a Vite + TypeScript + React frontend. All-Rust is strongly preferred.
+Leptos builds the web UIs (D-117). An all-Rust stack met the quality bar against Dioxus and server-rendered axum + Datastar/htmx. The fallback if it had not was Vite + TypeScript + React (D-088). Palettes are in D-089.
 
 ## Client features (v1)
 
-These apply to both the TUI and the client web UI (D-118). The dummy TUI in `prototypes/tui/` shows many of them.
+These apply to both the TUI and the client web UI (D-118).
 
 | Area | Features |
 | --- | --- |
@@ -65,7 +58,7 @@ These apply to both the TUI and the client web UI (D-118). The dummy TUI in `pro
 The web UIs use Leptos (D-117). Code written for them, by people or agents, follows these rules:
 
 - Use Leptos 0.8 (pinned). Don't mix in APIs from 0.6 or older.
-- Never create one memo per item that subscribes to a shared signal. Removing a subscriber is O(n) in `reactive_graph`, so this pattern becomes quadratic: 1,536 such memos cost about 55 ms per update in the M0 prototype. Use one effect that diffs into per-item signals, `Selector`, or keyed stores.
+- Never create one memo per item that subscribes to a shared signal. Removing a subscriber is O(n) in `reactive_graph`, so this pattern becomes quadratic: 1,536 such memos cost about 55 ms per update in an early prototype. Use one effect that diffs into per-item signals, `Selector`, or keyed stores.
 - Keep UI logic in plain Rust modules, and keep components thin.
 - A CI benchmark of a 1,536-cell live view guards against performance regressions.
 
@@ -133,8 +126,6 @@ The TUI and the client web UI are designed together, not as copies. They share:
 - the information hierarchy, so the same things matter at a glance in both
 
 Layout decisions (see Client layout) apply to both where they make sense. Each interface keeps its own affordances. The TUI is keyboard-first and dense; the web UI can use pointer interactions, richer charts and wider layouts. Full parity is not a goal.
-
-The dummy TUI in `prototypes/tui/` was well received as a starting point (D-119).
 
 ## Terminal UI
 

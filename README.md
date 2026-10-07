@@ -31,6 +31,10 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/gregorybchris/temp
 
 To build from source, run `cargo install --path crates/tempest`.
 
+## Usage
+
+The `tempest` binary does not share or download anything yet. Planned commands (`share`, `get`) arrive with [M1 and M4](specs/roadmap.md); run `tempest --help` for what exists.
+
 ## Status
 
 In development. See the [roadmap](specs/roadmap.md).
@@ -39,5 +43,6 @@ In development. See the [roadmap](specs/roadmap.md).
 
 | Path | Contents |
 | --- | --- |
+| [`crates/`](crates) | The Rust workspace |
 | [`protocol/`](protocol/README.md) | The Tempest protocol specification |
 | [`specs/`](specs/index.md) | Project goals, decisions, architecture and plans |

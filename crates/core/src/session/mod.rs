@@ -108,6 +108,8 @@ pub struct Session {
     superseed: Option<Superseed>,
     selector: Box<dyn ChunkSelector>,
     uploader: Box<dyn UploadStrategy>,
+    /// Whether the driver chose the upload strategy (see [`Session::set_upload_strategy`]).
+    custom_uploader: bool,
     rng: Rng,
     actions: Vec<Action>,
     events: Vec<Event>,
@@ -149,6 +151,7 @@ impl Session {
         Ok(Self {
             selector: config.strategies.chunk_selection.build(&config.selection),
             uploader: config.strategies.upload.build(&config.upload),
+            custom_uploader: false,
             config,
             local,
             bundle_id,
@@ -200,6 +203,16 @@ impl Session {
         session.bundle = Some(bundle);
         session.uploader = session.upload_strategy();
         Ok(session)
+    }
+
+    /// Replaces the upload strategy used while downloading with one the settings can't name,
+    /// such as the simulator's strategic client. Call it before the session opens connections.
+    ///
+    /// Once complete, the session still switches as `strategies.when_complete` says; with
+    /// `unchanged`, it keeps this strategy.
+    pub fn set_upload_strategy(&mut self, strategy: Box<dyn UploadStrategy>) {
+        self.uploader = strategy;
+        self.custom_uploader = true;
     }
 
     // ----- Accessors -----

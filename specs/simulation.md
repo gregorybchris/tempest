@@ -41,7 +41,7 @@ Protocol-level alternatives, such as a flat-hash variant for comparison with Mer
 - Disk write speed and hashing CPU cost
 - Misbehaving peers: free riders, peers sending bad data, strategic clients (BitTyrant-style)
 
-How routers, relays, disks and sessions are modeled is in D-165.
+How routers, relays, disks and sessions are modeled is in D-165; strategic clients, in D-166.
 
 ## Fidelity ladder
 
@@ -81,7 +81,7 @@ This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run
   - **traffic:** messages and bytes sent per message type, with the overhead in each.
   - **events:** every log entry as a row, in order, with a readable description for decision events.
 - **Viewing:** a **Rust web UI** reads the database and shows results with beautiful, high-quality interactive charts. It shares a design-system crate with the client and tracker UIs (D-076).
-- **Statistics:** many seeds per variant, paired seeds across variants, and medians with confidence intervals. Reports say whether differences are meaningful.
+- **Statistics:** many seeds per variant, paired seeds across variants, and medians with confidence intervals. Reports say whether differences are meaningful. `tempest sim run` prints this comparison against a reference variant; the method and thresholds are in D-167, and the simulator's `stats` module implements them.
 
 **Headline metrics** (defined in the simulator's `summary` module, D-162):
 

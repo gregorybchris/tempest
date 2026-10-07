@@ -37,6 +37,7 @@ use crate::log::{Entry, LeaveReason, Log, Record, Sink, Wire};
 use crate::network::{FlowId, Limit, Link, Network};
 use crate::queue::Queue;
 use crate::scenario::{Arrivals, Behavior, Payload, Scenario, ScenarioError, Start, Variant};
+use crate::strategic::{PEER_SET_FACTOR, Strategic};
 use crate::units::Rate;
 
 /// How long a dial to a peer that isn't there takes to fail.
@@ -311,9 +312,13 @@ impl<'a, 's> Simulation<'a, 's> {
         let bundle = bundle.map_err(|e| invalid("bundle".into(), e))?;
         let configs = (0..scenario.peers.len())
             .map(|class| {
-                scenario
+                let mut config = scenario
                     .config(class, variant)
-                    .map_err(|e| invalid(format!("peers[{class}].overrides"), e.to_string()))
+                    .map_err(|e| invalid(format!("peers[{class}].overrides"), e.to_string()))?;
+                if scenario.peers[class].behavior == Behavior::Strategic {
+                    config.connections.max = config.connections.max.saturating_mul(PEER_SET_FACTOR);
+                }
+                Ok(config)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -599,7 +604,12 @@ impl<'a, 's> Simulation<'a, 's> {
         } else {
             Session::new(config, local, self.bundle.manifest().bundle_id(), peer.seed)
         };
-        peer.session = Some(session.expect("scenario configs are validated"));
+        let mut session = session.expect("scenario configs are validated");
+        if peer.behavior == Behavior::Strategic && !complete {
+            let settings = &self.configs[peer.class].upload;
+            session.set_upload_strategy(Box::new(Strategic::new(settings)));
+        }
+        peer.session = Some(session);
         peer.content = self.original.as_ref().map(|original| {
             if complete {
                 original.clone()

@@ -11,6 +11,8 @@
 //! - [`distribution`]: random draws for arrivals and session lengths.
 //! - [`experiment`]: every variant with every seed.
 //! - [`summary`]: each run's headline metrics, and results per variant.
+//! - [`stats`]: medians with confidence intervals, and paired comparisons of variants (D-073).
+//! - [`strategic`]: the strategic client's upload strategy.
 //! - [`log`]: the event log and its digest.
 //! - [`baseline`]: golden baselines to check runs against (D-077).
 //! - `results`: the DuckDB results database (D-075), with the `results` feature.
@@ -26,6 +28,8 @@ pub mod queue;
 #[cfg(feature = "results")]
 pub mod results;
 pub mod scenario;
+pub mod stats;
+pub mod strategic;
 pub mod summary;
 pub mod units;
 

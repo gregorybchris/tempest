@@ -191,6 +191,7 @@ impl Session {
                 peer: c.peer(),
                 wants: c.they_want,
                 serving: c.we_serve,
+                serves_us: c.serving_us,
                 complete: c.is_complete(),
                 received: c.received.total(),
                 sent: c.sent.total(),

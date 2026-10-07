@@ -6,11 +6,12 @@ mod common;
 use std::time::Duration;
 
 use common::{CHUNK, Swarm, at, bundle, far_future};
-use tempest_core::config::{ChunkSelection, Endgame};
+use tempest_core::config::{ChunkSelection, Endgame, WhenComplete};
 use tempest_core::event::{
     CancelReason, CloseCause, InFlightReason, SelectReason, ServeReason, StopReason, SuperseedEnd,
 };
-use tempest_core::{Config, EventKind, Time};
+use tempest_core::upload::{ServeDecision, UploadContext, UploadStrategy};
+use tempest_core::{Config, EventKind, Rng, Time};
 use tempest_protocol::message::GoodbyeReason;
 
 /// A fetcher between a fast and a very slow provider, with the given endgame.
@@ -489,4 +490,48 @@ fn bittorrent_serves_by_reciprocity() {
     for &f in &fetchers {
         assert_eq!(swarm.nodes[f].content.files(), content.files());
     }
+}
+
+/// Serves nobody.
+#[derive(Debug)]
+struct Withhold;
+
+impl UploadStrategy for Withhold {
+    fn review(&mut self, ctx: &UploadContext<'_>, _rng: &mut Rng) -> Vec<ServeDecision> {
+        ctx.peers
+            .iter()
+            .map(|p| ServeDecision {
+                conn: p.conn,
+                serve: false,
+                reason: ServeReason::NotWanted,
+            })
+            .collect()
+    }
+}
+
+/// What a peer that withholds upload while downloading sends, once complete, under
+/// `when_complete`.
+fn withholder_uploads(when_complete: WhenComplete) -> u64 {
+    let content = bundle(&[64 * CHUNK]);
+    let mut swarm = Swarm::new();
+    let origin = swarm.add_complete(1, Config::default(), &content);
+    swarm.nodes[origin].upload_rate = Some(100_000);
+    let mut config = Config::default();
+    config.strategies.when_complete = when_complete;
+    let withholder = swarm.add_empty(2, config, &content);
+    swarm.nodes[withholder]
+        .session
+        .set_upload_strategy(Box::new(Withhold));
+    let other = swarm.add_empty(3, Config::default(), &content);
+    swarm.nodes[other].upload_rate = Some(50_000);
+    swarm.introduce_all(&[origin, withholder, other]);
+    swarm.run(far_future());
+    assert!(swarm.nodes[withholder].completed_at() < swarm.nodes[other].completed_at());
+    swarm.nodes[withholder].session.uploaded()
+}
+
+#[test]
+fn a_custom_upload_strategy_lasts_until_complete_unless_kept() {
+    assert!(withholder_uploads(WhenComplete::RoundRobin) > 0);
+    assert_eq!(withholder_uploads(WhenComplete::Unchanged), 0);
 }

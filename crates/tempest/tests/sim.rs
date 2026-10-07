@@ -38,11 +38,13 @@ fn runs_a_scenario_records_it_and_prints_a_summary() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("1 variant × 2 seeds = 2 runs"), "{stdout}");
     assert!(stdout.contains("(experiment 1)"), "{stdout}");
-    let row = stdout.lines().last().unwrap();
     assert!(
-        row.starts_with("default") && row.contains("2/2"),
+        stdout
+            .lines()
+            .any(|row| row.starts_with("default") && row.contains("2/2")),
         "{stdout}"
     );
+    assert!(stdout.contains("across seeds"), "{stdout}");
     assert!(db.exists());
 
     // One line per run: variant, seed and a SHA-256 digest.
@@ -72,6 +74,49 @@ fn no_db_writes_nothing() {
         .unwrap();
     assert!(output.status.success());
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn compares_variants_with_the_chosen_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vary.yaml");
+    let text = std::fs::read_to_string(example("two-peers.yaml")).unwrap();
+    let vary = "experiment: { vary: { requests.chunks: [16, 1] } }\n";
+    std::fs::write(&path, text + vary).unwrap();
+    let run = |reference: &str| {
+        tempest(&[
+            "sim",
+            "run",
+            path.to_str().unwrap(),
+            "--no-db",
+            "--seeds",
+            "5",
+            "--reference",
+            reference,
+        ])
+    };
+
+    let output = run("requests.chunks=1");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let comparison = stdout.split("across seeds").nth(1).unwrap();
+    let rows: Vec<&str> = comparison
+        .lines()
+        .filter(|l| l.contains("requests.chunks="))
+        .collect();
+    // One row per metric and variant. Requesting one chunk at a time gets the first byte
+    // sooner on every seed.
+    assert_eq!(rows.len(), 10, "{stdout}");
+    assert!(rows[0].starts_with("completion p50"), "{stdout}");
+    assert!(rows[1].contains("requests.chunks=1") && rows[1].ends_with("reference"));
+    assert!(rows[4].starts_with("first byte p50"), "{stdout}");
+    assert!(rows[4].ends_with("worse"), "{stdout}");
+
+    // A part of more than one name is ambiguous.
+    let output = run("requests");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("exactly one of the variants"), "{stderr}");
 }
 
 #[test]

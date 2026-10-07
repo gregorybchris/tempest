@@ -11,6 +11,7 @@ use clap::Subcommand;
 use tempest_sim::experiment::{Observer, run_all, seeds};
 use tempest_sim::log::Sink;
 use tempest_sim::results::{Database, Recorder, ScenarioFile};
+use tempest_sim::stats::{self, Bootstrap, Meaningful, Samples};
 use tempest_sim::summary::{summarize, table};
 use tempest_sim::{RunOptions, RunResult, Scenario};
 
@@ -46,6 +47,10 @@ pub struct RunArgs {
     /// Write each run's variant, seed and event-log digest to this file, one run per line.
     #[arg(long, value_name = "FILE")]
     digests: Option<PathBuf>,
+    /// The variant the others are compared with: its name, or a part of the name only it has.
+    /// Defaults to the first.
+    #[arg(long, value_name = "VARIANT")]
+    reference: Option<String>,
 }
 
 pub fn sim(command: SimCommand) -> Result<()> {
@@ -100,6 +105,11 @@ fn run(args: RunArgs) -> Result<()> {
         .or_else(|| std::thread::available_parallelism().ok())
         .unwrap_or(NonZeroUsize::MIN);
     let variants = scenario.variants();
+    let names: Vec<String> = variants.iter().map(|v| v.name()).collect();
+    let reference = match &args.reference {
+        Some(wanted) => find_variant(&names, wanted)?,
+        None => 0,
+    };
     let total = variants.len() * seeds.len();
 
     println!(
@@ -126,7 +136,6 @@ fn run(args: RunArgs) -> Result<()> {
         .as_ref()
         .map(|db| db.record(&scenario, Some(&file), &seeds, !args.no_events))
         .transpose()?;
-    let names: Vec<String> = variants.iter().map(|v| v.name()).collect();
     let progress = Progress {
         recorder: recorder.as_ref(),
         names: &names,
@@ -150,5 +159,41 @@ fn run(args: RunArgs) -> Result<()> {
     }
     println!();
     print!("{}", table(&summarize(&scenario, &results)));
+    if seeds.len() > 1 {
+        let samples = stats::samples(&scenario, &results);
+        print!("{}", comparison(&samples, &names[reference]));
+    }
     Ok(())
+}
+
+/// The variant `wanted` names: exactly, or as a part of only its name.
+fn find_variant(names: &[String], wanted: &str) -> Result<usize> {
+    if let Some(index) = names.iter().position(|n| n == wanted) {
+        return Ok(index);
+    }
+    let matches: Vec<usize> = (0..names.len())
+        .filter(|&i| names[i].contains(wanted))
+        .collect();
+    match matches[..] {
+        [index] => Ok(index),
+        _ => anyhow::bail!(
+            "--reference {wanted:?} must name exactly one of the variants: {}",
+            names.join(", ")
+        ),
+    }
+}
+
+/// Medians across seeds with their confidence intervals, and each variant's paired difference
+/// from `reference` (D-073).
+fn comparison(samples: &[Samples], reference: &str) -> String {
+    let bootstrap = Bootstrap::default();
+    let reference = samples
+        .iter()
+        .position(|s| s.name == reference)
+        .unwrap_or(0);
+    let rows = stats::compare(samples, reference, bootstrap, Meaningful::default());
+    format!(
+        "\nacross seeds: medians, and differences from the reference paired by seed\n\n{}",
+        stats::table(&rows, bootstrap.confidence)
+    )
 }

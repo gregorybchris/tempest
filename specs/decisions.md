@@ -2503,3 +2503,41 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Whether each peer's router is punchable comes from its own random stream, so scenarios without routers replay exactly as before.
 
 **Rationale:** Measurement studies explain most punching failures by symmetric NATs on either side, which a per-peer punchable chance captures without modeling NAT behavior in detail. Keeping the connection when it upgrades avoids modeling duplicate-connection resolution and re-requests, whose cost is a round trip, small next to a transfer. A cap per connection matches the protocol's allowance for relays to limit bandwidth; shared relay capacity can come with the packet-level mode. Delivering Data only once stored makes slow disks throttle requests, as a client's bounded write queue would. Weibull sessions with shape below 1 fit measured swarms better than exponential ones.
+
+---
+
+## D-166: Simulated strategic clients
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-070 asks the simulator to model strategic clients (BitTyrant-style), so that upload strategies can be tested against peers that game them.
+
+**Options for where it lives:** a core upload strategy named in the settings; a core strategy the settings can't name; a strategy in the simulator, installed through a session hook (chosen). **For estimating what an unknown peer would give:** its announced download rate split among BitTorrent's slots, as BitTyrant does; nothing, so unknown peers get what known ones leave (chosen). **For prices:** absolute rates against an estimated capacity; shares of the capacity (chosen).
+
+**Decision:**
+
+- A peer class may have `behavior: strategic`. Such peers keep twice the configured connections and, while downloading, use the simulator's `strategic` upload strategy. Once complete they follow `strategies.when_complete` like anyone else.
+- The strategy follows Piatek et al. Each peer has a price, in equal shares of upload capacity among BitTorrent's slots, starting at one. Every review interval it serves the interested peers with the best ratio of what they last gave to their price, until the prices fill the slot count; between reviews it fills what peers that stop wanting leave. Responses are ordered so each served peer gets upload in proportion to its price. A served peer that doesn't serve back costs 20% more next time; one that serves back for three reviews in a row, 10% less. These constants are BitTyrant's.
+- The session gains a hook to replace its downloading upload strategy, and upload strategies now see whether each peer is serving them.
+
+**Rationale:** The strategy exists to attack the real ones, so it should not be selectable in the real client. Announce-based estimates were tried first: in the simulator, a peer's download comes mostly from seeds and fast peers, so they overrated every unknown peer, and the strategic client spread its upload over peers that never paid back. Serving everyone until the capacity was measured, or leaving slots empty between reviews, did similar harm at the start of a download, when BitTorrent peers settle whom they reciprocate; prices in shares avoid needing the capacity at all. In a swarm with uneven upload capacities where peers leave once complete, strategic peers then finish a 256 MiB download about 15% sooner than they would as BitTorrent peers on the same seeds (`crates/sim/tests/strategic.rs`). For downloads of a minute or less the prices have no time to settle, and the difference is not meaningful.
+
+---
+
+## D-167: Statistics across seeds
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-073 asks for medians with confidence intervals, paired seeds and meaningful-difference reporting.
+
+**Options for intervals:** normal approximation (assumes a symmetric distribution, which completion times rarely have); exact order-statistic intervals for the median (no paired-difference counterpart that is as simple); the percentile bootstrap (chosen). **For comparisons:** difference of medians; median of per-seed differences (chosen), which uses the pairing. **For "meaningful":** interval excludes zero; that and a minimum effect size (chosen).
+
+**Decision:**
+
+- Each run gives one value per headline metric. A variant's median across seeds comes with a 95% percentile-bootstrap interval from 10,000 resamples.
+- Another variant is compared with a reference variant seed by seed: the median of the per-seed differences, with its bootstrap interval, and that median relative to the reference's.
+- A difference is meaningful when at least 5 seeds are paired, the interval excludes zero and the effect is at least 2% of the reference's median. It is reported as better or worse according to the metric's direction.
+- The resampler is seeded with a constant, afresh for each interval, so reports are reproducible and don't depend on what else was estimated.
+- `tempest sim run` prints the comparison after the summary, with the reference variant chosen by `--reference` (default: the first). The comparison is derived from the results database's `runs` table and these constants, so the database stores nothing more.
+
+**Rationale:** The bootstrap needs no assumptions about the shape of the distribution and works the same for medians and paired differences. Pairing removes the world-to-world variation that dominates between seeds. With fewer than 5 pairs a percentile bootstrap can't produce a useful interval. A minimum effect keeps consistent but negligible differences, common with deterministic paired runs, from being called meaningful; 2% is below what a user would notice and above the noise of most metrics.

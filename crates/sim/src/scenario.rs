@@ -250,6 +250,9 @@ pub enum Behavior {
     FreeRider,
     /// Every Data it sends fails verification.
     BadData,
+    /// A BitTyrant-style strategic client: while downloading it keeps more connections and
+    /// buys download with as little upload as it can (`strategic` module).
+    Strategic,
 }
 
 /// When the peers of a class arrive.

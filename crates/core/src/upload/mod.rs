@@ -33,6 +33,8 @@ pub struct PeerView {
     pub wants: bool,
     /// Whether this peer is serving it now.
     pub serving: bool,
+    /// Whether it said it is serving this peer.
+    pub serves_us: bool,
     /// Whether the peer has every chunk.
     pub complete: bool,
     /// Bytes of verified Data received from the peer, in total.
@@ -166,6 +168,7 @@ pub(crate) mod testing {
             peer: Hash::new([n; 32]),
             wants: true,
             serving: false,
+            serves_us: false,
             complete: false,
             received: 0,
             sent: 0,

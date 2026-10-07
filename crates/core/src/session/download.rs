@@ -13,6 +13,7 @@ use super::bundle::Bundle;
 use super::conn::{Holdings, Outgoing};
 use super::{Fail, Outcome, Session, violation};
 use crate::chunks::ChunkSet;
+use crate::config::WhenComplete;
 use crate::event::{CancelReason, Event, EventKind, SelectReason};
 use crate::io::{Action, ConnId, OutRequest, RequestId, Response};
 use crate::pipeline::{Provider, requests_in_flight};
@@ -425,7 +426,11 @@ impl Session {
     fn on_complete(&mut self, now: Time) {
         self.complete = true;
         self.emit(now, EventKind::Completed);
-        self.uploader = self.upload_strategy();
+        let keep =
+            self.custom_uploader && self.config.strategies.when_complete == WhenComplete::Unchanged;
+        if !keep {
+            self.uploader = self.upload_strategy();
+        }
         self.idle_since = None;
         self.update_idle(now);
         self.review_serving(now);

@@ -83,7 +83,7 @@ I want to have control over terminology. I want to have control over which featu
 9. Create an intuitive learning guide for new users of the Tempest client.
 10. Create the Tempest tracker catalog (search, categories, comments) and its web interface, reusing the client web UI's design. The tracker's peer-list service is built alongside the client in phase 5, since public swarms depend on it.
 
-**Gate before heavy implementation:** before doing a lot of implementation, and before locking in a UI framework, build a test UI in Rust to check whether it reaches the quality bar for Tempest's UIs (client, tracker catalog and simulation results viewer).
+**Gate before heavy implementation (passed):** a test UI in Rust was built and met the quality bar (M0). Leptos is the web UI framework (D-117).
 
 ## Code Quality
 

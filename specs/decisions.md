@@ -1724,3 +1724,35 @@ The full field list is in `protocol/trackers.md`.
 - **Bad data:** the spec requires discarding chunks that fail verification. Closing the connection and banning the peer remains client policy (D-067).
 - **Message types:** D-058's list gains `0x08` (Candidates, D-109). `0x07` is retired (D-112).
 - **Test vectors:** added for a manifest with its bundle ID, and for a framed Hello.
+
+---
+
+## D-117: Web UI framework: Leptos
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Context:** M0 built the same live page in Leptos 0.8.22, Dioxus 0.7.10, and server-rendered axum + Datastar (`prototypes/ui/`). All three met the quality bar, so Rust UIs are confirmed and the React fallback (D-088) isn't needed. Research compared Leptos and Dioxus for Tempest. The reports are `leptos-vs-dioxus.md` and `ai-agents-leptos-dioxus.md` in `planning/research/`.
+
+**Decision:** All Tempest web UIs (client, tracker catalog, simulation results) use Leptos.
+
+**Rationale:**
+
+- **Performance:** smoothest in the prototype (under 1 ms per update) and the smallest download (129 KB gzipped WASM vs 181 KB). It updates the DOM directly, with no virtual DOM.
+- **Catalog fit:** mature server-side rendering, streaming and islands suit the tracker catalog. Dioxus is client-rendered first and has no islands mode.
+- **Engine fit:** `leptos_axum` integrates directly with the engine's axum server.
+- **Stability:** 0.8 has been stable for 17 months, and 0.9 is described as needing little migration. Dioxus has had a breaking release about once a year, and its 0.8 breaks again.
+- **Stars:** Dioxus's larger star count mostly reflects its desktop and mobile scope.
+- **AI agents:** no meaningful difference in how well coding agents handle either.
+
+**Risks accepted:**
+
+- Leptos's author describes it as feature-complete and "lightly maintained". Dioxus has its own reduced focus (its team joined Cognition), so neither is strongly backed.
+- Removing a subscriber in Leptos's `reactive_graph` costs O(n). Many per-item memos subscribed to one shared signal therefore become quadratic.
+
+**Guardrails:**
+
+- Pin Leptos 0.8, and move to 0.9 when it is released.
+- No per-item memos subscribed to a shared signal. Instead, use one effect that diffs into per-item signals, `Selector`, or keyed stores. This rule is recorded in `CLAUDE.md`.
+- Keep a performance benchmark of a 1,536-cell live view in CI.
+- Keep UI logic in plain Rust modules so the framework layer stays thin.
+- Revisit if Leptos maintenance visibly stalls, e.g. no 0.9 release by mid-2027.

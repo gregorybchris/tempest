@@ -58,9 +58,9 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | Engine API | HTTP + JSON, server-sent events with resumable IDs | D-080 |
 | Tracker API | HTTPS + JSON | D-043 |
 | Simulation results | DuckDB | D-075 |
+| Web UIs | Leptos 0.8 (client-side, with server rendering and islands where useful) | D-117 |
 
 ## Open questions
 
-- Web UI framework (gated on the Rust UI quality prototype; see `index.md`).
 - Testing, CI and release tooling.
 - Error handling, logging and metrics conventions.

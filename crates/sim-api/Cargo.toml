@@ -1,0 +1,18 @@
+[package]
+name = "tempest-sim-api"
+description = "The simulation results API's types and queries, shared by its server and its web UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

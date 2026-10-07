@@ -24,6 +24,9 @@ pub enum SimCommand {
     /// Check the golden scenarios against their saved baselines, or rewrite the baselines. Run
     /// from the repository's root, or point to the directories.
     Baseline(BaselineArgs),
+    /// Browse recorded experiments in the results UI: runs, their charts, comparisons of
+    /// variants with confidence intervals, and checks against the golden baselines.
+    Web(crate::sim_web::SimWebArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -84,6 +87,7 @@ pub fn sim(command: SimCommand) -> Result<()> {
     match command {
         SimCommand::Run(args) => run(args),
         SimCommand::Baseline(args) => baseline(args),
+        SimCommand::Web(args) => crate::sim_web::web(args),
     }
 }
 

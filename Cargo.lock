@@ -4375,6 +4375,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "serde",
  "serde_json",
  "tempest-core",
  "tempest-engine",
@@ -4382,10 +4383,12 @@ dependencies = [
  "tempest-protocol",
  "tempest-relay",
  "tempest-sim",
+ "tempest-sim-api",
  "tempest-tracker",
  "tempest-tui",
  "tempfile",
  "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -4515,8 +4518,34 @@ dependencies = [
  "sha2",
  "tempest-core",
  "tempest-protocol",
+ "tempest-sim-api",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tempest-sim-api"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "tempest-sim-web"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "leptos",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempest-sim-api",
+ "tempest-ui-kit",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

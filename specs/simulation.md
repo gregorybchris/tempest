@@ -80,7 +80,7 @@ This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run
   - **peers:** what each peer did in a run: when it arrived, connected, got its first byte, completed and left, and what it sent and received.
   - **traffic:** messages and bytes sent per message type, with the overhead in each.
   - **events:** every log entry as a row, in order, with a readable description for decision events.
-- **Viewing:** a **Rust web UI** reads the database and shows results with beautiful, high-quality interactive charts. It shares a design-system crate with the client and tracker UIs (D-076).
+- **Viewing:** `tempest sim web` serves the results UI and the API it reads over the database (D-204). It browses experiments and runs, charts each run over time, compares any variants, from one experiment or several, with the statistics below, and checks experiments of golden scenarios against their baselines. It shares a design-system crate with the client and tracker UIs (D-076).
 - **Statistics:** many seeds per variant, paired seeds across variants, and medians with confidence intervals. Reports say whether differences are meaningful. `tempest sim run` prints this comparison against a reference variant; the method and thresholds are in D-167, and the simulator's `stats` module implements them.
 
 **Headline metrics** (defined in the simulator's `summary` module, D-162):

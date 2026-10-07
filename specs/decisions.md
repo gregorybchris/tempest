@@ -3234,3 +3234,24 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** Controls in place are what a browser user expects and need no mode per kind, while one cursor keeps the TUI's keys. A permission granted to one browser shouldn't switch notifications on in another. Effects are part of the look, which D-195 keeps with the engine.
 
+
+---
+
+## D-204: The simulation results UI and its API
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-074 and D-075 put simulation results in DuckDB, read by a Rust web UI. The UI is WebAssembly and can't open the database, so something must serve it; the comparisons it shows must agree with what `tempest sim run` and `tempest sim baseline` print.
+
+**Options:** **Where the server lives:** a new server crate; the simulator behind a feature; a thin axum layer in the `tempest` binary over query functions in the simulator (chosen). **Shared types:** the simulator's own types, built for the browser without its `results` feature; a small `sim-api` crate (chosen), as `api` is for the engine (D-200). **Database access:** one connection for the server's life; a read-only connection per request (chosen). **Where views live:** separate pages; one page with the view in the address's `#` (chosen).
+
+**Decision:**
+
+- `tempest sim web [--db PATH] [--baselines DIR] [--listen ADDRESS] [--no-open]` serves the results UI and a JSON API under `/v1`: experiments and runs with filters, sorts and pages; a run with its peers, traffic and time series; comparisons of any variants, from one experiment or several; and the golden baselines with experiments checked against them. It listens on `127.0.0.1:7340` by default, and its UI is embedded like the client's (D-201).
+- The simulator's `browse` module answers each route with `sim-api`'s types. Filters travel as SQL parameters; sorts come from a fixed table of columns. The query strings are parsed and written by `sim-api`, so the UI and the server agree, and are fuzzed.
+- Comparisons use the simulator's `stats` (D-167): medians across seeds with bootstrap intervals, and differences paired by seed with a verdict. Over time, each variant's completed fraction, rarest-chunk copies and peers present are medians across seeds at 80 moments, with 1,000-resample intervals so a page loads quickly; a quantity no run has two moments of is left out.
+- An experiment is checked against the baseline whose scenario has its name, on the seeds both have, as `tempest sim baseline` checks: by means for up to three seeds, otherwise seed by seed (D-171). Baselines are read on every request, so updates show without a restart.
+- Each request opens the database read-only and closes it, so `tempest sim run` can add experiments while the UI is open; while a run records, requests answer that the database is busy.
+- The UI has four areas: Experiments, Runs, Compare and Baselines. Variants are picked into a comparison basket kept in the browser. Every view has a link.
+
+**Rationale:** Query functions in the simulator are tested against real recorded runs beside the code that writes them, and the HTTP layer stays thin. A tiny types crate keeps the simulator out of the browser. Short-lived read-only connections fit DuckDB's one-writer rule without making the UI and the simulator take turns by hand.

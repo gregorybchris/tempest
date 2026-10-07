@@ -2027,6 +2027,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde",
+ "serde_json",
+ "tempest-protocol",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "tempest-core"
 version = "0.1.0"
 dependencies = [
@@ -2055,6 +2066,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "sha2",
+ "tempest-api",
  "tempest-core",
  "tempest-net",
  "tempest-protocol",
@@ -2077,6 +2089,7 @@ dependencies = [
  "tempest-net",
  "tempest-protocol",
  "tempest-sim",
+ "tempest-sim-api",
  "tempest-tracker",
 ]
 
@@ -2126,6 +2139,14 @@ dependencies = [
  "tempest-core",
  "tempest-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tempest-sim-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

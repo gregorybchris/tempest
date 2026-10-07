@@ -21,7 +21,8 @@ In development. See the [roadmap](specs/roadmap.md).
 ## Usage
 
 ```sh
-(cd crates/web && trunk build --release --cargo-profile web)   # the web UI, to embed (optional)
+(cd crates/web && trunk build --release --cargo-profile web)       # the web UI, to embed (optional)
+(cd crates/sim-web && trunk build --release --cargo-profile web)   # the results UI, likewise
 cargo install --path crates/tempest
 
 tempest share ./photos   # prints a tempest: link, then shares until Ctrl-C
@@ -36,9 +37,12 @@ tempest daemon           # runs the engine, which keeps transfers going and serv
 tempest list             # shows its transfers; start, stop and remove control them
 tempest tui              # the terminal UI, on the daemon or an engine of its own
 tempest web              # the web UI in your browser, likewise
+
+tempest sim run crates/sim/scenarios/flash-crowd.yaml   # simulates a swarm, into tempest-sim.duckdb
+tempest sim web                                         # browses and compares the results
 ```
 
-Building the web UI needs [trunk](https://trunkrs.dev); a binary built without it serves a page that says so. In the TUI and the web UI, `1`-`4` switch between Transfers, Share, Catalog and Settings, `:` finds any command (TUI), and `?` lists the keys of the screen you are on.
+Building the web UIs needs [trunk](https://trunkrs.dev); a binary built without them serves a page that says so. In the TUI and the web UI, `1`-`4` switch between Transfers, Share, Catalog and Settings, `:` finds any command (TUI), and `?` lists the keys of the screen you are on.
 
 While a daemon runs, `share` and `get` hand their transfers to it. Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. Each peer asks its router to forward its port with PCP, NAT-PMP or UPnP-IGD; `--no-port-mapping` turns that off. `tempest <command> --help` lists each command's options. The engine's API is described in [`specs/api.md`](specs/api.md).
 

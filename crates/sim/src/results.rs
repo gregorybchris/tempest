@@ -166,6 +166,25 @@ impl Database {
         Self::init(Connection::open(path)?)
     }
 
+    /// Opens the database at `path` to read it, without creating or changing anything. Other
+    /// processes may read it at the same time, but none may write it until this is dropped.
+    pub fn open_read_only(path: &Path) -> Result<Self, Error> {
+        let config = duckdb::Config::default().access_mode(duckdb::AccessMode::ReadOnly)?;
+        let conn = Connection::open_with_flags(path, config)?;
+        let found: Option<i32> =
+            conn.query_row("SELECT max(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })?;
+        match found {
+            Some(SCHEMA_VERSION) => Ok(Self {
+                conn: Mutex::new(conn),
+            }),
+            found => Err(Error::Schema {
+                found: found.unwrap_or(0),
+            }),
+        }
+    }
+
     /// A database in memory, for tests.
     pub fn open_in_memory() -> Result<Self, Error> {
         Self::init(Connection::open_in_memory()?)

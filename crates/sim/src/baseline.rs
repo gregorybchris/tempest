@@ -23,6 +23,7 @@ use crate::engine::{RunOptions, RunResult};
 use crate::experiment::run_all;
 use crate::scenario::{Scenario, ScenarioError};
 use crate::stats::{self, Bootstrap, Estimate};
+use crate::summary::RunMetrics;
 
 /// Seeds a quick check runs, at most.
 pub const QUICK_SEEDS: u32 = 3;
@@ -62,7 +63,12 @@ pub struct Metrics {
 impl Metrics {
     /// The metrics of `result`, a run of `scenario`.
     pub fn of(result: &RunResult, scenario: &Scenario) -> Self {
-        let m = result.metrics(scenario);
+        Self::from(&result.metrics(scenario))
+    }
+}
+
+impl From<&RunMetrics> for Metrics {
+    fn from(m: &RunMetrics) -> Self {
         let secs = |d: Option<std::time::Duration>| d.map(|d| d.as_secs_f64());
         Self {
             completed: m.completed,

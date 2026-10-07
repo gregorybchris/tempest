@@ -16,8 +16,11 @@
 //! - [`log`]: the event log and its digest.
 //! - [`baseline`]: golden scenarios and their baselines, to check runs against (D-077).
 //! - `results`: the DuckDB results database (D-075), with the `results` feature.
+//! - `browse`: what the results UI reads from that database, with the `results` feature.
 
 pub mod baseline;
+#[cfg(feature = "results")]
+pub mod browse;
 pub mod bundle;
 pub mod distribution;
 pub mod engine;

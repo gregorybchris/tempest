@@ -18,6 +18,7 @@ tempest-engine = { path = "../crates/engine" }
 tempest-net = { path = "../crates/net" }
 tempest-protocol = { path = "../crates/protocol" }
 tempest-sim = { path = "../crates/sim", default-features = false }
+tempest-sim-api = { path = "../crates/sim-api" }
 tempest-tracker = { path = "../crates/tracker" }
 
 # Keep the fuzz crate out of the main workspace: it builds only on nightly.
@@ -139,6 +140,13 @@ bench = false
 [[bin]]
 name = "engine_events"
 path = "fuzz_targets/engine_events.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sim_query"
+path = "fuzz_targets/sim_query.rs"
 test = false
 doc = false
 bench = false

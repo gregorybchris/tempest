@@ -35,15 +35,16 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client | `protocol`, `core` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api` |
 | `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `protocol` |
-| `sim` | Discrete-event simulator, scenarios, DuckDB results | `core` |
+| `sim` | Discrete-event simulator, scenarios, DuckDB results and the queries the results UI reads (D-204) | `core`, `sim-api` |
+| `sim-api` | The simulation results API's types and query strings, shared by its server and the results UI (D-204) | (none) |
 | `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
 | `ui-gallery` | A catalog of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
 | `web` | Client web UI | `ui-kit`, `api` |
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
-| `sim-web` | Simulation results UI | `ui-kit` |
+| `sim-web` | Simulation results UI | `ui-kit`, `sim-api` |
 | `tracker` | Tracker server: peer-list service, catalog | `protocol`, `ui-kit` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
-| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI; embeds the web UI's built files (D-201) | most of the above |
+| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the results UI; embeds the web UIs' built files (D-201) | most of the above |
 
 `protocol` and `core` must never depend on async runtimes, sockets, the clock or global randomness. `protocol` is the code other implementers should be able to read alongside the spec.
 

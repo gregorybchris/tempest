@@ -1,13 +1,21 @@
-//! Embeds the client web UI in the binary when it has been built: trunk puts it in
-//! `crates/web/dist` (D-201). Without it, the binary serves a page that says how to build it.
+//! Embeds the web UIs in the binary when they have been built: trunk puts the client's in
+//! `crates/web/dist` and the simulation results UI's in `crates/sim-web/dist` (D-201). Without
+//! them, the binary serves a page that says how to build them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../web");
+    embed("web", "web_assets.rs");
+    embed("sim-web", "sim_web_assets.rs");
+}
+
+/// Writes `out`, the list of files in the `dist` folder of the crate in `crates/{name}`, for
+/// `include!`.
+fn embed(name: &str, out: &str) {
+    let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(name);
     let dist = web.join("dist");
-    // Watching a folder that doesn't exist would rerun this on every build; the web crate's
+    // Watching a folder that doesn't exist would rerun this on every build; the UI crate's
     // folder exists, and gains `dist` when the UI is built.
     let watched = if dist.is_dir() { &dist } else { &web };
     println!("cargo:rerun-if-changed={}", watched.display());
@@ -25,15 +33,15 @@ fn main() {
         ));
     }
     code.push_str("]\n");
-    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
-    fs::write(out.join("web_assets.rs"), code).expect("OUT_DIR is writable");
+    let dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
+    fs::write(dir.join(out), code).expect("OUT_DIR is writable");
 }
 
 /// Every file under `dir`, as its path from `root` with `/` between segments, and its path.
 fn collect(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
-    let entries = fs::read_dir(dir).expect("the web UI's files can be listed");
+    let entries = fs::read_dir(dir).expect("a web UI's files can be listed");
     for entry in entries {
-        let path = entry.expect("the web UI's files can be listed").path();
+        let path = entry.expect("a web UI's files can be listed").path();
         if path.is_dir() {
             collect(root, &path, files);
         } else {

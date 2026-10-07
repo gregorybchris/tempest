@@ -64,15 +64,18 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }},trunk
-      # The UI kit's and the web UI's own tests use native-only crates, and run in the check job;
+      # The UI kit's and the web UIs' own tests use native-only crates, and run in the check job;
       # the gallery's are the browser benchmark.
-      - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-kit -p tempest-web -- -D warnings
+      - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-kit -p tempest-web -p tempest-sim-web -- -D warnings
       - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-gallery --all-targets -- -D warnings
-      # The client web UI as releases embed it (D-201), then the binary serving it.
+      # The web UIs as releases embed them (D-201), then the binary serving them.
       - name: Build the web UI
         working-directory: crates/web
         run: trunk build --release --cargo-profile web
-      - run: cargo test -p tempest --test web
+      - name: Build the simulation results UI
+        working-directory: crates/sim-web
+        run: trunk build --release --cargo-profile web
+      - run: cargo test -p tempest --test web --test sim_web
       # The 1,536-cell live view benchmark (specs/interfaces.md), in headless Chrome.
       - name: Live view benchmark
         env:

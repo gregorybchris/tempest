@@ -1,5 +1,6 @@
 //! The `tempest` binary.
 
+mod assets;
 mod daemon;
 mod engine;
 mod get;
@@ -8,6 +9,7 @@ mod progress;
 mod relay;
 mod share;
 mod sim;
+mod sim_web;
 mod tracker;
 mod transfers;
 mod tui;

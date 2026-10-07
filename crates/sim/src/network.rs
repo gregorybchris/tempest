@@ -14,6 +14,10 @@
 //! prioritize its control streams: they take `size ÷ min(upload, download)` without slowing the
 //! flows, then one [`Network::delay`].
 //!
+//! **Relayed** flows also share a [`Limit`]: the relay forwards a group of flows, such as one
+//! direction of one connection, at up to its rate, split evenly among them. A relayed message
+//! takes an extra one-way latency for its detour ([`Network::delay_via`]).
+//!
 //! **Loss** never drops a message, since the transport is reliable: each loss resends it after a
 //! probe timeout, one round trip plus 25 ms (QUIC's default maximum ACK delay).
 
@@ -35,6 +39,15 @@ pub struct Link {
     pub latency: Duration,
     /// The chance that this link loses a message.
     pub loss: Fraction,
+}
+
+/// A cap shared by a group of flows, such as one direction of a relayed connection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Limit {
+    /// Names the group. Flows with the same group and sender share the cap.
+    pub group: u64,
+    /// The group's total rate in bytes per second.
+    pub rate: f64,
 }
 
 /// A flow, named by the network. IDs are reused once a flow has ended.
@@ -75,6 +88,7 @@ struct Flow<P> {
     rate: f64,
     updated: Time,
     stamp: u64,
+    limit: Option<Limit>,
     payload: P,
 }
 
@@ -135,12 +149,19 @@ impl<P> Network<P> {
     /// The time from a message leaving `a` to its arrival at `b`: the latency, plus a probe
     /// timeout for each time it is lost.
     pub fn delay(&self, a: usize, b: usize, rng: &mut Rng) -> Duration {
+        self.delay_via(a, b, Duration::ZERO, rng)
+    }
+
+    /// [`Network::delay`] on a path that is `detour` longer each way, such as through a relay.
+    pub fn delay_via(&self, a: usize, b: usize, detour: Duration, rng: &mut Rng) -> Duration {
         let loss = self.loss(a, b);
         let mut losses = 0;
         while loss > 0.0 && losses < MAX_LOSSES && rng.random::<f64>() < loss {
             losses += 1;
         }
-        self.latency(a, b) + losses * (self.rtt(a, b) + MAX_ACK_DELAY)
+        let latency = self.latency(a, b).saturating_add(detour);
+        let timeout = latency.saturating_mul(2).saturating_add(MAX_ACK_DELAY);
+        latency.saturating_add(timeout.saturating_mul(losses))
     }
 
     /// The time a small message of `bytes` takes to leave `a` for `b`.
@@ -158,6 +179,19 @@ impl<P> Network<P> {
     /// Its completion, and those of other flows whose rate changed, are then in
     /// [`Network::take_completions`].
     pub fn start(&mut self, now: Time, from: usize, to: usize, bytes: u64, payload: P) -> FlowId {
+        self.start_limited(now, from, to, bytes, None, payload)
+    }
+
+    /// Starts a flow of `bytes` from `from` to `to`, sharing `limit` if it has one.
+    pub fn start_limited(
+        &mut self,
+        now: Time,
+        from: usize,
+        to: usize,
+        bytes: u64,
+        limit: Option<Limit>,
+        payload: P,
+    ) -> FlowId {
         let flow = Flow {
             from,
             to,
@@ -165,6 +199,7 @@ impl<P> Network<P> {
             rate: 0.0,
             updated: now,
             stamp: 0,
+            limit,
             payload,
         };
         let index = match self.free.pop() {
@@ -199,6 +234,19 @@ impl<P> Network<P> {
         remove(&mut self.nodes[ended.to].incoming);
         self.reshare(now, ended.from, ended.to);
         ended.payload
+    }
+
+    /// Lifts the limit from `from`'s flows in `group`, as when a relayed connection goes direct.
+    pub fn unlimit(&mut self, now: Time, from: usize, group: u64) {
+        let flows: Vec<usize> = self.nodes[from].outgoing.clone();
+        for index in flows {
+            let flow = self.flows[index].as_mut().expect("listed flows run");
+            if flow.limit.is_some_and(|l| l.group == group) {
+                flow.limit = None;
+                let to = flow.to;
+                self.reshare(now, from, to);
+            }
+        }
     }
 
     /// Whether `stamp` is a flow's current completion estimate.
@@ -237,8 +285,21 @@ impl<P> Network<P> {
         for index in affected {
             let flow = self.flows[index].as_ref().expect("listed flows run");
             let (sender, receiver) = (&self.nodes[flow.from], &self.nodes[flow.to]);
-            let rate = (sender.link.up.get() / sender.outgoing.len() as f64)
+            let mut rate = (sender.link.up.get() / sender.outgoing.len() as f64)
                 .min(receiver.link.down.get() / receiver.incoming.len() as f64);
+            if let Some(limit) = flow.limit {
+                let sharing = sender
+                    .outgoing
+                    .iter()
+                    .filter(|&&f| {
+                        self.flows[f]
+                            .as_ref()
+                            .and_then(|f| f.limit)
+                            .is_some_and(|l| l.group == limit.group)
+                    })
+                    .count();
+                rate = rate.min(limit.rate / sharing as f64);
+            }
             let flow = self.flows[index].as_mut().expect("listed flows run");
             let elapsed = now.since(flow.updated).as_secs_f64();
             if elapsed > 0.0 {
@@ -366,6 +427,51 @@ mod tests {
         // 0.5 MB left at 0.5 MB/s.
         assert_eq!(done[&0], at(1.5));
         assert_eq!(done[&1], at(2.0));
+    }
+
+    #[test]
+    fn a_limit_is_shared_by_its_group_until_lifted() {
+        let mut net = Network::new();
+        let a = net.add_node(link(1e7, 1e9));
+        let b = net.add_node(link(1e9, 1e9));
+        let c = net.add_node(link(1e9, 1e9));
+        let limit = Some(Limit {
+            group: 7,
+            rate: 1e6,
+        });
+        let x = net.start_limited(Time::ZERO, a, b, 1_000_000, limit, 0);
+        let y = net.start_limited(Time::ZERO, a, b, 1_000_000, limit, 1);
+        let z = net.start(Time::ZERO, a, c, 10_000_000, 2);
+        assert_eq!(net.rate(x), Some(5e5), "the group splits its cap");
+        assert_eq!(net.rate(y), Some(5e5));
+        assert!(
+            (net.rate(z).unwrap() - 1e7 / 3.0).abs() < 1e-6,
+            "others share the link"
+        );
+        // After 1 s, each limited flow has 0.5 MB left; lifted, they share a's upload.
+        net.unlimit(at(1.0), a, 7);
+        assert!((net.rate(x).unwrap() - 1e7 / 3.0).abs() < 1e-6);
+        let done = drain(&mut net, at(1.0));
+        assert!(done[&0] < at(1.2), "{:?}", done[&0]);
+    }
+
+    #[test]
+    fn a_detour_lengthens_delays_and_probe_timeouts() {
+        let mut net: Network<()> = Network::new();
+        let mut lossy = link(1e6, 1e6);
+        lossy.loss = Fraction::new(0.999).unwrap();
+        let a = net.add_node(lossy);
+        let b = net.add_node(link(1e6, 1e6));
+        let mut rng = tempest_core::Rng::seed_from_u64(3);
+        let detour = Duration::from_millis(40);
+        let delay = net.delay_via(a, b, detour, &mut rng);
+        let latency = net.latency(a, b) + detour;
+        let losses = (delay - latency).as_nanos() / (2 * latency + MAX_ACK_DELAY).as_nanos();
+        assert!(losses > 0);
+        assert_eq!(
+            delay,
+            latency + losses as u32 * (2 * latency + MAX_ACK_DELAY)
+        );
     }
 
     #[test]

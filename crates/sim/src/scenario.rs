@@ -52,6 +52,9 @@ pub struct Scenario {
     /// The simulated tracker.
     #[serde(default)]
     pub tracker: TrackerSpec,
+    /// The relays that peers behind routers register with.
+    #[serde(default)]
+    pub relay: RelaySpec,
     /// The profile and overrides every peer starts from.
     #[serde(default)]
     pub settings: Settings,
@@ -116,6 +119,30 @@ impl Default for TrackerSpec {
     }
 }
 
+/// The relays that peers behind routers register with (`protocol/relays.md`).
+///
+/// Every peer with a home relay has one with these properties. A relayed connection detours
+/// through the relay: its messages take the relay's latency twice more each way, and the relay
+/// forwards each direction of each relayed connection at up to `bandwidth`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RelaySpec {
+    /// One-way latency from a relay to the core of the network. Default 20 ms.
+    #[serde(with = "duration")]
+    pub latency: Duration,
+    /// The most a relay forwards each way on one relayed connection. Default 10 Mbps.
+    pub bandwidth: Rate,
+}
+
+impl Default for RelaySpec {
+    fn default() -> Self {
+        Self {
+            latency: Duration::from_millis(20),
+            bandwidth: Rate::bytes_per_second(10e6 / 8.0),
+        }
+    }
+}
+
 /// A group of peers alike in everything but their randomness.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +165,15 @@ pub struct PeerClass {
     /// Chance of losing a message, instead of the network's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loss: Option<Fraction>,
+    /// The router the peers sit behind, if they can't be dialed directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nat: Option<Nat>,
+    /// How fast the peers write verified chunks to disk. Default unlimited.
+    #[serde(default)]
+    pub disk: Rate,
+    /// How fast the peers hash received chunks to verify them. Default unlimited.
+    #[serde(default)]
+    pub hashing: Rate,
     /// Whether the peers start with the whole bundle.
     #[serde(default)]
     pub starts: Start,
@@ -164,6 +200,32 @@ pub struct Bandwidth {
     pub up: Rate,
     /// Download capacity. Default unlimited.
     pub down: Rate,
+}
+
+/// A router that drops incoming connections a peer didn't ask for (network address
+/// translation).
+///
+/// Nobody can dial such a peer directly. A peer with a home relay is dialed through it, and the
+/// two peers then try to hole-punch a direct connection (`protocol/relays.md`). Punching works
+/// when the dialing peer is directly reachable, or when both routers are punchable.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Nat {
+    /// The chance that a peer's router keeps one public port for every destination, so that
+    /// hole punching through it works. Default 85%, so that about 72% of pairs of such peers
+    /// can punch.
+    pub punchable: Fraction,
+    /// Whether the peers keep a home relay. Without one they can only dial out. Default true.
+    pub relay: bool,
+}
+
+impl Default for Nat {
+    fn default() -> Self {
+        Self {
+            punchable: Fraction::new(0.85).expect("a fraction"),
+            relay: true,
+        }
+    }
 }
 
 /// What a peer has when it arrives.
@@ -209,6 +271,15 @@ pub enum Arrivals {
         #[serde(with = "duration")]
         interval: Duration,
     },
+    /// A Poisson process: arrivals start at `start`, with exponential gaps of mean `interval`.
+    Poisson {
+        /// When the first gap starts. Default 0.
+        #[serde(default, with = "duration")]
+        start: Duration,
+        /// The mean time between arrivals.
+        #[serde(with = "duration")]
+        interval: Duration,
+    },
     /// A flash crowd: arrivals start at `start` and fall off exponentially, with a mean delay
     /// of `decay`.
     FlashCrowd {
@@ -228,13 +299,22 @@ impl Default for Arrivals {
 }
 
 /// Peers leaving before they would otherwise stop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Churn {
-    /// The mean time a peer stays, drawn from an exponential distribution. A peer that stops
-    /// sharing sooner (`lingering`) leaves sooner.
+    /// The mean time a peer stays. A peer that stops sharing sooner (`lingering`) leaves
+    /// sooner.
     #[serde(with = "duration")]
     pub session: Duration,
+    /// The shape of the Weibull distribution session lengths are drawn from. 1, the default,
+    /// is the exponential distribution; below 1, most sessions are short and a few are very
+    /// long, as measured in deployed swarms.
+    #[serde(default = "unit_shape")]
+    pub shape: f64,
+}
+
+fn unit_shape() -> f64 {
+    1.0
 }
 
 /// The variants to compare.
@@ -388,23 +468,35 @@ impl Scenario {
                 format!("{variants} variants is more than the limit of {MAX_VARIANTS}"),
             ));
         }
+        // A link that loses every message never delivers one.
+        let lossless = |loss: Fraction| loss.get() < 1.0;
+        if !lossless(self.network.loss) {
+            return Err(invalid("network.loss", "must be below 100%"));
+        }
         for (i, class) in self.peers.iter().enumerate() {
             let field = |name: &str| format!("peers[{i}].{name}");
+            if !class.loss.is_none_or(lossless) {
+                return Err(invalid(field("loss"), "must be below 100%"));
+            }
             if self.peers[..i].iter().any(|c| c.class == class.class) {
                 return Err(invalid(
                     field("class"),
                     format!("{:?} is used twice", class.class),
                 ));
             }
-            if let Arrivals::Steady { interval, .. } = class.arrivals
+            if let Arrivals::Steady { interval, .. } | Arrivals::Poisson { interval, .. } =
+                class.arrivals
                 && interval.is_zero()
             {
                 return Err(invalid(field("arrivals.interval"), "must be more than 0"));
             }
-            if let Some(churn) = class.churn
-                && churn.session.is_zero()
-            {
-                return Err(invalid(field("churn.session"), "must be more than 0"));
+            if let Some(churn) = class.churn {
+                if churn.session.is_zero() {
+                    return Err(invalid(field("churn.session"), "must be more than 0"));
+                }
+                if !(churn.shape.is_finite() && churn.shape >= 0.05) {
+                    return Err(invalid(field("churn.shape"), "must be at least 0.05"));
+                }
             }
         }
         // Every class's settings must resolve in every variant. Check each source on its own
@@ -601,6 +693,57 @@ experiment:
             "class: leecher\n    arrivals: { pattern: steady }",
         ));
         assert!(e.contains("missing field `interval`"), "{e}");
+        let e = error(&format!("{MINIMAL}    churn: {{ session: 1m, shape: 0 }}"));
+        assert!(e.starts_with("peers[1].churn.shape:"), "{e}");
+        let e = error(&format!(
+            "{MINIMAL}    arrivals: {{ pattern: poisson, interval: 0s }}"
+        ));
+        assert!(e.starts_with("peers[1].arrivals.interval:"), "{e}");
+        let e = error(&format!("{MINIMAL}    loss: 100%"));
+        assert!(e.starts_with("peers[1].loss:"), "{e}");
+        let e = error(&format!("{MINIMAL}network: {{ loss: 1 }}"));
+        assert!(e.starts_with("network.loss:"), "{e}");
+        let e = error(&format!("{MINIMAL}    nat: {{ punchable: 2 }}"));
+        assert!(e.contains("not a fraction"), "{e}");
+    }
+
+    #[test]
+    fn routers_relays_disks_and_sessions_read() {
+        let scenario = Scenario::from_yaml(&format!(
+            "{MINIMAL}    nat: {{ punchable: 40% }}
+    disk: 50MB/s
+    hashing: 400MB/s
+    arrivals: {{ pattern: poisson, interval: 3s }}
+    churn: {{ session: 20m, shape: 0.5 }}
+  - class: hidden
+    nat: {{ relay: false }}
+relay: {{ latency: 35ms, bandwidth: 20Mbps }}
+"
+        ))
+        .unwrap();
+        let leecher = &scenario.peers[1];
+        assert_eq!(leecher.nat.unwrap().punchable.get(), 0.4);
+        assert!(leecher.nat.unwrap().relay);
+        assert_eq!(leecher.disk.get(), 50e6);
+        assert_eq!(leecher.hashing.get(), 400e6);
+        assert_eq!(
+            leecher.arrivals,
+            Arrivals::Poisson {
+                start: Duration::ZERO,
+                interval: Duration::from_secs(3)
+            }
+        );
+        assert_eq!(leecher.churn.unwrap().shape, 0.5);
+        let hidden = scenario.peers[2].nat.unwrap();
+        assert!(!hidden.relay);
+        assert_eq!(hidden.punchable.get(), 0.85);
+        assert_eq!(scenario.peers[0].nat, None);
+        assert_eq!(scenario.relay.latency, Duration::from_millis(35));
+        assert_eq!(scenario.relay.bandwidth.get(), 2.5e6);
+
+        let defaults = Scenario::from_yaml(MINIMAL).unwrap();
+        assert_eq!(defaults.relay, RelaySpec::default());
+        assert_eq!(defaults.peers[1].disk, Rate::UNLIMITED);
     }
 
     #[test]

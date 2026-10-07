@@ -19,7 +19,7 @@ pub struct ByteSize(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Rate(f64);
 
-/// A fraction from 0 up to but excluding 1, written as `0.5%` or `0.005`.
+/// A fraction from 0 to 1, written as `0.5%` or `0.005`.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Fraction(f64);
 
@@ -142,12 +142,12 @@ impl Fraction {
         self.0
     }
 
-    /// Wraps `value`, which must be at least 0 and below 1.
+    /// Wraps `value`, which must be from 0 to 1.
     pub fn new(value: f64) -> Result<Self, String> {
-        if (0.0..1.0).contains(&value) {
+        if (0.0..=1.0).contains(&value) {
             Ok(Self(value))
         } else {
-            Err(format!("{value} is not a fraction from 0 up to 1"))
+            Err(format!("{value} is not a fraction from 0 to 1"))
         }
     }
 
@@ -333,8 +333,9 @@ mod tests {
     fn fractions() {
         assert_eq!(Fraction::parse("0.5%").unwrap().get(), 0.005);
         assert_eq!(Fraction::parse("0.25").unwrap().get(), 0.25);
-        assert!(Fraction::parse("100%").is_err());
-        assert!(Fraction::parse("1").is_err());
+        assert_eq!(Fraction::parse("100%").unwrap().get(), 1.0);
+        assert!(Fraction::parse("101%").is_err());
+        assert!(Fraction::parse("-1%").is_err());
         assert!(Fraction::parse("5 percent").is_err());
     }
 

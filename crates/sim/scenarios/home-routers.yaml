@@ -1,0 +1,40 @@
+# Peers behind home routers: most reachable only through relays, some never punching through,
+# with slow disks, Poisson arrivals and heavy-tailed sessions.
+name: home-routers
+description: 120 peers, most behind routers, arriving at random and staying for Weibull sessions.
+duration: 1h
+seeds: 4
+
+bundle:
+  files: [{ size: 64MiB }]
+
+network: { latency: 20ms, loss: 0.2% }
+relay: { latency: 25ms, bandwidth: 8Mbps }
+tracker: { peers: 30, interval: 2m }
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 50Mbps, down: 200Mbps }
+  - class: public
+    count: 20
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+    arrivals: { pattern: poisson, interval: 4s }
+    churn: { session: 30m, shape: 0.6 }
+  - class: home
+    count: 80
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    nat: { punchable: 80% }
+    arrivals: { pattern: poisson, interval: 1s }
+    churn: { session: 30m, shape: 0.6 }
+  - class: hidden
+    count: 10
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    nat: { relay: false }
+    arrivals: { pattern: poisson, interval: 6s }
+  - class: old-laptop
+    count: 10
+    bandwidth: { up: 10Mbps, down: 100Mbps }
+    disk: 4MB/s
+    hashing: 20MB/s
+    arrivals: { pattern: poisson, interval: 6s }

@@ -6,9 +6,13 @@
 //! schedule more events, and records its decision events in the [`Log`].
 //!
 //! Every random choice comes from generators seeded by the run's seed, on separate streams for
-//! the world (arrivals, churn and each session's seed), the network and the tracker. The world
-//! is drawn before the run starts and doesn't depend on settings, so every variant of an
-//! experiment sees the same arrivals and churn for a given seed (D-073).
+//! the world (arrivals, churn and each session's seed), the network, the tracker and the
+//! routers. The world is drawn before the run starts and doesn't depend on settings, so every
+//! variant of an experiment sees the same arrivals, churn and routers for a given seed (D-073).
+//!
+//! Beyond the network, the driver models what the client's I/O layer would do: dialing peers
+//! behind routers through their relay and then hole punching (`protocol/relays.md`), and the
+//! time a peer takes to hash and store each chunk it receives.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -28,10 +32,12 @@ use tempest_protocol::tree::VerifyError;
 use tempest_protocol::{Encode, Hash, Message, PeerId, RangeList};
 
 use crate::bundle::Bundle;
+use crate::distribution::{exponential, weibull};
 use crate::log::{Entry, LeaveReason, Log, Record, Sink, Wire};
-use crate::network::{FlowId, Link, Network};
+use crate::network::{FlowId, Limit, Link, Network};
 use crate::queue::Queue;
 use crate::scenario::{Arrivals, Behavior, Payload, Scenario, ScenarioError, Start, Variant};
+use crate::units::Rate;
 
 /// How long a dial to a peer that isn't there takes to fail.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -138,6 +144,10 @@ enum Event {
         conn: ConnId,
         info: ConnInfo,
     },
+    /// A relayed connection, named by one end, went direct after a hole punch.
+    Upgraded {
+        conn: ConnId,
+    },
     DialFailed {
         peer: usize,
         target: PeerId,
@@ -152,6 +162,8 @@ enum Event {
         payload: u64,
         data: Option<Data>,
         bad: bool,
+        /// Whether the receiver has hashed and stored it, so that its session may hear of it.
+        stored: bool,
     },
     Closed {
         conn: ConnId,
@@ -173,6 +185,8 @@ struct End {
     /// When the last small message sent from this end arrives, so that later ones arrive after
     /// it.
     last_arrival: Time,
+    /// Whether the connection goes through a relay.
+    relayed: bool,
 }
 
 /// A bulk transfer in the network: a response on a request stream.
@@ -201,12 +215,34 @@ enum State {
     Gone,
 }
 
+/// How a dial to a peer would connect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Path {
+    Direct,
+    /// Through the peer's relay, then direct if the hole punch works.
+    Relayed {
+        punch: bool,
+    },
+}
+
+/// A peer's router, if it sits behind one.
+#[derive(Debug, Clone, Copy)]
+struct Router {
+    punchable: bool,
+    relay: bool,
+}
+
 #[derive(Debug)]
 struct Peer {
     id: PeerId,
     class: usize,
     behavior: Behavior,
     seed: u64,
+    router: Option<Router>,
+    /// When the peer finishes hashing what it has received so far.
+    hashed: Time,
+    /// When the peer finishes storing what it has verified so far.
+    stored: Time,
     state: State,
     session: Option<Session>,
     content: Option<MemoryContent>,
@@ -251,9 +287,9 @@ fn peer_id(index: usize) -> PeerId {
     Hash::new(Sha256::digest(format!("tempest-sim peer {index}")).into())
 }
 
-/// A sample from the exponential distribution with mean `mean`, from a uniform sample `u`.
-fn exponential(mean: Duration, u: f64) -> Duration {
-    Duration::try_from_secs_f64(mean.as_secs_f64() * -(1.0 - u).ln()).unwrap_or(Duration::MAX)
+/// The time to process `bytes` at `rate`: zero if the rate is unlimited.
+fn work(bytes: u64, rate: Rate) -> Duration {
+    Duration::try_from_secs_f64(bytes as f64 / rate.get()).unwrap_or(Duration::MAX)
 }
 
 impl<'a, 's> Simulation<'a, 's> {
@@ -287,6 +323,9 @@ impl<'a, 's> Simulation<'a, 's> {
             rng
         };
         let mut world = stream(0);
+        // Routers draw from their own stream, so that adding them leaves the rest of the world
+        // as it was.
+        let mut routers = stream(3);
         let mut sim = Self {
             scenario,
             manifest_bytes: bundle.manifest().to_bytes(),
@@ -314,16 +353,23 @@ impl<'a, 's> Simulation<'a, 's> {
         };
 
         for (class, spec) in scenario.peers.iter().enumerate() {
+            // The time since the start of the class's Poisson arrivals.
+            let mut poisson = Duration::ZERO;
             for k in 0..spec.count {
                 // Every peer draws the same numbers whatever its class uses, so that changing
                 // one class leaves the others' randomness alone.
                 let (u_arrival, u_session, session_seed): (f64, f64, u64) =
                     (world.random(), world.random(), world.random());
+                let u_router: f64 = routers.random();
                 let arrive = Time::ZERO
                     + match spec.arrivals {
                         Arrivals::AtOnce { at } => at,
                         Arrivals::Steady { start, interval } => {
                             start.saturating_add(interval.saturating_mul(k))
+                        }
+                        Arrivals::Poisson { start, interval } => {
+                            poisson = poisson.saturating_add(exponential(interval, u_arrival));
+                            start.saturating_add(poisson)
                         }
                         Arrivals::FlashCrowd { start, decay } => {
                             start.saturating_add(exponential(decay, u_arrival))
@@ -338,7 +384,7 @@ impl<'a, 's> Simulation<'a, 's> {
                 });
                 sim.queue.push(arrive, Event::Arrive(index));
                 if let Some(churn) = spec.churn {
-                    let leave = arrive + exponential(churn.session, u_session);
+                    let leave = arrive + weibull(churn.session, churn.shape, u_session);
                     sim.queue.push(leave, Event::Leave(index));
                 }
                 if spec.starts == Start::Empty {
@@ -351,6 +397,12 @@ impl<'a, 's> Simulation<'a, 's> {
                     class,
                     behavior: spec.behavior,
                     seed: session_seed,
+                    router: spec.nat.map(|nat| Router {
+                        punchable: u_router < nat.punchable.get(),
+                        relay: nat.relay,
+                    }),
+                    hashed: Time::ZERO,
+                    stored: Time::ZERO,
                     state: State::Waiting,
                     session: None,
                     content: None,
@@ -478,6 +530,7 @@ impl<'a, 's> Simulation<'a, 's> {
                 }
             }
             Event::Connected { conn, info } => self.connected(conn, info),
+            Event::Upgraded { conn } => self.upgraded(conn),
             Event::DialFailed { peer, target } => {
                 if self.present(peer) {
                     self.session(peer).handle_dial_failed(now, target);
@@ -503,7 +556,14 @@ impl<'a, 's> Simulation<'a, 's> {
                 payload,
                 data,
                 bad,
-            } => self.data_arrived(conn, request, payload, data, bad),
+                stored,
+            } => {
+                if stored {
+                    self.data_stored(conn, request, payload, data, bad);
+                } else {
+                    self.data_arrived(conn, request, payload, data, bad);
+                }
+            }
             Event::Closed { conn, closed } => {
                 let Some(peer) = self.open_end(conn) else {
                     return;
@@ -616,7 +676,7 @@ impl<'a, 's> Simulation<'a, 's> {
             self.close_end(conn);
             let other_peer = self.ends.get(&other).map(|e| e.peer);
             if let Some(other_peer) = other_peer {
-                let at = now + self.network.latency(peer, other_peer);
+                let at = now + self.network.latency(peer, other_peer) + self.detour(conn);
                 self.queue.push(
                     at,
                     Event::Closed {
@@ -627,14 +687,57 @@ impl<'a, 's> Simulation<'a, 's> {
             }
             return;
         }
-        let rtt = self.network.rtt(peer, self.ends[&other].peer);
+        let detour = self.detour(conn).saturating_mul(2);
+        let rtt = self
+            .network
+            .rtt(peer, self.ends[&other].peer)
+            .saturating_add(detour);
         let session = self.session(peer);
         session.handle_connected(now, conn, info);
         session.handle_rtt(now, conn, rtt);
         self.after(peer);
     }
 
+    /// Data arrived: the receiver hashes it, then stores it if it passes, each in turn after
+    /// what it received before. Its session hears of it once that is done.
     fn data_arrived(
+        &mut self,
+        conn: ConnId,
+        request: RequestId,
+        payload: u64,
+        data: Option<Data>,
+        bad: bool,
+    ) {
+        let now = self.now;
+        let Some(peer) = self.open_end(conn) else {
+            return;
+        };
+        let class = &self.scenario.peers[self.peers[peer].class];
+        let (hashing, disk) = (class.hashing, class.disk);
+        let state = &mut self.peers[peer];
+        state.hashed = state.hashed.max(now) + work(payload, hashing);
+        let mut done = state.hashed;
+        if !bad {
+            state.stored = state.stored.max(done) + work(payload, disk);
+            done = state.stored;
+        }
+        if done == now {
+            self.data_stored(conn, request, payload, data, bad);
+        } else {
+            let event = Event::Data {
+                conn,
+                request,
+                payload,
+                data,
+                bad,
+                stored: true,
+            };
+            self.queue.push(done, event);
+        }
+    }
+
+    /// Data has been hashed and, if it passed, stored: the receiver's session hears of it.
+    fn data_stored(
         &mut self,
         conn: ConnId,
         request: RequestId,
@@ -684,7 +787,11 @@ impl<'a, 's> Simulation<'a, 's> {
         };
         let (sender, other) = (end.peer, end.other);
         let receiver = self.ends[&other].peer;
-        let arrive = now + self.network.delay(sender, receiver, &mut self.net_rng);
+        let detour = self.detour(conn);
+        let arrive = now
+            + self
+                .network
+                .delay_via(sender, receiver, detour, &mut self.net_rng);
         let request = RequestId(stream.0);
         match kind {
             TransferKind::Data { payload, data, bad } => {
@@ -703,6 +810,7 @@ impl<'a, 's> Simulation<'a, 's> {
                     payload,
                     data,
                     bad,
+                    stored: false,
                 };
                 self.queue.push(arrive, event);
             }
@@ -807,15 +915,46 @@ impl<'a, 's> Simulation<'a, 's> {
         }
     }
 
+    /// How `peer` can reach `target`, if it can: directly unless `target` is behind a router,
+    /// otherwise through `target`'s relay if it has one.
+    fn path(&self, peer: usize, target: usize) -> Option<Path> {
+        let Some(theirs) = self.peers[target].router else {
+            return Some(Path::Direct);
+        };
+        if !theirs.relay {
+            return None;
+        }
+        // A directly reachable dialer is dialed back; otherwise both routers must allow it.
+        let punch = self.peers[peer]
+            .router
+            .is_none_or(|ours| ours.punchable && theirs.punchable);
+        Some(Path::Relayed { punch })
+    }
+
+    /// The extra one-way latency of the path of the connection with end `conn`.
+    fn detour(&self, conn: ConnId) -> Duration {
+        match self.ends.get(&conn) {
+            Some(end) if end.relayed => self.scenario.relay.latency.saturating_mul(2),
+            _ => Duration::ZERO,
+        }
+    }
+
     fn dial(&mut self, peer: usize, target: PeerId) {
         let now = self.now;
-        let Some(&other) = self.by_id.get(&target).filter(|&&p| self.present(p)) else {
+        let found = self
+            .by_id
+            .get(&target)
+            .copied()
+            .filter(|&p| self.present(p));
+        let Some((other, path)) = found.and_then(|other| Some((other, self.path(peer, other)?)))
+        else {
             self.queue
                 .push(now + DIAL_TIMEOUT, Event::DialFailed { peer, target });
             return;
         };
         let (a, b) = (ConnId(self.next_conn), ConnId(self.next_conn + 1));
         self.next_conn += 2;
+        let relayed = path != Path::Direct;
         for (conn, owner, other_end) in [(a, peer, b), (b, other, a)] {
             self.ends.insert(
                 conn,
@@ -824,15 +963,28 @@ impl<'a, 's> Simulation<'a, 's> {
                     other: other_end,
                     open: true,
                     last_arrival: Time::ZERO,
+                    relayed,
                 },
             );
         }
         // The handshake takes a round trip, after which both ends know of the connection.
-        let at = now + self.network.rtt(peer, other);
+        let direct_rtt = self.network.rtt(peer, other);
+        let rtt = direct_rtt.saturating_add(self.detour(a).saturating_mul(2));
+        let at = now + rtt;
+        if path == (Path::Relayed { punch: true }) {
+            // The peers exchange Candidates through the relay, then dial each other directly.
+            let upgrade = at + rtt + direct_rtt;
+            self.queue.push(upgrade, Event::Upgraded { conn: a });
+        }
+        let path = if relayed {
+            PathKind::Relayed
+        } else {
+            PathKind::Direct
+        };
         let info = |peer, direction| ConnInfo {
             peer,
             direction,
-            path: PathKind::Direct,
+            path,
         };
         let dialer = info(target, Direction::Dialed);
         let acceptor = info(self.peers[peer].id, Direction::Accepted);
@@ -850,6 +1002,37 @@ impl<'a, 's> Simulation<'a, 's> {
                 info: acceptor,
             },
         );
+    }
+
+    /// A relayed connection goes direct: its messages stop detouring, and its transfers stop
+    /// sharing the relay's limit. The client would open a new connection and close the relayed
+    /// one; carrying on with the same one is the simulator's shortcut.
+    fn upgraded(&mut self, conn: ConnId) {
+        let now = self.now;
+        let Some(other) = self.ends.get(&conn).filter(|e| e.open).map(|e| e.other) else {
+            return;
+        };
+        if !self.ends.get(&other).is_some_and(|e| e.open) {
+            return;
+        }
+        let mut peers = Vec::new();
+        for (end, other_end) in [(conn, other), (other, conn)] {
+            let state = self.ends.get_mut(&end).expect("open");
+            state.relayed = false;
+            let (peer, to) = (state.peer, self.ends[&other_end].peer);
+            self.network.unlimit(now, peer, end.0);
+            self.record(peer, now, Record::Upgraded { to: to as u32 });
+            peers.push((peer, end, to));
+        }
+        self.schedule_completions();
+        // Each session measures the shorter round trip.
+        for (peer, end, to) in peers {
+            if self.present(peer) {
+                let rtt = self.network.rtt(peer, to);
+                self.session(peer).handle_rtt(now, end, rtt);
+                self.after(peer);
+            }
+        }
     }
 
     fn count(&mut self, from: usize, to: usize, wire: Wire, bytes: usize) {
@@ -871,7 +1054,9 @@ impl<'a, 's> Simulation<'a, 's> {
         let to = self.ends[&other].peer;
         self.count(from, to, wire, bytes);
         let sent = self.now + self.network.send_time(from, to, bytes);
-        let arrive = (sent + self.network.delay(from, to, &mut self.net_rng)).max(last);
+        let detour = self.detour(conn);
+        let delay = self.network.delay_via(from, to, detour, &mut self.net_rng);
+        let arrive = (sent + delay).max(last);
         self.ends.get_mut(&conn).expect("open").last_arrival = arrive;
         self.queue.push(
             arrive,
@@ -933,6 +1118,10 @@ impl<'a, 's> Simulation<'a, 's> {
             return;
         };
         let (from, to) = (end.peer, self.ends[&end.other].peer);
+        let limit = end.relayed.then(|| Limit {
+            group: conn.0,
+            rate: self.scenario.relay.bandwidth.get(),
+        });
         self.count(from, to, Wire::Message(message_type), bytes);
         if let TransferKind::Data { payload, .. } = kind {
             self.payload_sent += payload;
@@ -940,7 +1129,7 @@ impl<'a, 's> Simulation<'a, 's> {
         let transfer = Transfer { conn, stream, kind };
         let flow = self
             .network
-            .start(self.now, from, to, bytes as u64, transfer);
+            .start_limited(self.now, from, to, bytes as u64, limit, transfer);
         self.uploads.insert((conn, stream), flow);
         self.schedule_completions();
     }
@@ -965,7 +1154,9 @@ impl<'a, 's> Simulation<'a, 's> {
             Closed::Lost => 0,
         };
         self.count(from, to, Wire::Goodbye, bytes);
-        let arrive = (self.now + self.network.delay(from, to, &mut self.net_rng)).max(last);
+        let detour = self.detour(conn);
+        let delay = self.network.delay_via(from, to, detour, &mut self.net_rng);
+        let arrive = (self.now + delay).max(last);
         self.queue.push(
             arrive,
             Event::Closed {

@@ -41,6 +41,8 @@ Protocol-level alternatives, such as a flat-hash variant for comparison with Mer
 - Disk write speed and hashing CPU cost
 - Misbehaving peers: free riders, peers sending bad data, strategic clients (BitTyrant-style)
 
+How routers, relays, disks and sessions are modeled is in D-165.
+
 ## Fidelity ladder
 
 1. **The simulator:** most experiments.
@@ -95,7 +97,7 @@ This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run
 
 - **Validation milestone (D-078):** reproduce the classic results of Bharambe et al. and Legout et al. before trusting new conclusions.
 - **Regression scenarios (D-077):** a small set of fast golden scenarios runs on every change, against saved baselines. The first is `crates/sim/scenarios/golden.yaml`; its test (`crates/sim/tests/baseline.rs`) says how to run more seeds or update the baseline (D-163).
-- **Determinism check:** same seed, same event log. CI runs the 1,000-peer swarm and the golden scenario twice in separate processes and compares the digests of their logs (D-163).
+- **Determinism check:** same seed, same event log. CI runs the 1,000-peer swarm, the golden scenario and an example of each newer model feature twice in separate processes and compares the digests of their logs (D-163).
 
 ## Experiment backlog
 

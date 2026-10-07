@@ -8,6 +8,7 @@
 //! - [`scenario`]: scenario files, which describe the world and the experiment (D-072).
 //! - [`engine`]: one run of one variant with one seed.
 //! - [`network`]: the message-level network model (D-069).
+//! - [`distribution`]: random draws for arrivals and session lengths.
 //! - [`experiment`]: every variant with every seed.
 //! - [`summary`]: each run's headline metrics, and results per variant.
 //! - [`log`]: the event log and its digest.
@@ -16,6 +17,7 @@
 
 pub mod baseline;
 pub mod bundle;
+pub mod distribution;
 pub mod engine;
 pub mod experiment;
 pub mod log;

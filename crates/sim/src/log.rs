@@ -40,6 +40,11 @@ pub enum Record {
         /// Its size on the wire.
         bytes: u64,
     },
+    /// The peer's relayed connection to another went direct after a hole punch.
+    Upgraded {
+        /// The other peer.
+        to: u32,
+    },
     /// The peer's session made a decision or observed something.
     Decision(EventKind),
 }
@@ -107,7 +112,7 @@ pub struct Row {
     pub time: Time,
     /// The peer it happened to.
     pub peer: u32,
-    /// `arrived`, `left`, `sent`, or a decision event's [`EventKind::name`].
+    /// `arrived`, `left`, `sent`, `upgraded`, or a decision event's [`EventKind::name`].
     pub kind: &'static str,
     /// The other peer involved: the receiver of a message, or the peer a decision concerns.
     pub other: Option<u32>,
@@ -149,6 +154,10 @@ impl Row {
                 self.other = Some(*to);
                 self.message = Some(wire.name());
                 self.bytes = Some(*bytes);
+            }
+            Record::Upgraded { to } => {
+                self.kind = "upgraded";
+                self.other = Some(*to);
             }
             Record::Decision(event) => {
                 self.kind = event.name();

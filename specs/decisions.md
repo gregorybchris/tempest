@@ -2482,3 +2482,24 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 **Decision:** No code change. The cause is unknown, most likely machine load or a one-off outside the test code. If CI shows the failure again, keep the full panic message first: a digest mismatch would mean the recorder perturbs the engine; a DuckDB error would point to shared state.
 
 **Rationale:** A speculative change would hide the cause without confirming it. The determinism job in CI already compares digests across separate processes and thread counts.
+
+---
+
+## D-165: Simulated routers, relays, disks and sessions
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-070 asks the simulator to model NAT reachability with relays and hole punching, disk and hashing speed, and churn. D-159 covered only exponential sessions and three arrival patterns.
+
+**Options for routers:** a NAT type per peer (full cone, restricted, symmetric) with per-pair rules; one chance per peer that its router is punchable, a pair punching when both are or when the dialer is reachable (chosen); one success rate per pair. **For the hole punch:** a new direct connection replacing the relayed one, as the protocol does; the same connection switching its path at the time the direct one would open (chosen). **For relays:** relays as network nodes whose capacity all relayed flows share; a detour latency and a per-connection forwarding cap (chosen).
+
+**Decision:**
+
+- A peer class may sit behind a router (`nat`). Nobody can dial such a peer directly. With a home relay (the default) it is dialed through the relay; without one, dials to it fail after the dial timeout, though it can still dial out.
+- A relayed connection goes direct when the dialer is directly reachable (it is dialed back) or when both routers are punchable, each with the class's chance (default 85%, so about 72% of such pairs punch, within the 70–90% the protocol cites). The switch happens one relayed and one direct round trip after the connection opens: the Candidates exchange, then the direct handshake. Both sessions then measure the direct round trip, and the switch is logged as `upgraded` for both peers.
+- Relays (`relay` in the scenario) add their latency twice to each one-way trip and forward each direction of a relayed connection at up to a set rate (default 10 Mbps), shared by that connection's transfers.
+- A peer hashes each Data it receives at its `hashing` rate, then writes it at its `disk` rate unless it failed verification; the two stages overlap. Its session hears of the Data once it is stored. Both default to unlimited.
+- Sessions may follow a Weibull distribution (`churn.shape`; 1, the default, is exponential), and arrivals may be a Poisson process (`pattern: poisson`).
+- Whether each peer's router is punchable comes from its own random stream, so scenarios without routers replay exactly as before.
+
+**Rationale:** Measurement studies explain most punching failures by symmetric NATs on either side, which a per-peer punchable chance captures without modeling NAT behavior in detail. Keeping the connection when it upgrades avoids modeling duplicate-connection resolution and re-requests, whose cost is a round trip, small next to a transfer. A cap per connection matches the protocol's allowance for relays to limit bandwidth; shared relay capacity can come with the packet-level mode. Delivering Data only once stored makes slow disks throttle requests, as a client's bounded write queue would. Weibull sessions with shape below 1 fit measured swarms better than exponential ones.

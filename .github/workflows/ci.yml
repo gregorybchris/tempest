@@ -35,7 +35,7 @@ jobs:
       # the number of threads.
       - name: Determinism check
         run: |
-          for scenario in swarm-1000 golden; do
+          for scenario in swarm-1000 golden home-routers; do
             path=crates/sim/scenarios/$scenario.yaml
             target/release/tempest sim run "$path" --no-db --digests "$scenario-1.tsv"
             target/release/tempest sim run "$path" --no-db --digests "$scenario-2.tsv" --jobs 1

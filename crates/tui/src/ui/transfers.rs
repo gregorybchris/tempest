@@ -1,4 +1,5 @@
-//! The Transfers area: the list, and below it the selected transfer's state in plain language.
+//! The Transfers area: the list, and below it the selected transfer's state in plain language
+//! or, once opened, its detail.
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
@@ -7,8 +8,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use tempest_engine::{Status, TransferInfo};
 
-use super::{fit, rule, status_color, status_label};
-use crate::app::App;
+use super::{detail, fit, rule, status_color, status_label};
+use crate::app::{App, View};
 use crate::columns::{self, BAR, Column, SPACING};
 use crate::explain::{Fix, explain};
 use crate::finding::{Finding, Sort, SortKey};
@@ -20,6 +21,23 @@ use crate::theme::Theme;
 const MARKER: u16 = 1;
 
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
+    if app.view == View::Detail {
+        // The detail takes three fifths of what the rules leave, the list the rest.
+        let detail = (area.height.saturating_sub(2) * 3 / 5).max(4);
+        let [list, tabs_rule, content, bottom_rule] = Layout::vertical([
+            Constraint::Min(2),
+            Constraint::Length(1),
+            Constraint::Length(detail),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+        draw_list(frame, app, list);
+        rule(frame, &app.theme, tabs_rule);
+        detail::draw_tabs(frame, app, tabs_rule);
+        detail::draw(frame, app, content);
+        rule(frame, &app.theme, bottom_rule);
+        return;
+    }
     let [list, middle_rule, summary, bottom_rule] = Layout::vertical([
         Constraint::Min(2),
         Constraint::Length(1),
@@ -225,7 +243,7 @@ fn draw_summary(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// The summary is body text, so it keeps the readable colors and only stuck states stand out.
-fn summary_color(theme: &Theme, status: &Status) -> ratatui::style::Color {
+pub(super) fn summary_color(theme: &Theme, status: &Status) -> ratatui::style::Color {
     match status {
         Status::Stalled { .. } => theme.warn,
         Status::Errored { .. } => theme.bad,
@@ -234,7 +252,7 @@ fn summary_color(theme: &Theme, status: &Status) -> ratatui::style::Color {
 }
 
 /// How to apply a fix in the TUI.
-fn fix_hint(fix: Fix) -> &'static str {
+pub(super) fn fix_hint(fix: Fix) -> &'static str {
     match fix {
         Fix::Start => "Press space to start it.",
         Fix::Retry => "Press space to try again.",

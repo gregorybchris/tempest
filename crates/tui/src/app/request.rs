@@ -4,7 +4,10 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use tempest_engine::api::{AddRequest, QueueStep};
+use tempest_engine::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use tempest_protocol::BundleId;
+
+use super::Look;
 
 /// The transfer a request is about, named as it was when the request was made, since it may
 /// be gone (or renamed) by the time the answer comes.
@@ -55,10 +58,12 @@ pub enum Request {
     Categories,
     /// Open a folder on this machine.
     Open(PathBuf),
+    /// Fetch something from inside a transfer.
+    Look(BundleId, Look),
 }
 
 /// What a request that succeeded brought back, where the app needs it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Reply {
     /// Nothing beyond success: the change arrives on the event stream.
     Done,
@@ -66,6 +71,12 @@ pub enum Reply {
     Added(String),
     /// Every category's name.
     Categories(Vec<String>),
+    /// A transfer's files.
+    Files(Vec<FileInfo>),
+    /// A transfer's connections.
+    Peers(Vec<PeerInfo>),
+    /// A transfer's chunk map.
+    Chunks(ChunkMapInfo),
 }
 
 impl Request {
@@ -75,7 +86,7 @@ impl Request {
             (Self::Transfer(target, action), _) => action.success(&target.name),
             (Self::Add(_), Reply::Added(name)) => format!("Added {name}."),
             (Self::Add(_), _) => "Added the link.".to_owned(),
-            (Self::Categories, _) => return None,
+            (Self::Categories | Self::Look(..), _) => return None,
             (Self::Open(path), _) => format!("Opened {}.", path.display()),
         })
     }
@@ -89,6 +100,14 @@ impl Request {
             Self::Add(_) => format!("Couldn't add the link: {error}"),
             Self::Categories => format!("Couldn't load the categories: {error}"),
             Self::Open(path) => format!("Couldn't open {}: {error}", path.display()),
+            Self::Look(_, look) => {
+                let what = match look {
+                    Look::Files => "files",
+                    Look::Peers => "peers",
+                    Look::Chunks(_) => "chunk map",
+                };
+                format!("Couldn't load the {what}: {error}")
+            }
         }
     }
 }

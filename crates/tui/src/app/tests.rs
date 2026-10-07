@@ -463,7 +463,7 @@ fn areas_switch_by_number_or_bracket_and_wrap() {
 #[test]
 fn hints_list_only_keys_that_work() {
     let has = |app: &App, command: Command| {
-        let (keys, _) = command.hint().unwrap();
+        let (keys, _) = command.hint(app.screen()).unwrap();
         app.hints().iter().any(|hint| hint.keys == keys)
     };
     let mut app = app_with(vec![]);
@@ -487,7 +487,10 @@ fn help_lists_the_areas_sections() {
     let mut app = three();
     let titles =
         |app: &App| -> Vec<&str> { app.help_sections().iter().map(|(s, _)| s.title()).collect() };
-    assert_eq!(titles(&app), ["Move", "Transfer", "Queue", "Find", "App"]);
+    assert_eq!(
+        titles(&app),
+        ["Move", "Transfer", "Queue", "Detail", "Find", "App"]
+    );
     press(&mut app, KeyCode::Char('4'));
     assert_eq!(titles(&app), ["App"]);
 }
@@ -537,4 +540,161 @@ fn notices_report_successes_and_failures_and_fade() {
         app.notice.clone().unwrap().text,
         "Couldn't add the link: The link is not valid."
     );
+}
+
+#[test]
+fn enter_opens_the_detail_and_esc_goes_back_one_level() {
+    let mut app = three();
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        None,
+        "the summary needs no fetch"
+    );
+    assert_eq!((app.screen(), app.tab), (Screen::Detail, Tab::Summary));
+    press(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.screen(), Screen::Chunks);
+    press(&mut app, KeyCode::Char('g'));
+    assert_eq!(app.screen(), Screen::Rates);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen(), Screen::Detail);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen(), Screen::List);
+    // Back in the list, esc clears the filters again.
+    assert_eq!(
+        Command::for_key(app.screen(), key(KeyCode::Esc)),
+        Some(Command::ClearFilters)
+    );
+}
+
+#[test]
+fn g_is_the_first_transfer_in_the_list_and_the_rates_in_the_detail() {
+    let mut app = three();
+    type_keys(&mut app, "jj");
+    type_keys(&mut app, "g");
+    assert_eq!(selected_name(&app), Some("alpha"));
+    type_keys(&mut app, "j");
+    press(&mut app, KeyCode::Enter);
+    type_keys(&mut app, "g");
+    assert_eq!(app.screen(), Screen::Rates);
+    assert_eq!(selected_name(&app), Some("beta"), "the selection stays");
+}
+
+#[test]
+fn tabs_cycle_both_ways_and_fetch_what_they_show() {
+    let mut app = three();
+    press(&mut app, KeyCode::Enter);
+    let id = app.selected.unwrap();
+    assert_eq!(
+        press(&mut app, KeyCode::Tab),
+        Some(Request::Look(id, Look::Files))
+    );
+    assert_eq!(app.tab, Tab::Files);
+    // One fetch at a time: the next tick waits for the answer.
+    assert_eq!(app.tick(), None);
+    app.finished(
+        &Request::Look(id, Look::Files),
+        Ok(Reply::Files(Vec::new())),
+    );
+    assert_eq!(app.tick(), Some(Request::Look(id, Look::Files)));
+    assert_eq!(app.notice, None, "fetches make no notices");
+
+    assert_eq!(
+        type_keys(&mut app, "l"),
+        Some(Request::Look(id, Look::Peers))
+    );
+    assert_eq!(
+        type_keys(&mut app, "l"),
+        None,
+        "decisions come from the events"
+    );
+    assert_eq!(app.tab, Tab::Decisions);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.tab, Tab::Summary);
+    press(&mut app, KeyCode::BackTab);
+    type_keys(&mut app, "h");
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.tab, Tab::Files);
+
+    // The chunk map asks for as many cells as the terminal shows.
+    app.resize(100, 30);
+    let cells = crate::chunkmap::cells_for_screen(100, 30);
+    assert_eq!(
+        type_keys(&mut app, "c"),
+        Some(Request::Look(id, Look::Chunks(cells)))
+    );
+}
+
+#[test]
+fn a_failed_fetch_shows_in_its_view() {
+    let mut app = three();
+    press(&mut app, KeyCode::Enter);
+    let request = press(&mut app, KeyCode::Tab).unwrap();
+    app.finished(&request, Err("the engine is shutting down".to_owned()));
+    let files = app.inside().unwrap().files.clone();
+    assert_eq!(
+        files,
+        Some(Err(
+            "Couldn't load the files: the engine is shutting down".to_owned()
+        ))
+    );
+    assert_eq!(app.notice, None);
+}
+
+#[test]
+fn the_detail_scrolls_within_its_rows() {
+    let mut app = three();
+    press(&mut app, KeyCode::Enter);
+    for _ in 0..30 {
+        press(&mut app, KeyCode::Char('j'));
+    }
+    assert_eq!(app.scroll, SUMMARY_ROWS - 1);
+    press(&mut app, KeyCode::Home);
+    assert_eq!(app.scroll, 0);
+    assert_eq!(selected_name(&app), Some("alpha"), "the cursor stays put");
+
+    // Decisions count back from the newest: up scrolls back, down toward the newest.
+    let id = app.selected.unwrap();
+    for n in 0..5 {
+        app.apply(ApiEvent::Decision(tempest_engine::api::DecisionInfo {
+            id,
+            time: f64::from(n),
+            kind: "requested".to_owned(),
+            reason: None,
+            text: n.to_string(),
+        }));
+    }
+    press(&mut app, KeyCode::BackTab);
+    assert_eq!(app.tab, Tab::Decisions);
+    type_keys(&mut app, "kkkkkkk");
+    assert_eq!(app.scroll, 4);
+    type_keys(&mut app, "j");
+    assert_eq!(app.scroll, 3);
+    type_keys(&mut app, "G");
+    assert_eq!(app.scroll, 0);
+}
+
+#[test]
+fn losing_the_selection_closes_the_detail() {
+    let mut app = app_with(vec![transfer(1, "only", 0)]);
+    press(&mut app, KeyCode::Enter);
+    type_keys(&mut app, "c");
+    app.apply(ApiEvent::Removed(RemovedInfo {
+        id: app.selected.unwrap(),
+    }));
+    assert_eq!(app.screen(), Screen::List);
+}
+
+#[test]
+fn hints_follow_the_screen() {
+    let mut app = three();
+    let keys = |app: &App| -> Vec<&str> { app.hints().iter().map(|hint| hint.keys).collect() };
+    assert!(keys(&app).contains(&"enter"));
+    press(&mut app, KeyCode::Enter);
+    let detail = keys(&app);
+    assert_eq!(detail[..5], ["esc", "j/k", "h/l", "c", "g"]);
+    assert!(!detail.contains(&"/"), "no filtering from the detail");
+    assert_eq!(app.screen_title(), "Detail");
+    type_keys(&mut app, "c");
+    assert_eq!(keys(&app)[..2], ["esc", "g"]);
+    assert_eq!(app.help_sections()[0].0, Section::View);
 }

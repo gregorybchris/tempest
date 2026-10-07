@@ -285,7 +285,7 @@ impl App {
     }
 
     fn palette_key(&mut self, mut query: Input, selected: usize, key: KeyEvent) -> Outcome {
-        let matches = commands::palette_matches(self.area, &query.text());
+        let matches = commands::palette_matches(self.screen(), &query.text());
         let last = matches.len().saturating_sub(1);
         let selected = if is(key, KeyCode::Down) || is(key, KeyCode::Tab) || ctrl(key, 'n') {
             (selected + 1).min(last)

@@ -1,9 +1,14 @@
 //! Drawing. Reads the [`App`]; never changes it.
 //!
 //! The screen follows the shared client layout (`specs/interfaces.md`): the areas and rates on
-//! top, the area's content, and a bar of the keys that work at the bottom.
+//! top, the area's content, and a bar of the keys that work at the bottom. In Transfers, the
+//! content is the list with the selected transfer's state or detail below it, or one of its
+//! full-screen views (D-137).
 
+mod chunks;
+mod detail;
 mod modal;
+mod rates;
 mod transfers;
 
 use ratatui::Frame;
@@ -14,7 +19,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use tempest_engine::Status;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Area, Hint, Modal, Origin};
+use crate::app::{App, Area, Hint, Modal, Origin, Screen};
 use crate::format;
 use crate::model::Connection;
 use crate::theme::Theme;
@@ -36,12 +41,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     .areas(area);
     draw_header(frame, app, header);
     rule(frame, theme, top_rule);
-    if app.area == Area::Transfers {
-        draw_finding(frame, app, top_rule);
-    }
-    match app.area {
-        Area::Transfers => transfers::draw(frame, app, body),
-        other => draw_empty_area(frame, theme, other, body),
+    match app.screen() {
+        Screen::List | Screen::Detail => {
+            draw_finding(frame, app, top_rule);
+            transfers::draw(frame, app, body);
+        }
+        Screen::Chunks => chunks::draw(frame, app, body),
+        Screen::Rates => rates::draw(frame, app, body),
+        Screen::Other => draw_empty_area(frame, theme, app.area, body),
     }
     draw_footer(frame, app, footer);
     modal::draw(frame, app, area);
@@ -123,6 +130,13 @@ fn fit(text: &str, width: usize) -> String {
     }
     cut.push('…');
     cut
+}
+
+/// `text` fit to `width` columns and padded to fill them.
+fn pad(text: &str, width: usize) -> String {
+    let fitted = fit(text, width);
+    let fill = width.saturating_sub(fitted.width());
+    fitted + &" ".repeat(fill)
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -270,6 +284,8 @@ mod tests {
         assert_eq!(fit("ensemble.tar", 12), "ensemble.tar");
         assert_eq!(fit("ensemble-2026.tar", 10), "ensemble-…");
         assert_eq!(fit("日本語のファイル", 7), "日本語…");
+        assert_eq!(pad("日本", 6), "日本  ");
+        assert_eq!(pad("ensemble-2026.tar", 10), "ensemble-…");
     }
 
     #[test]

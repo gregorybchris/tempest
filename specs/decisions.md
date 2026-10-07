@@ -3053,3 +3053,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Clients poll these routes while a view shows them. The event stream stays about transfers as a whole.
 
 **Rationale:** The client knows how many cells it can draw, so it asks for that many and the answer stays bounded. Run-length encoding is small for a nearly done download but not for a swarm's scattered chunks. Pushing peer and chunk changes would flood the stream for every client to show views few have open.
+
+---
+
+## D-194: The TUI's detail, chunk map and rates chart
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The client layout puts a transfer's detail below the list, with the chunk map and rates chart one level further in (D-137), and gives `g` to the rates chart while the list already uses it for the first transfer (D-191). The detail needs keys, and the two full-screen views a scale and a source.
+
+**Options for `g`:** move the rates chart to another key; give `g` to whichever screen has the keys (chosen). **For the rates chart:** a history route in the engine; the TUI's own samples (chosen).
+
+**Decision:**
+
+- Keys depend on the screen: the list, the detail, the chunk map or the rates chart. `enter` opens the detail from the list, and `esc` goes back one level. In the list `g` is the first transfer; in the detail and the chunk map it opens the rates chart, and `home` takes the top.
+- In the detail, `tab`/`shift-tab`, `h`/`l` and the arrows switch tabs, and `j`/`k` scroll the tab. Decisions scroll back from the newest. Transfer and queue keys still act on the transfer shown; filtering and sorting stay with the list.
+- Files, peers and the chunk map are fetched when their view opens and once a second while it shows, one request of a kind at a time (D-193). A failed fetch shows in its view, not as a notice.
+- The chunk map asks for two cells per terminal cell below its title and legend, and draws them as half blocks: stored, downloading, missing dimmer the rarer, and no peer holding it. A transfer that isn't running shows only stored and missing.
+- The rates chart draws the TUI's own once-a-second samples, kept for ten minutes, as braille lines for ↓ and ↑. The time axis spans at least a minute, and the rate axis tops out at a round number above the peak.
+
+**Rationale:** One meaning per key per screen keeps the k9s/lazygit habit of keys that follow focus, and the hint bar and help, read from the same table, always show what `g` does where you are. The TUI samples every transfer's rates from the event stream already, so a history route would only matter to a client that just started.

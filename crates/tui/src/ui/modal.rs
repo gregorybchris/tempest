@@ -123,14 +123,18 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
                 section.title(),
                 Style::new().fg(theme.dim).add_modifier(Modifier::BOLD),
             )];
-            lines.extend(commands.into_iter().filter_map(Command::help_line).map(
-                |(keys, label)| {
-                    Line::from(vec![
-                        Span::styled(format!("{keys:>KEYS$}  "), Style::new().fg(theme.hot)),
-                        Span::styled(label, Style::new().fg(theme.fg)),
-                    ])
-                },
-            ));
+            let screen = app.screen();
+            lines.extend(
+                commands
+                    .into_iter()
+                    .filter_map(|c| c.help_line(screen))
+                    .map(|(keys, label)| {
+                        Line::from(vec![
+                            Span::styled(format!("{keys:>KEYS$}  "), Style::new().fg(theme.hot)),
+                            Span::styled(label, Style::new().fg(theme.fg)),
+                        ])
+                    }),
+            );
             lines
         })
         .collect();
@@ -144,7 +148,7 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
     let columns = pack(&blocks, even);
     let height = columns.iter().map(Vec::len).max().unwrap_or(0) as u16 + 4;
     let width = COLUMN * columns.len() as u16 + 3;
-    let title = format!("{} keys", app.area.title());
+    let title = format!("{} keys", app.screen_title());
     let inner = popup(frame, theme, area, (width, height), &title);
     let [body, _, footnote] = Layout::vertical([
         Constraint::Min(0),
@@ -184,7 +188,7 @@ fn pack<'a>(blocks: &[Vec<Line<'a>>], rows: usize) -> Vec<Vec<Line<'a>>> {
 
 fn draw_palette(frame: &mut Frame, app: &App, area: Rect, query: &Input, selected: usize) {
     let theme = &app.theme;
-    let matches = commands::palette_matches(app.area, &query.text());
+    let matches = commands::palette_matches(app.screen(), &query.text());
     let rows = matches.len().clamp(1, PALETTE_ROWS);
     let width = 56.min(area.width.saturating_sub(4));
     let height = rows as u16 + 4;
@@ -245,7 +249,7 @@ fn draw_palette(frame: &mut Frame, app: &App, area: Rect, query: &Input, selecte
 
 fn palette_row(app: &App, command: Command, selected: bool, width: u16) -> Line<'static> {
     let theme = &app.theme;
-    let keys = command.key_label();
+    let keys = command.key_label(app.screen());
     let label_width = usize::from(width).saturating_sub(keys.width() + 3);
     let label = fit(command.label(), label_width);
     let gap = usize::from(width).saturating_sub(label.width() + keys.width() + 2);

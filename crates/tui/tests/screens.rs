@@ -6,10 +6,13 @@ use std::path::PathBuf;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tempest_engine::api::DecisionInfo;
 use tempest_engine::api::client::ApiEvent;
+use tempest_engine::inspect::{CellInfo, ChunkMapInfo, FileInfo, PeerInfo};
 use tempest_engine::{Kind, Status, TransferInfo};
 use tempest_protocol::Hash;
-use tempest_tui::app::{App, Origin, Reply, Request};
+use tempest_tui::app::{App, Look, Origin, Reply, Request};
+use tempest_tui::chunkmap;
 use tempest_tui::model::Connection;
 use tempest_tui::theme::Theme;
 use tempest_tui::ui;
@@ -60,7 +63,14 @@ fn transfers() -> Vec<TransferInfo> {
             connections: 7,
             relayed: 2,
             peers: 12,
+            have: 207_640,
+            chunks: 256_348,
+            downloaded: 3_400_000_000,
+            uploaded: 408_000_000,
             tags: ["music".to_owned()].into(),
+            category: Some("music".to_owned()),
+            content_dir: Some(PathBuf::from("/home/ada/Downloads/ensemble-2026.tar")),
+            link: "tempest:7f3a9c2be1d04a5f8e6b7c9d0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3?n=ensemble-2026.tar".to_owned(),
             ..transfer(0, "ensemble-2026.tar", Status::Downloading)
         },
         TransferInfo {
@@ -297,4 +307,187 @@ fn notices_replace_the_hints() {
     let request = Request::Categories;
     app.finished(&request, Err("cannot reach the engine".to_owned()));
     insta::assert_snapshot!(draw(&app, 80, 8).backend());
+}
+
+/// Answers the fetch the app just started for the first transfer.
+fn answer(app: &mut App, look: Look, reply: Reply) {
+    app.finished(&Request::Look(Hash::new([0; 32]), look), Ok(reply));
+}
+
+fn file(path: &str, size: u64, progress: f64) -> FileInfo {
+    let chunks = size.div_ceil(16_384) as u32;
+    FileInfo {
+        path: path.to_owned(),
+        size,
+        chunks,
+        have: (f64::from(chunks) * progress) as u32,
+        progress,
+    }
+}
+
+fn peer(seed: char, address: &str, relayed: bool, rates: (u64, u64)) -> PeerInfo {
+    PeerInfo {
+        peer_id: seed.to_string().repeat(64),
+        address: address.to_owned(),
+        path: if relayed { "relayed" } else { "direct" }.to_owned(),
+        direction: "dialed".to_owned(),
+        open: true,
+        progress: Some(1.0),
+        we_want: true,
+        they_want: relayed,
+        serving_us: rates.0 > 0,
+        we_serve: rates.1 > 0,
+        snubbed: false,
+        download_rate: rates.0,
+        upload_rate: rates.1,
+        downloaded: 0,
+        uploaded: 0,
+        rtt_ms: Some(30),
+    }
+}
+
+#[test]
+fn the_detail_opens_below_the_list_with_its_tabs() {
+    let mut app = app();
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("detail_summary", draw(&app, 80, 24).backend());
+
+    press(&mut app, "l");
+    insta::assert_snapshot!("detail_files_loading", draw(&app, 80, 24).backend());
+    let files = vec![
+        file("ensemble-2026/disc-1.flac", 2_100_000_000, 1.0),
+        file("ensemble-2026/disc-2.flac", 2_050_000_000, 0.62),
+        file(
+            "ensemble-2026/booklet with a rather long name.pdf",
+            48_000_000,
+            0.0,
+        ),
+        file("ensemble-2026/cover.jpg", 2_000_000, 1.0),
+    ];
+    answer(&mut app, Look::Files, Reply::Files(files));
+    insta::assert_snapshot!("detail_files", draw(&app, 80, 24).backend());
+
+    press(&mut app, "l");
+    let peers = vec![
+        peer('a', "203.0.113.7:4777", false, (6_100_000, 0)),
+        peer('b', "198.51.100.23:51234", true, (2_400_000, 800_000)),
+        peer('c', "[2001:db8::42]:4777", false, (1_300_000, 400_000)),
+    ];
+    answer(&mut app, Look::Peers, Reply::Peers(peers));
+    insta::assert_snapshot!("detail_peers", draw(&app, 80, 24).backend());
+
+    press(&mut app, "l");
+    let id = Hash::new([0; 32]);
+    let events = [
+        (0.0, "started", "Started with 207,640 of 256,348 chunks."),
+        (0.4, "connected", "Connected to aaaaaaaa directly."),
+        (
+            0.5,
+            "requested",
+            "Asked aaaaaaaa for chunks 207,640 to 207,703: the rarest it has.",
+        ),
+        (
+            1.2,
+            "serving",
+            "Serving bbbbbbbb: it sends to us the fastest.",
+        ),
+        (64.3, "endgame", "Asking every peer for the last 12 chunks."),
+    ];
+    for (time, kind, text) in events {
+        app.apply(ApiEvent::Decision(DecisionInfo {
+            id,
+            time,
+            kind: kind.to_owned(),
+            reason: None,
+            text: text.to_owned(),
+        }));
+    }
+    app.apply(ApiEvent::DecisionsMissed(tempest_engine::api::MissedInfo {
+        id,
+        count: 3,
+    }));
+    insta::assert_snapshot!("detail_decisions", draw(&app, 80, 24).backend());
+
+    // Decisions scroll back from the newest.
+    press(&mut app, "kkk");
+    insta::assert_snapshot!("detail_decisions_scrolled", draw(&app, 80, 14).backend());
+
+    // esc goes back one level.
+    press_code(&mut app, KeyCode::Esc);
+    insta::assert_snapshot!("detail_closed", draw(&app, 80, 12).backend());
+}
+
+#[test]
+fn the_chunk_map_fills_the_screen() {
+    let mut app = app();
+    press_code(&mut app, KeyCode::Enter);
+    press(&mut app, "c");
+    insta::assert_snapshot!("chunks_loading", draw(&app, 80, 12).backend());
+
+    let cells = chunkmap::cells_for_screen(80, 24);
+    let map = ChunkMapInfo {
+        chunks: 256_348,
+        running: true,
+        cells: (0..cells)
+            .map(|index| match index * 10 / cells {
+                0..=5 => CellInfo::from([89, 0, 0, 3]),
+                6 => CellInfo::from([40, 9, 40, 2]),
+                7 => CellInfo::from([0, 0, 89, index % 5]),
+                _ => CellInfo::from([0, 0, 89, 0]),
+            })
+            .collect(),
+    };
+    answer(&mut app, Look::Chunks(cells), Reply::Chunks(map));
+    let terminal = draw(&app, 80, 24);
+    insta::assert_snapshot!("chunks", terminal.backend());
+    // Stored cells are lit in the download color, those being downloaded in the hot one.
+    let buffer = terminal.backend().buffer();
+    let theme = Theme::default();
+    assert_eq!(buffer[(0, 5)].fg, theme.down);
+    assert_eq!(buffer[(0, 5)].bg, theme.down);
+    let in_flight = chunkmap::place(cells as usize * 65 / 100, 80);
+    let cell = &buffer[(in_flight.0, 5 + (in_flight.1 / 2) as u16)];
+    assert!(cell.fg == theme.hot || cell.bg == theme.hot);
+
+    // A transfer that isn't running has no rarity to show.
+    let stopped = ChunkMapInfo {
+        chunks: 10,
+        running: false,
+        cells: (0..10)
+            .map(|n| CellInfo::from([u32::from(n < 4), 0, u32::from(n >= 4), 0]))
+            .collect(),
+    };
+    app.tick();
+    answer(&mut app, Look::Chunks(cells), Reply::Chunks(stopped));
+    insta::assert_snapshot!("chunks_stopped", draw(&app, 80, 10).backend());
+
+    press_code(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen(), tempest_tui::app::Screen::Detail);
+}
+
+#[test]
+fn the_rates_chart_fills_the_screen() {
+    let mut app = app();
+    press_code(&mut app, KeyCode::Enter);
+    press(&mut app, "g");
+    insta::assert_snapshot!("rates_empty", draw(&app, 80, 12).backend());
+    for second in 0..120u64 {
+        let wave = (second % 40).abs_diff(20);
+        let mut busy = transfers().remove(0);
+        busy.download_rate = 4_000_000 + wave * 300_000;
+        busy.upload_rate = 500_000 + (second % 7) * 100_000;
+        app.apply(ApiEvent::Transfer(Box::new(busy)));
+        app.tick();
+    }
+    insta::assert_snapshot!("rates", draw(&app, 80, 24).backend());
+    press(&mut app, "c");
+    assert_eq!(app.screen(), tempest_tui::app::Screen::Chunks);
+}
+
+#[test]
+fn help_in_the_detail_lists_its_keys() {
+    let mut app = app();
+    press_code(&mut app, KeyCode::Enter);
+    press(&mut app, "?");
+    insta::assert_snapshot!(draw(&app, 80, 24).backend());
 }

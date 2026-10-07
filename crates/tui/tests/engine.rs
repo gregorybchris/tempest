@@ -191,3 +191,45 @@ async fn keys_rename_tag_reorder_and_remove_through_the_api() {
     engine.shutdown().await;
     serving.abort();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_detail_fetches_files_peers_and_chunks_from_the_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, client, serving) = engine(dir.path()).await;
+    let mut app = App::new(Origin::Daemon, Theme::default());
+    let mut events = client.events(None).await.unwrap();
+    share(&client, dir.path(), "field-notes.txt").await;
+    follow_until(&mut app, &mut events, |app| {
+        app.selected_transfer()
+            .is_some_and(|t| t.status.name() == "sharing")
+    })
+    .await;
+
+    // Files, then peers: none, since nobody is downloading it.
+    press(&mut app, &client, &[KeyCode::Enter, KeyCode::Tab]).await;
+    let files = app.inside().and_then(|inside| inside.files.clone());
+    let files = files.unwrap().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(
+        (files[0].path.as_str(), files[0].progress),
+        ("field-notes.txt", 1.0)
+    );
+    press(&mut app, &client, &[KeyCode::Tab]).await;
+    let peers = app.inside().and_then(|inside| inside.peers.clone());
+    assert_eq!(peers, Some(Ok(Vec::new())));
+
+    // The chunk map, sized for the terminal: one chunk, so one cell.
+    app.resize(80, 24);
+    press(&mut app, &client, &[KeyCode::Char('c')]).await;
+    let map = app.inside().and_then(|inside| inside.chunks.clone());
+    let map = map.unwrap().unwrap();
+    assert!(map.running);
+    assert_eq!((map.chunks, map.cells.len()), (1, 1));
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| ui::draw(frame, &app)).unwrap();
+    let screen = terminal.backend().to_string();
+    assert!(screen.contains("1 chunk, 100% stored"), "{screen}");
+
+    engine.shutdown().await;
+    serving.abort();
+}

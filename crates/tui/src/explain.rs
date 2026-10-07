@@ -79,7 +79,7 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
 
 /// "7 of 12 peers, 2 through relays": the connections, out of the peers known, and how many
 /// are relayed.
-fn connected(transfer: &TransferInfo) -> String {
+pub fn connected(transfer: &TransferInfo) -> String {
     let mut text = if transfer.peers > transfer.connections {
         format!("{} of {} peers", transfer.connections, transfer.peers)
     } else {

@@ -1,9 +1,12 @@
 //! Every command and the keys bound to it. The key handling, the hint bar, the help overlay and
 //! the `:` palette all read this one table.
+//!
+//! A key can mean different things on different screens, as `g` does: the first transfer in the
+//! list, and the rates chart from a transfer's detail (D-194).
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::Area;
+use crate::app::Screen;
 
 /// Something the user can do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,6 +35,13 @@ pub enum Command {
     QueueTop,
     QueueBottom,
 
+    Detail,
+    NextTab,
+    PreviousTab,
+    Chunks,
+    Rates,
+    Back,
+
     Filter,
     StatusFilter,
     Sort,
@@ -59,6 +69,8 @@ pub enum Section {
     Transfer,
     /// Reordering the queue.
     Queue,
+    /// A transfer's detail, chunk map and rates chart.
+    View,
     /// Filtering and sorting.
     Find,
     /// Areas, theme, help: what works everywhere.
@@ -72,20 +84,16 @@ impl Section {
             Self::Move => "Move",
             Self::Transfer => "Transfer",
             Self::Queue => "Queue",
+            Self::View => "Detail",
             Self::Find => "Find",
             Self::App => "App",
         }
-    }
-
-    /// Whether its commands work in `area`.
-    pub fn works_in(self, area: Area) -> bool {
-        self == Self::App || area == Area::Transfers
     }
 }
 
 impl Command {
     /// Every command, in the order help and the palette list them.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 41] = [
         Self::Down,
         Self::Up,
         Self::First,
@@ -106,6 +114,12 @@ impl Command {
         Self::QueueDown,
         Self::QueueTop,
         Self::QueueBottom,
+        Self::Detail,
+        Self::NextTab,
+        Self::PreviousTab,
+        Self::Chunks,
+        Self::Rates,
+        Self::Back,
         Self::Filter,
         Self::StatusFilter,
         Self::Sort,
@@ -123,12 +137,34 @@ impl Command {
         Self::Quit,
     ];
 
-    /// The keys bound to it, the first being the one shown.
-    pub fn keys(self) -> &'static [KeyCode] {
+    /// Whether it works on `screen`.
+    pub fn works_in(self, screen: Screen) -> bool {
+        let deeper = matches!(screen, Screen::Detail | Screen::Chunks | Screen::Rates);
+        match self {
+            Self::Detail => screen == Screen::List,
+            Self::NextTab | Self::PreviousTab => screen == Screen::Detail,
+            Self::Chunks => matches!(screen, Screen::Detail | Screen::Rates),
+            Self::Rates => matches!(screen, Screen::Detail | Screen::Chunks),
+            Self::Back => deeper,
+            _ => match self.section() {
+                Section::Move | Section::Transfer | Section::Queue => {
+                    matches!(screen, Screen::List | Screen::Detail)
+                }
+                Section::Find => screen == Screen::List,
+                Section::View => deeper,
+                Section::App => true,
+            },
+        }
+    }
+
+    /// The keys bound to it on `screen`, the first being the one shown.
+    pub fn keys(self, screen: Screen) -> &'static [KeyCode] {
         use KeyCode::*;
         match self {
             Self::Down => &[Char('j'), KeyCode::Down],
             Self::Up => &[Char('k'), KeyCode::Up],
+            // In the detail, `g` opens the rates chart.
+            Self::First if screen == Screen::Detail => &[Home],
             Self::First => &[Char('g'), Home],
             Self::Last => &[Char('G'), End],
             Self::PageDown => &[KeyCode::PageDown],
@@ -147,6 +183,12 @@ impl Command {
             Self::QueueDown => &[Char('J')],
             Self::QueueTop => &[Char('<')],
             Self::QueueBottom => &[Char('>')],
+            Self::Detail => &[Enter],
+            Self::NextTab => &[Tab, Char('l'), Right],
+            Self::PreviousTab => &[BackTab, Char('h'), Left],
+            Self::Chunks => &[Char('c')],
+            Self::Rates => &[Char('g')],
+            Self::Back => &[Esc],
             Self::Filter => &[Char('/')],
             Self::StatusFilter => &[Char('f')],
             Self::Sort => &[Char('s')],
@@ -188,6 +230,12 @@ impl Command {
             Self::QueueDown => "Down the queue",
             Self::QueueTop => "Top of the queue",
             Self::QueueBottom => "Bottom of the queue",
+            Self::Detail => "Show its detail",
+            Self::NextTab => "Next tab",
+            Self::PreviousTab => "Previous tab",
+            Self::Chunks => "Chunk map",
+            Self::Rates => "Rates chart",
+            Self::Back => "Back",
             Self::Filter => "Filter by name or #tag",
             Self::StatusFilter => "Filter by status",
             Self::Sort => "Sort by…",
@@ -206,10 +254,16 @@ impl Command {
         }
     }
 
-    /// The keys and a word or two, as the hint bar shows it, if it ever does.
-    pub fn hint(self) -> Option<(&'static str, &'static str)> {
+    /// The keys and a word or two, as the hint bar shows it on `screen`, if it ever does.
+    pub fn hint(self, screen: Screen) -> Option<(&'static str, &'static str)> {
         Some(match self {
+            Self::Down if screen == Screen::Detail => ("j/k", "scroll"),
             Self::Down => ("j/k", "move"),
+            Self::Detail => ("enter", "detail"),
+            Self::NextTab => ("h/l", "tabs"),
+            Self::Chunks => ("c", "chunks"),
+            Self::Rates => ("g", "rates"),
+            Self::Back => ("esc", "back"),
             Self::StartStop => ("space", "start/stop"),
             Self::Add => ("a", "add"),
             Self::Remove => ("x", "remove"),
@@ -225,13 +279,16 @@ impl Command {
         })
     }
 
-    /// Its line in help, as keys and what they do. Pairs of commands share a line, which the
-    /// first of them gives; the second gives none.
-    pub fn help_line(self) -> Option<(String, &'static str)> {
+    /// Its line in help on `screen`, as keys and what they do. Pairs of commands share a line,
+    /// which the first of them gives; the second gives none.
+    pub fn help_line(self, screen: Screen) -> Option<(String, &'static str)> {
         let pair = |keys: &str, label| Some((keys.to_owned(), label));
         match self {
+            Self::Down if screen == Screen::Detail => pair("j/k", "Scroll down/up"),
             Self::Down => pair("j/k", "Move down/up"),
+            Self::First if screen == Screen::Detail => pair("home/end", "Top/bottom"),
             Self::First => pair("g/G", "First/last"),
+            Self::NextTab => pair("tab h/l", "Next/previous tab"),
             Self::PageDown => pair("pgdn/pgup", "Page down/up"),
             Self::QueueUp => pair("K/J", "Up/down the queue"),
             Self::QueueTop => pair("</>", "Top/bottom of the queue"),
@@ -242,11 +299,12 @@ impl Command {
             | Self::PageUp
             | Self::QueueDown
             | Self::QueueBottom
+            | Self::PreviousTab
             | Self::GoShare
             | Self::GoCatalog
             | Self::GoSettings
             | Self::PreviousArea => None,
-            _ => Some((self.key_label(), self.label())),
+            _ => Some((self.key_label(screen), self.label())),
         }
     }
 
@@ -267,6 +325,12 @@ impl Command {
             | Self::MoveStorage
             | Self::Open => Section::Transfer,
             Self::QueueUp | Self::QueueDown | Self::QueueTop | Self::QueueBottom => Section::Queue,
+            Self::Detail
+            | Self::NextTab
+            | Self::PreviousTab
+            | Self::Chunks
+            | Self::Rates
+            | Self::Back => Section::View,
             Self::Filter | Self::StatusFilter | Self::Sort | Self::Reverse | Self::ClearFilters => {
                 Section::Find
             }
@@ -279,17 +343,17 @@ impl Command {
         self.section() != Section::Move && self != Self::Palette
     }
 
-    /// Its keys as help shows them: "x del".
-    pub fn key_label(self) -> String {
-        self.keys()
+    /// Its keys on `screen` as help shows them: "x del".
+    pub fn key_label(self, screen: Screen) -> String {
+        self.keys(screen)
             .iter()
             .map(|code| key_name(*code))
             .collect::<Vec<_>>()
             .join(" ")
     }
 
-    /// The command `key` runs in `area`, if any.
-    pub fn for_key(area: Area, key: KeyEvent) -> Option<Self> {
+    /// The command `key` runs on `screen`, if any.
+    pub fn for_key(screen: Screen, key: KeyEvent) -> Option<Self> {
         if key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
@@ -298,7 +362,7 @@ impl Command {
         }
         Self::ALL
             .into_iter()
-            .find(|command| command.section().works_in(area) && command.keys().contains(&key.code))
+            .find(|command| command.works_in(screen) && command.keys(screen).contains(&key.code))
     }
 }
 
@@ -315,6 +379,11 @@ fn key_name(code: KeyCode) -> String {
         KeyCode::PageDown => "pgdn".to_owned(),
         KeyCode::Delete => "del".to_owned(),
         KeyCode::Esc => "esc".to_owned(),
+        KeyCode::Enter => "enter".to_owned(),
+        KeyCode::Tab => "tab".to_owned(),
+        KeyCode::BackTab => "⇧tab".to_owned(),
+        KeyCode::Left => "←".to_owned(),
+        KeyCode::Right => "→".to_owned(),
         other => other.to_string().to_lowercase(),
     }
 }
@@ -349,12 +418,12 @@ pub fn match_score(query: &str, label: &str) -> Option<usize> {
     Some(3 + last - first.unwrap_or(0))
 }
 
-/// The palette's commands for `area` matching `query`, best first.
-pub fn palette_matches(area: Area, query: &str) -> Vec<Command> {
+/// The palette's commands for `screen` matching `query`, best first.
+pub fn palette_matches(screen: Screen, query: &str) -> Vec<Command> {
     let mut matches: Vec<(usize, usize, Command)> = Command::ALL
         .into_iter()
         .enumerate()
-        .filter(|(_, command)| command.in_palette() && command.section().works_in(area))
+        .filter(|(_, command)| command.in_palette() && command.works_in(screen))
         .filter_map(|(index, command)| Some((match_score(query, command.label())?, index, command)))
         .collect();
     matches.sort_by_key(|(score, index, _)| (*score, *index));
@@ -369,82 +438,87 @@ mod tests {
 
     #[test]
     fn no_two_commands_share_a_key_where_both_work() {
-        for area in Area::ALL {
+        for screen in Screen::ALL {
             let mut seen = HashSet::new();
             for command in Command::ALL {
-                if !command.section().works_in(area) {
+                if !command.works_in(screen) {
                     continue;
                 }
-                for key in command.keys() {
-                    assert!(seen.insert(*key), "{key:?} is bound twice in {area:?}");
+                for key in command.keys(screen) {
+                    assert!(seen.insert(*key), "{key:?} is bound twice on {screen:?}");
                 }
             }
         }
+    }
+
+    #[test]
+    fn g_goes_to_the_top_of_the_list_and_to_the_rates_from_the_detail() {
+        let g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+        assert_eq!(Command::for_key(Screen::List, g), Some(Command::First));
+        assert_eq!(Command::for_key(Screen::Detail, g), Some(Command::Rates));
+        assert_eq!(Command::for_key(Screen::Chunks, g), Some(Command::Rates));
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(
+            Command::for_key(Screen::List, esc),
+            Some(Command::ClearFilters)
+        );
+        assert_eq!(Command::for_key(Screen::Rates, esc), Some(Command::Back));
     }
 
     #[test]
     fn keys_find_their_commands_in_their_areas() {
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         assert_eq!(
-            Command::for_key(Area::Transfers, key('x')),
+            Command::for_key(Screen::List, key('x')),
             Some(Command::Remove)
         );
-        assert_eq!(Command::for_key(Area::Share, key('x')), None);
+        assert_eq!(Command::for_key(Screen::Other, key('x')), None);
         assert_eq!(
-            Command::for_key(Area::Share, key('T')),
+            Command::for_key(Screen::Other, key('T')),
             Some(Command::Theme)
         );
         let shifted = KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT);
         assert_eq!(
-            Command::for_key(Area::Transfers, shifted),
+            Command::for_key(Screen::List, shifted),
             Some(Command::QueueUp)
         );
         let ctrl = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
-        assert_eq!(Command::for_key(Area::Transfers, ctrl), None);
-        assert_eq!(Command::Remove.key_label(), "x del");
+        assert_eq!(Command::for_key(Screen::List, ctrl), None);
+        assert_eq!(Command::Remove.key_label(Screen::List), "x del");
     }
 
     #[test]
-    fn hints_show_a_bound_key() {
-        for command in Command::ALL {
-            if let Some((keys, _)) = command.hint() {
-                assert!(
-                    command.key_label().split(' ').any(|k| keys.starts_with(k)),
-                    "{command:?} hints {keys} but is bound to {}",
-                    command.key_label()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn help_shows_a_bound_key() {
-        for command in Command::ALL {
-            if let Some((keys, _)) = command.help_line() {
-                assert!(
-                    command.key_label().split(' ').any(|k| keys.starts_with(k)),
-                    "{command:?} shows {keys} but is bound to {}",
-                    command.key_label()
-                );
+    fn hints_and_help_show_a_bound_key() {
+        for screen in Screen::ALL {
+            for command in Command::ALL.into_iter().filter(|c| c.works_in(screen)) {
+                let label = command.key_label(screen);
+                let hint = command.hint(screen).map(|(keys, _)| keys.to_owned());
+                let help = command.help_line(screen).map(|(keys, _)| keys);
+                for keys in hint.into_iter().chain(help) {
+                    // Paired keys, as in "h/l", need only one bound to the command.
+                    let bound = |shown: &str| label.split(' ').any(|k| shown.starts_with(k));
+                    assert!(
+                        bound(&keys) || keys.split('/').any(bound),
+                        "{command:?} shows {keys} on {screen:?} but is bound to {label}"
+                    );
+                }
             }
         }
     }
 
     #[test]
     fn the_palette_ranks_closer_matches_first() {
-        assert_eq!(palette_matches(Area::Transfers, "").len(), 28);
-        assert_eq!(palette_matches(Area::Transfers, "rem")[0], Command::Remove);
-        assert_eq!(palette_matches(Area::Transfers, "tags")[0], Command::Tags);
+        assert_eq!(palette_matches(Screen::List, "").len(), 29);
+        assert_eq!(palette_matches(Screen::List, "rem")[0], Command::Remove);
+        assert_eq!(palette_matches(Screen::List, "tags")[0], Command::Tags);
+        assert_eq!(palette_matches(Screen::List, "queue")[0], Command::QueueUp);
         assert_eq!(
-            palette_matches(Area::Transfers, "queue")[0],
-            Command::QueueUp
-        );
-        assert_eq!(
-            palette_matches(Area::Transfers, "fbs"),
+            palette_matches(Screen::List, "fbs"),
             [Command::StatusFilter]
         );
-        assert!(palette_matches(Area::Transfers, "zzz").is_empty());
-        assert_eq!(palette_matches(Area::Share, "rem"), []);
+        assert!(palette_matches(Screen::List, "zzz").is_empty());
+        assert_eq!(palette_matches(Screen::Other, "rem"), []);
+        assert_eq!(palette_matches(Screen::Detail, "chunk")[0], Command::Chunks);
         assert_eq!(match_score("set cat", "Set the category"), Some(3 + 10));
     }
 }

@@ -61,6 +61,31 @@ pub fn percent(share: f64) -> String {
     format!("{percent:.0}%")
 }
 
+/// A whole number with commas between thousands: `256,348`.
+pub fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut text = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
+}
+
+/// A time on a session's clock, in seconds since it started, to a tenth of a second:
+/// `0:07.3`, `12:03.0`, `1:02:03.5`.
+pub fn clock(seconds: f64) -> String {
+    let tenths = (seconds.max(0.0) * 10.0).floor() as u64;
+    let (whole, tenth) = (tenths / 10, tenths % 10);
+    let (hours, minutes, seconds) = (whole / 3600, whole / 60 % 60, whole % 60);
+    match hours {
+        0 => format!("{minutes}:{seconds:02}.{tenth}"),
+        hours => format!("{hours}:{minutes:02}:{seconds:02}.{tenth}"),
+    }
+}
+
 /// `count` of a noun, with an `s` unless it is one: "1 peer", "3 peers".
 pub fn count(count: usize, noun: &str) -> String {
     match count {
@@ -106,6 +131,23 @@ mod tests {
         assert_eq!(duration_words(61), "2 minutes");
         assert_eq!(duration_words(3600), "1 hour");
         assert_eq!(duration_words(3 * 86_400), "3 days");
+    }
+
+    #[test]
+    fn thousands_are_separated() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1000), "1,000");
+        assert_eq!(thousands(256_348), "256,348");
+        assert_eq!(thousands(12_345_678), "12,345,678");
+    }
+
+    #[test]
+    fn clocks_count_from_the_session_start() {
+        assert_eq!(clock(7.36), "0:07.3");
+        assert_eq!(clock(723.0), "12:03.0");
+        assert_eq!(clock(3723.5), "1:02:03.5");
+        assert_eq!(clock(-1.0), "0:00.0");
     }
 
     #[test]

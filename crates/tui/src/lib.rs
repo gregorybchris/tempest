@@ -7,11 +7,13 @@
 //! - [`ui`]: drawing the state.
 //! - [`explain`]: transfer states in plain language.
 //! - [`columns`], [`format`] and [`theme`]: how the list fits, numbers read and colors look.
+//! - [`chunkmap`]: how a transfer's chunk map fits the terminal and shades its cells.
 //! - [`input`]: one line of text being typed.
 //!
 //! [`run`] connects them to a terminal and an engine.
 
 pub mod app;
+pub mod chunkmap;
 pub mod columns;
 pub mod commands;
 pub mod explain;
@@ -38,7 +40,7 @@ use tempest_engine::api::QueuePlace;
 use tempest_engine::api::client::{ApiClient, ApiEvent};
 use tokio::sync::mpsc;
 
-use crate::app::{Action, App, Origin, Reply, Request};
+use crate::app::{Action, App, Look, Origin, Reply, Request};
 use crate::model::Connection;
 use crate::theme::Theme;
 
@@ -91,9 +93,15 @@ async fn main_loop(
     let mut ticks = tokio::time::interval(Duration::from_secs(1));
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
+        let size = terminal.size()?;
+        app.resize(size.width, size.height);
         terminal.draw(|frame| ui::draw(frame, &app))?;
         tokio::select! {
-            _ = ticks.tick() => app.tick(),
+            _ = ticks.tick() => {
+                if let Some(request) = app.tick() {
+                    tokio::spawn(send(client.clone(), request, sender.clone()));
+                }
+            }
             message = messages.recv() => {
                 let Some(message) = message else { return Ok(()) };
                 handle(&mut app, client, &sender, message);
@@ -168,6 +176,14 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
             .await
             .map(|categories| Reply::Categories(categories.into_keys().collect()))
             .map_err(|e| e.to_string()),
+        Request::Look(id, look) => {
+            let reply = match *look {
+                Look::Files => client.files(*id).await.map(Reply::Files),
+                Look::Peers => client.peers(*id).await.map(Reply::Peers),
+                Look::Chunks(cells) => client.chunk_map(*id, cells).await.map(Reply::Chunks),
+            };
+            reply.map_err(|e| e.to_string())
+        }
         Request::Open(folder) => {
             let folder = folder.clone();
             tokio::task::spawn_blocking(move || open(folder))

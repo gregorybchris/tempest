@@ -1,6 +1,7 @@
 //! The TUI's state and what keys do to it. Nothing here draws (see `ui`) or does I/O: what
 //! needs the engine or the system comes back as a [`Request`] for the runtime to carry out.
 
+mod inside;
 mod modal;
 mod request;
 
@@ -10,8 +11,10 @@ use tempest_engine::api::client::ApiEvent;
 use tempest_engine::{Status, TransferInfo};
 use tempest_protocol::BundleId;
 
+pub use self::inside::{Fetched, Inside, Look};
 pub use self::modal::{AddField, AddForm, Modal, PickItem, PickKind, TextKind};
 pub use self::request::{Action, Reply, Request, Target, parse_tags};
+use crate::chunkmap;
 use crate::commands::{Command, Section};
 use crate::finding::{Finding, SortKey, StatusFilter};
 use crate::input::Input;
@@ -55,6 +58,79 @@ impl Area {
     }
 }
 
+/// How far into the selected transfer the Transfers area goes (D-137).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// The list, with the selected transfer's state below it.
+    List,
+    /// The list, with the selected transfer's detail below it.
+    Detail,
+    /// The selected transfer's chunk map, full screen.
+    Chunks,
+    /// The selected transfer's rates over time, full screen.
+    Rates,
+}
+
+/// The detail's tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    /// Its state in plain language, and its numbers.
+    Summary,
+    /// Its files.
+    Files,
+    /// Its connections.
+    Peers,
+    /// Its decision log.
+    Decisions,
+}
+
+impl Tab {
+    /// Every tab, in order.
+    pub const ALL: [Self; 4] = [Self::Summary, Self::Files, Self::Peers, Self::Decisions];
+
+    /// Its name on the tab bar.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Summary => "Summary",
+            Self::Files => "Files",
+            Self::Peers => "Peers",
+            Self::Decisions => "Decisions",
+        }
+    }
+
+    fn step(self, by: isize) -> Self {
+        let index = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0);
+        let count = Self::ALL.len() as isize;
+        Self::ALL[(index as isize + by).rem_euclid(count) as usize]
+    }
+}
+
+/// What has the keys: a level of the Transfers area, or another area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Screen {
+    /// The transfers list.
+    List,
+    /// A transfer's detail, below the list.
+    Detail,
+    /// A transfer's chunk map.
+    Chunks,
+    /// A transfer's rates chart.
+    Rates,
+    /// Share, Catalog or Settings.
+    Other,
+}
+
+impl Screen {
+    /// Every screen.
+    pub const ALL: [Self; 5] = [
+        Self::List,
+        Self::Detail,
+        Self::Chunks,
+        Self::Rates,
+        Self::Other,
+    ];
+}
+
 /// Where the engine the TUI talks to runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
@@ -90,6 +166,9 @@ const NOTICE_TICKS: u8 = 5;
 /// How far page up and down move.
 const PAGE: isize = 10;
 
+/// The most rows the summary tab has.
+pub const SUMMARY_ROWS: usize = 14;
+
 /// The whole TUI's state.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -107,6 +186,17 @@ pub struct App {
     pub finding: Finding,
     /// The transfer the cursor is on.
     pub selected: Option<BundleId>,
+    /// How far into the selected transfer the Transfers area goes.
+    pub view: View,
+    /// The detail's tab.
+    pub tab: Tab,
+    /// How far the detail's tab is scrolled: rows from the top, or for decisions from the
+    /// newest.
+    pub scroll: usize,
+    /// What has been fetched from inside the selected transfer.
+    pub inside: Inside,
+    /// The terminal's width and height.
+    pub size: (u16, u16),
     /// What is open over the list.
     pub modal: Option<Modal>,
     /// The categories' names, once fetched.
@@ -129,6 +219,11 @@ impl App {
             theme,
             finding: Finding::default(),
             selected: None,
+            view: View::List,
+            tab: Tab::Summary,
+            scroll: 0,
+            inside: Inside::default(),
+            size: (80, 24),
             modal: None,
             categories: None,
             notice: None,
@@ -152,15 +247,28 @@ impl App {
         self.model.transfer(&self.selected?)
     }
 
+    /// What has the keys.
+    pub fn screen(&self) -> Screen {
+        match (self.area, self.view) {
+            (Area::Transfers, View::List) => Screen::List,
+            (Area::Transfers, View::Detail) => Screen::Detail,
+            (Area::Transfers, View::Chunks) => Screen::Chunks,
+            (Area::Transfers, View::Rates) => Screen::Rates,
+            _ => Screen::Other,
+        }
+    }
+
     /// Whether `command` would do anything now.
     pub fn works(&self, command: Command) -> bool {
-        if !command.section().works_in(self.area) {
+        let screen = self.screen();
+        if !command.works_in(screen) {
             return false;
         }
         let selected = self.selected.is_some();
         match command.section() {
-            Section::Move => !self.visible().is_empty(),
+            Section::Move => screen == Screen::Detail || !self.visible().is_empty(),
             Section::Transfer | Section::Queue => command == Command::Add || selected,
+            Section::View => selected,
             Section::Find => command != Command::ClearFilters || self.finding.filtering(),
             Section::App => true,
         }
@@ -171,9 +279,14 @@ impl App {
         if let Some(modal) = &self.modal {
             return Self::modal_hints(modal);
         }
-        const ORDER: [Command; 12] = [
+        const ORDER: [Command; 17] = [
             Command::ClearFilters,
+            Command::Back,
             Command::Down,
+            Command::NextTab,
+            Command::Detail,
+            Command::Chunks,
+            Command::Rates,
             Command::StartStop,
             Command::Filter,
             Command::Add,
@@ -185,22 +298,24 @@ impl App {
             Command::Quit,
             Command::Help,
         ];
+        let screen = self.screen();
         ORDER
             .into_iter()
             .filter(|command| self.works(*command))
-            .filter_map(Command::hint)
+            .filter_map(|command| command.hint(screen))
             .map(|(keys, action)| Hint { keys, action })
             .collect()
     }
 
-    /// The current area's commands by section, for the help overlay.
+    /// The current screen's commands by section, for the help overlay.
     pub fn help_sections(&self) -> Vec<(Section, Vec<Command>)> {
+        let screen = self.screen();
         let mut sections: Vec<(Section, Vec<Command>)> = Vec::new();
         for command in Command::ALL {
-            let section = command.section();
-            if !section.works_in(self.area) {
+            if !command.works_in(screen) {
                 continue;
             }
+            let section = command.section();
             match sections.last_mut() {
                 Some((last, commands)) if *last == section => commands.push(command),
                 _ => sections.push((section, vec![command])),
@@ -209,11 +324,25 @@ impl App {
         sections
     }
 
+    /// The current screen's name, as help titles it.
+    pub fn screen_title(&self) -> &'static str {
+        match self.screen() {
+            Screen::List | Screen::Other => self.area.title(),
+            Screen::Detail => "Detail",
+            Screen::Chunks => "Chunk map",
+            Screen::Rates => "Rates",
+        }
+    }
+
     /// Takes in an event from the engine, keeping the cursor on a transfer that is shown.
     pub fn apply(&mut self, event: ApiEvent) {
         let cursor = self.cursor();
         self.model.apply(event);
         self.keep_cursor(cursor);
+        // With nothing selected, there is nothing to look inside.
+        if self.selected.is_none() {
+            self.view = View::List;
+        }
     }
 
     /// Moves the cursor to a shown transfer if it is on one that isn't, near where it was.
@@ -236,8 +365,9 @@ impl App {
         self.change_finding(|finding| finding.text = text);
     }
 
-    /// Called once a second.
-    pub fn tick(&mut self) {
+    /// Called once a second. Returns the fetch that keeps the open view up to date, if it
+    /// needs one.
+    pub fn tick(&mut self) -> Option<Request> {
         self.model.sample();
         if let Some(notice) = &mut self.notice {
             notice.ticks_left = notice.ticks_left.saturating_sub(1);
@@ -245,6 +375,32 @@ impl App {
                 self.notice = None;
             }
         }
+        self.fetch()
+    }
+
+    /// Notes the terminal's size, which decides how many cells the chunk map asks for.
+    pub fn resize(&mut self, width: u16, height: u16) {
+        self.size = (width, height);
+    }
+
+    /// The fetch the open view needs from inside the selected transfer, unless one is under
+    /// way.
+    pub fn fetch(&mut self) -> Option<Request> {
+        let id = self.selected?;
+        let look = match self.screen() {
+            Screen::Detail if self.tab == Tab::Files => Look::Files,
+            Screen::Detail if self.tab == Tab::Peers => Look::Peers,
+            Screen::Chunks => Look::Chunks(chunkmap::cells_for_screen(self.size.0, self.size.1)),
+            _ => return None,
+        };
+        self.inside
+            .start(id, look)
+            .then_some(Request::Look(id, look))
+    }
+
+    /// What has been fetched from inside the selected transfer.
+    pub fn inside(&self) -> Option<&Inside> {
+        self.inside.of(self.selected?)
     }
 
     /// Shows a message about something that just happened.
@@ -258,6 +414,11 @@ impl App {
 
     /// Reports how a request went: `Err` holds the engine's explanation.
     pub fn finished(&mut self, request: &Request, result: Result<Reply, String>) {
+        if let Request::Look(id, look) = request {
+            let result = result.map_err(|error| request.failure(&error));
+            self.inside.receive(*id, *look, result);
+            return;
+        }
         match result {
             Ok(Reply::Categories(categories)) => self.categories = Some(categories),
             Ok(reply) => {
@@ -278,21 +439,45 @@ impl App {
         if let Some(modal) = self.modal.take() {
             return self.modal_key(modal, key);
         }
-        self.run(Command::for_key(self.area, key)?)
+        self.run(Command::for_key(self.screen(), key)?)
     }
 
     /// Runs `command`, from its key or the palette.
     pub fn run(&mut self, command: Command) -> Option<Request> {
-        if !command.section().works_in(self.area) {
+        if !command.works_in(self.screen()) {
             return None;
         }
         match command {
-            Command::Down => self.move_cursor(1),
-            Command::Up => self.move_cursor(-1),
-            Command::First => self.move_cursor(isize::MIN),
-            Command::Last => self.move_cursor(isize::MAX),
-            Command::PageDown => self.move_cursor(PAGE),
-            Command::PageUp => self.move_cursor(-PAGE),
+            Command::Down => self.move_by(1),
+            Command::Up => self.move_by(-1),
+            Command::First => self.move_by(isize::MIN),
+            Command::Last => self.move_by(isize::MAX),
+            Command::PageDown => self.move_by(PAGE),
+            Command::PageUp => self.move_by(-PAGE),
+
+            Command::Detail if self.selected.is_some() => {
+                self.view = View::Detail;
+                self.scroll = 0;
+                return self.fetch();
+            }
+            Command::NextTab | Command::PreviousTab => {
+                let by = if command == Command::NextTab { 1 } else { -1 };
+                self.tab = self.tab.step(by);
+                self.scroll = 0;
+                return self.fetch();
+            }
+            Command::Chunks => {
+                self.view = View::Chunks;
+                return self.fetch();
+            }
+            Command::Rates => self.view = View::Rates,
+            Command::Back => {
+                self.view = match self.view {
+                    View::List | View::Detail => View::List,
+                    View::Chunks | View::Rates => View::Detail,
+                };
+                return self.fetch();
+            }
 
             Command::Add => {
                 self.modal = Some(Modal::Add(Box::default()));
@@ -430,6 +615,29 @@ impl App {
         Some(Request::Transfer(target, action))
     }
 
+    /// Moves the cursor in the list, or scrolls the detail's tab.
+    fn move_by(&mut self, by: isize) {
+        if self.screen() != Screen::Detail {
+            return self.move_cursor(by);
+        }
+        // Decisions count from the newest, at the bottom, so down goes toward it.
+        let by = if self.tab == Tab::Decisions { -by } else { by };
+        let last = self.tab_rows().saturating_sub(1);
+        self.scroll = self.scroll.saturating_add_signed(by).min(last);
+    }
+
+    /// How many rows the detail's tab has to scroll through.
+    fn tab_rows(&self) -> usize {
+        let Some(id) = self.selected else { return 0 };
+        let inside = self.inside();
+        match self.tab {
+            Tab::Summary => SUMMARY_ROWS,
+            Tab::Files => inside.and_then(|i| loaded(&i.files)).map_or(0, Vec::len),
+            Tab::Peers => inside.and_then(|i| loaded(&i.peers)).map_or(0, Vec::len),
+            Tab::Decisions => self.model.decisions(&id).map_or(0, |d| d.events.len()),
+        }
+    }
+
     fn move_cursor(&mut self, by: isize) {
         let visible = self.visible();
         let Some(last) = visible.len().checked_sub(1) else {
@@ -459,6 +667,11 @@ impl App {
         };
         Some(Request::Transfer(target, action))
     }
+}
+
+/// What was fetched, if it was.
+pub fn loaded<T>(fetched: &Fetched<T>) -> Option<&T> {
+    fetched.as_ref()?.as_ref().ok()
 }
 
 #[cfg(test)]

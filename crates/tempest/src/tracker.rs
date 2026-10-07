@@ -2,12 +2,17 @@
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tempest_protocol::{BundleId, RelayIdentity};
+use tempest_relay::RelayConfig;
 use tempest_tracker::{DEFAULT_PORT, Tracker, TrackerConfig};
 use tokio::net::TcpListener;
+use tokio::sync::watch;
+
+use crate::relay;
 
 #[derive(Debug, clap::Args)]
 pub struct TrackerArgs {
@@ -32,6 +37,18 @@ pub struct TrackerArgs {
     /// Serve only this bundle, making the tracker private. Repeat for more.
     #[arg(long, value_name = "BUNDLE")]
     allow: Vec<BundleId>,
+    /// Also run a relay, with the default limits of `tempest relay`.
+    #[arg(long)]
+    run_relay: bool,
+    /// The relay's UDP port.
+    #[arg(long, default_value_t = tempest_relay::DEFAULT_PORT, requires = "run_relay")]
+    relay_port: u16,
+    /// The relay's public IP address. With it, the tracker recommends its own relay to peers.
+    #[arg(long, value_name = "IP", requires = "run_relay")]
+    relay_public_ip: Option<IpAddr>,
+    /// The relay's key file. Created if missing. Defaults to that of `tempest relay`.
+    #[arg(long, value_name = "FILE", requires = "run_relay")]
+    relay_identity: Option<PathBuf>,
     /// Requests arrive through a reverse proxy, such as one that adds HTTPS: take the client's
     /// IP from the last `X-Forwarded-For` entry.
     #[arg(long)]
@@ -39,7 +56,11 @@ pub struct TrackerArgs {
 }
 
 pub fn tracker(args: TrackerArgs) -> Result<()> {
-    let config = TrackerConfig {
+    let relay_identity = args
+        .run_relay
+        .then(|| relay::load_identity(args.relay_identity.as_ref()))
+        .transpose()?;
+    let mut config = TrackerConfig {
         interval: Duration::from_secs(args.interval.max(1)),
         min_interval: Duration::from_secs(args.min_interval),
         max_peers: args.max_peers,
@@ -50,14 +71,45 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
     };
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
     runtime.block_on(async {
+        // Relaying is one of the tracker's roles (D-028).
+        let relay = match &relay_identity {
+            Some(identity) => {
+                let relay_config = RelayConfig {
+                    public_ip: args.relay_public_ip,
+                    ..RelayConfig::new(SocketAddr::new(
+                        Ipv4Addr::UNSPECIFIED.into(),
+                        args.relay_port,
+                    ))
+                };
+                let relay = relay::start(identity, relay_config, args.bind)?;
+                config
+                    .relays
+                    .extend(relay::identity_of(&relay, args.relay_public_ip)?);
+                Some(relay)
+            }
+            None => None,
+        };
+
         let listener = bind(args.bind, args.port).await?;
         let address = listener.local_addr()?;
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
         let tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
-        let shutdown = async {
+        let (stop, stopped) = watch::channel(false);
+        tokio::spawn(async move {
             let _ = tokio::signal::ctrl_c().await;
+            let _ = stop.send(true);
+        });
+        let shutdown = |mut stopped: watch::Receiver<bool>| async move {
+            let _ = stopped.wait_for(|stop| *stop).await;
         };
-        tracker.serve(listener, shutdown).await?;
+        let relaying = async {
+            if let Some(relay) = &relay {
+                relay.serve(shutdown(stopped.clone())).await;
+            }
+        };
+        let (served, ()) =
+            tokio::join!(tracker.serve(listener, shutdown(stopped.clone())), relaying);
+        served?;
         eprintln!("stopped");
         Ok(())
     })

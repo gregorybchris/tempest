@@ -2580,6 +2580,7 @@ dependencies = [
  "tempest-engine",
  "tempest-net",
  "tempest-protocol",
+ "tempest-relay",
  "tempest-sim",
  "tempest-tracker",
  "tempfile",
@@ -2664,6 +2665,19 @@ dependencies = [
  "sha2",
  "thiserror 2.0.21",
  "unicode-normalization",
+]
+
+[[package]]
+name = "tempest-relay"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "quinn",
+ "socket2",
+ "tempest-net",
+ "tempest-protocol",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

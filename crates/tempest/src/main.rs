@@ -5,6 +5,7 @@ mod engine;
 mod get;
 mod peer;
 mod progress;
+mod relay;
 mod share;
 mod sim;
 mod tracker;
@@ -44,6 +45,8 @@ enum Command {
     Sim(sim::SimCommand),
     /// Run a tracker, which helps peers in public swarms find each other.
     Tracker(tracker::TrackerArgs),
+    /// Run a relay, which lends public addresses to peers behind routers.
+    Relay(relay::RelayArgs),
 }
 
 fn main() -> ExitCode {
@@ -58,6 +61,7 @@ fn main() -> ExitCode {
         Command::Daemon(args) => daemon::daemon(args),
         Command::Sim(command) => sim::sim(command),
         Command::Tracker(args) => tracker::tracker(args),
+        Command::Relay(args) => relay::relay(args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

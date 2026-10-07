@@ -87,7 +87,7 @@ pub fn server_config(identity: &Identity, alpn: &[u8]) -> ServerConfig {
 }
 
 /// The other peer's ID, from the raw public key it presented.
-pub(crate) fn peer_id(conn: &quinn::Connection) -> Option<PeerId> {
+pub fn peer_id(conn: &quinn::Connection) -> Option<PeerId> {
     let chain = conn
         .peer_identity()?
         .downcast::<Vec<CertificateDer<'static>>>()
@@ -99,7 +99,7 @@ pub(crate) fn peer_id(conn: &quinn::Connection) -> Option<PeerId> {
 }
 
 /// The ALPN identifier the handshake settled on.
-pub(crate) fn alpn(conn: &quinn::Connection) -> Option<Vec<u8>> {
+pub fn alpn(conn: &quinn::Connection) -> Option<Vec<u8>> {
     conn.handshake_data()?
         .downcast::<quinn::crypto::rustls::HandshakeData>()
         .ok()?

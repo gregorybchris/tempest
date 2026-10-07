@@ -2882,3 +2882,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `notifications.command` is a program and its arguments, run without a shell when a transfer completes during a run or newly fails. `TEMPEST_EVENT`, `TEMPEST_ID`, `TEMPEST_NAME`, `TEMPEST_KIND`, `TEMPEST_SAVE_FOLDER`, `TEMPEST_LINK`, and when known `TEMPEST_SIZE`, `TEMPEST_CONTENT_DIR` and `TEMPEST_ERROR` describe the transfer.
 
 **Rationale:** Counting time spent sharing measures what the user gave, not how long the engine was off. Per-file recheck is all the manifest allows, and still fetches only damaged files. Answering a move at once keeps API requests short, and an error on the transfer is where a UI looks. Moving entries rather than the base keeps a single-file share from dragging its parent folder along. A command covers desktop notifications, chat hooks and scripts alike, and needs no platform code in the engine.
+
+---
+
+## D-185: The relay server
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** M6 builds the relay of `protocol/relays.md`. The architecture table had the relay crate depend on `protocol` only, but a relay needs the same raw-public-key TLS, identities and framed streams as peers, which live in `net`. Several details the protocol leaves open had to be settled: how a relay closes connections, a peer registering again while still connected, how kept addresses count against capacity, which IP a lent address carries, and how the tracker takes on the relay role (D-028).
+
+**Options for sharing the QUIC and TLS code:** depend on `net` (chosen); copy it; move it into a new shared crate. **For closing codes:** reuse Goodbye's reason codes (chosen); define relay-specific codes. **For a second registration while the first is open:** refuse it until the old connection times out; replace the old connection, keeping the address (chosen). **For kept addresses at capacity:** count them and refuse newcomers; count them but give up the oldest kept one first (chosen). **For the lent IP:** require it in the config; default to the IP each peer reached the relay at, with an override for relays behind NAT (chosen).
+
+**Decision:**
+
+- `tempest-relay` depends on `protocol` and `net`. The binary is `tempest relay`, not a separate executable.
+- A relay connection closes with Goodbye's reason codes: `protocol_violation`, `duplicate` for a registration replaced by a newer one from the same peer, and `shutting_down`. A newer registration takes over the older one's lent address. Both are now in `protocol/relays.md`.
+- A peer that leaves has its lent socket kept bound for 5 minutes, so the same address is certain to be free when it returns. Kept sockets count toward the relay's capacity, and the one closest to expiring is given up to admit a newcomer.
+- Limits: an allowlist, a cap on registrations and on registrations per source IP, and an optional per-peer byte rate in each direction, over which datagrams are dropped. Forwarding permissions per peer are capped in number, so forged sources can't exhaust memory.
+- `tempest tracker --run-relay` runs a relay beside the tracker. Given the relay's public IP, the tracker recommends its own relay.
+
+**Rationale:** Depending on `net` keeps one implementation of the handshake rules. Replacing an old registration lets a peer whose network changed get its address back at once instead of waiting for a timeout. Keeping the socket bound makes stable addresses a guarantee rather than a hope that the port stays free.

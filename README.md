@@ -28,6 +28,7 @@ tempest get '<link>'     # downloads the bundle into ./<its name>
 
 tempest tracker                                   # runs a tracker
 tempest share --tracker http://host:4777 ./photos # announces the bundle to it
+tempest relay                                     # runs a relay for peers behind routers
 
 tempest daemon           # runs the engine, which keeps transfers going and serves its API
 tempest list             # shows its transfers; start, stop and remove control them

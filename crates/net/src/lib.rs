@@ -39,7 +39,10 @@ pub use limit::{RateLimit, SpeedLimits};
 pub use storage::{
     Checkpoint, CheckpointError, Storage, StorageConfig, StorageError, StorageStats, Written,
 };
-pub use stream::{ReadMessageError, read_message, read_message_within, write_message};
+pub use stream::{
+    ReadMessageError, read_message, read_message_within, read_relay_message, write_message,
+    write_relay_message,
+};
 pub use tls::UnexpectedPeer;
 pub use tracker::{
     AnnounceConfig, Announcer, TrackerClient, TrackerError, TrackerState, public_addresses,

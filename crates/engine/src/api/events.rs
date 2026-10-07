@@ -6,9 +6,9 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use futures_util::Stream;
-use serde_json::{Value, json};
 
 use super::error::ApiError;
+use super::{DecisionInfo, MissedInfo, RemovedInfo, SnapshotInfo};
 use crate::{Engine, EngineEvent, Numbered, Subscription, SubscriptionError};
 
 /// What a stream sends before the next event.
@@ -83,31 +83,38 @@ impl EventStream {
         let transfers = self.engine.list().await;
         SseEvent::default()
             .event(name)
-            .data(json!({ "transfers": transfers }).to_string())
+            .data(to_data(&SnapshotInfo { transfers }))
     }
 }
 
 fn numbered(numbered: &Numbered) -> SseEvent {
-    let (name, data): (&str, Value) = match &numbered.event {
-        EngineEvent::Transfer(info) => ("transfer", json!(info)),
-        EngineEvent::Removed { id } => ("removed", json!({ "id": id.to_string() })),
+    let (name, data) = match &numbered.event {
+        EngineEvent::Transfer(info) => ("transfer", to_data(info)),
+        EngineEvent::Removed { id } => ("removed", to_data(&RemovedInfo { id: *id })),
         EngineEvent::Decision { id, event } => (
             "decision",
-            json!({
-                "id": id.to_string(),
-                "time": event.time.since_epoch().as_secs_f64(),
-                "kind": event.kind.name(),
-                "reason": event.kind.reason(),
-                "text": event.kind.to_string(),
+            to_data(&DecisionInfo {
+                id: *id,
+                time: event.time.since_epoch().as_secs_f64(),
+                kind: event.kind.name().to_owned(),
+                reason: event.kind.reason().map(str::to_owned),
+                text: event.kind.to_string(),
             }),
         ),
         EngineEvent::DecisionsMissed { id, count } => (
             "decisions_missed",
-            json!({ "id": id.to_string(), "count": count }),
+            to_data(&MissedInfo {
+                id: *id,
+                count: *count,
+            }),
         ),
     };
     SseEvent::default()
         .id(numbered.id.to_string())
         .event(name)
-        .data(data.to_string())
+        .data(data)
+}
+
+fn to_data(value: &impl serde::Serialize) -> String {
+    serde_json::to_string(value).expect("event data serializes")
 }

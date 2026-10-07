@@ -127,11 +127,14 @@ pub(crate) fn ratio(uploaded: u64, downloaded: u64, size: Option<u64>) -> Option
     (base > 0).then(|| uploaded as f64 / base as f64)
 }
 
-fn display<S: Serializer>(value: &impl Display, serializer: S) -> Result<S::Ok, S::Error> {
+pub(crate) fn display<S: Serializer>(
+    value: &impl Display,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     serializer.collect_str(value)
 }
 
-fn parse<'de, D: Deserializer<'de>, T>(deserializer: D) -> Result<T, D::Error>
+pub(crate) fn parse<'de, D: Deserializer<'de>, T>(deserializer: D) -> Result<T, D::Error>
 where
     T: FromStr<Err: Display>,
 {

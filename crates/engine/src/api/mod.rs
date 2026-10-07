@@ -3,13 +3,15 @@
 //! - [`router`]: the routes under `/v1`, over an [`Engine`].
 //! - [`server`]: listening on TCP, with HTTPS and the access token for remote access (D-125),
 //!   and the file that tells local clients where the API is.
-//! - [`client`]: a client for the API, as the CLI uses it.
+//! - [`client`]: a client for the API, as the CLI and the TUI use it, with [`sse`] decoding its
+//!   event stream.
 
 mod access;
 pub mod client;
 mod error;
 mod events;
 pub mod server;
+pub mod sse;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -27,7 +29,7 @@ use tempest_protocol::{Address, BundleId};
 pub use self::access::Access;
 pub use self::error::ApiError;
 use self::error::{Json, json};
-use crate::{AddOptions, Engine, QueueMove, ShareOptions};
+use crate::{AddOptions, Engine, QueueMove, ShareOptions, TransferInfo};
 
 /// The prefix of every route: the API's version.
 pub const PREFIX: &str = "/v1";
@@ -168,6 +170,47 @@ impl From<QueuePlace> for QueueMove {
 pub struct Category {
     /// Where downloads added in the category go.
     pub save_folder: PathBuf,
+}
+
+/// The data of a `decision` event: a session's decision event (D-006).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DecisionInfo {
+    /// The transfer whose session decided.
+    #[serde(serialize_with = "crate::display", deserialize_with = "crate::parse")]
+    pub id: BundleId,
+    /// When, in seconds on the session's clock.
+    pub time: f64,
+    /// What kind of event, such as `requested` or `closed`.
+    pub kind: String,
+    /// Why, for kinds that have a reason.
+    pub reason: Option<String>,
+    /// The event in a sentence.
+    pub text: String,
+}
+
+/// The data of a `removed` event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovedInfo {
+    /// The transfer that was removed.
+    #[serde(serialize_with = "crate::display", deserialize_with = "crate::parse")]
+    pub id: BundleId,
+}
+
+/// The data of a `decisions_missed` event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissedInfo {
+    /// The transfer whose decision events were dropped.
+    #[serde(serialize_with = "crate::display", deserialize_with = "crate::parse")]
+    pub id: BundleId,
+    /// How many were dropped.
+    pub count: u64,
+}
+
+/// The data of a `snapshot` or `reset` event: every transfer, in queue order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotInfo {
+    /// The transfers.
+    pub transfers: Vec<TransferInfo>,
 }
 
 #[derive(Debug, Deserialize)]

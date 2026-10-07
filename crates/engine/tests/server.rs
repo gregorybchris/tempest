@@ -158,3 +158,46 @@ async fn remote_access_is_https_with_the_token() {
 
     server.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_follow_and_resume_the_event_stream() {
+    use tempest_engine::api::client::ApiEvent;
+
+    let dir = tempfile::tempdir().unwrap();
+    let api = ApiSettings {
+        port: 0,
+        ..ApiSettings::default()
+    };
+    let (_engine, server) = serve(config(dir.path(), api)).await;
+    let client = ApiClient::for_data_dir(dir.path()).unwrap().expect("found");
+
+    let mut stream = client.events(None).await.unwrap();
+    assert_eq!(
+        stream.next().await.unwrap(),
+        Some((ApiEvent::Snapshot(vec![]), None))
+    );
+    let added = client.add(&add(1)).await.unwrap();
+    let (event, number) = stream.next().await.unwrap().unwrap();
+    assert_eq!(event, ApiEvent::Transfer(Box::new(added.clone())));
+    let number = number.expect("transfer events are numbered");
+    drop(stream);
+
+    // Resuming after the last event seen sends only what came after it.
+    client.remove(added.id, false).await.unwrap();
+    let mut resumed = client.events(Some(number)).await.unwrap();
+    let (event, next) = resumed.next().await.unwrap().unwrap();
+    assert!(
+        matches!(&event, ApiEvent::Removed(removed) if removed.id == added.id),
+        "{event:?}"
+    );
+    assert_eq!(next, Some(number + 1));
+
+    // Resuming after an event this engine never sent starts over.
+    let mut reset = client.events(Some(number + 1000)).await.unwrap();
+    assert_eq!(
+        reset.next().await.unwrap(),
+        Some((ApiEvent::Reset(vec![]), None))
+    );
+
+    server.stop().await;
+}

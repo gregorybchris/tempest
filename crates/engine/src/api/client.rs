@@ -1,6 +1,6 @@
 //! A client for the engine's API.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,9 +17,11 @@ use serde_json::Value;
 use tempest_protocol::BundleId;
 
 use super::server::{Discovery, TOKEN_FILE};
+use super::sse::{SseDecoder, SseEvent};
 use super::{
-    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
-    QueuePlace, QueueRequest, TagsRequest,
+    AddRequest, ApiError, Category, CategoryRequest, DecisionInfo, EngineInfo, MissedInfo,
+    MoveRequest, NameRequest, PREFIX, QueuePlace, QueueRequest, RemovedInfo, SnapshotInfo,
+    TagsRequest,
 };
 use crate::{SettingsView, TransferInfo};
 
@@ -160,13 +162,7 @@ impl ApiClient {
         if status.is_success() {
             return Ok(bytes.to_vec());
         }
-        match serde_json::from_slice::<ApiError>(&bytes) {
-            Ok(error) => Err(ClientError::Refused(ApiError {
-                status: status.as_u16(),
-                ..error
-            })),
-            Err(_) => Err(ClientError::Unexpected(format!("status {status}"))),
-        }
+        Err(refusal(status, &bytes))
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, ClientError> {
@@ -295,6 +291,125 @@ impl ApiClient {
     /// Every category.
     pub async fn categories(&self) -> Result<BTreeMap<String, Category>, ClientError> {
         self.get("/categories").await
+    }
+
+    /// Opens the event stream, resuming after the event numbered `after` if given.
+    pub async fn events(&self, after: Option<u64>) -> Result<EventStream, ClientError> {
+        let mut request = self
+            .http
+            .get(format!("{}{PREFIX}/events", self.base))
+            .header(reqwest::header::ACCEPT, "text/event-stream");
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        if let Some(after) = after {
+            request = request.header("last-event-id", after.to_string());
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|source| ClientError::Unreachable {
+                url: self.base.clone(),
+                source,
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            let bytes = response.bytes().await.unwrap_or_default();
+            return Err(refusal(status, &bytes));
+        }
+        Ok(EventStream {
+            response,
+            decoder: SseDecoder::new(),
+            pending: Default::default(),
+            url: self.base.clone(),
+        })
+    }
+}
+
+/// The error an unsuccessful answer with `status` and `body` stands for.
+fn refusal(status: reqwest::StatusCode, body: &[u8]) -> ClientError {
+    match serde_json::from_slice::<ApiError>(body) {
+        Ok(error) => ClientError::Refused(ApiError {
+            status: status.as_u16(),
+            ..error
+        }),
+        Err(_) => ClientError::Unexpected(format!("status {status}")),
+    }
+}
+
+/// An event from the engine's stream (`specs/api.md`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApiEvent {
+    /// Every transfer, first on a new stream.
+    Snapshot(Vec<TransferInfo>),
+    /// Every transfer, because events the client asked for are gone: replace the whole view.
+    Reset(Vec<TransferInfo>),
+    /// A transfer that was added or changed.
+    Transfer(Box<TransferInfo>),
+    /// A transfer that was removed.
+    Removed(RemovedInfo),
+    /// A session's decision event.
+    Decision(DecisionInfo),
+    /// Decision events dropped because they came too fast.
+    DecisionsMissed(MissedInfo),
+}
+
+impl ApiEvent {
+    /// The event that `event` carries, or `None` for a name this client doesn't know, which a
+    /// later engine may send.
+    pub fn decode(event: &SseEvent) -> Result<Option<Self>, serde_json::Error> {
+        let data = event.data.as_str();
+        Ok(Some(match event.name.as_str() {
+            "snapshot" => Self::Snapshot(serde_json::from_str::<SnapshotInfo>(data)?.transfers),
+            "reset" => Self::Reset(serde_json::from_str::<SnapshotInfo>(data)?.transfers),
+            "transfer" => Self::Transfer(serde_json::from_str(data)?),
+            "removed" => Self::Removed(serde_json::from_str(data)?),
+            "decision" => Self::Decision(serde_json::from_str(data)?),
+            "decisions_missed" => Self::DecisionsMissed(serde_json::from_str(data)?),
+            _ => return Ok(None),
+        }))
+    }
+}
+
+/// The engine's event stream, as [`ApiClient::events`] opens it.
+#[derive(Debug)]
+pub struct EventStream {
+    response: reqwest::Response,
+    decoder: SseDecoder,
+    pending: VecDeque<SseEvent>,
+    url: String,
+}
+
+impl EventStream {
+    /// The next event and its number, if it has one, or `None` once the stream has ended.
+    pub async fn next(&mut self) -> Result<Option<(ApiEvent, Option<u64>)>, ClientError> {
+        loop {
+            while let Some(event) = self.pending.pop_front() {
+                let decoded = ApiEvent::decode(&event).map_err(|error| {
+                    ClientError::Unexpected(format!("bad {} event: {error}", event.name))
+                })?;
+                if let Some(decoded) = decoded {
+                    let number = event.id.and_then(|id| id.parse().ok());
+                    return Ok(Some((decoded, number)));
+                }
+            }
+            let chunk = self
+                .response
+                .chunk()
+                .await
+                .map_err(|source| ClientError::Unreachable {
+                    url: self.url.clone(),
+                    source,
+                })?;
+            let Some(chunk) = chunk else {
+                return Ok(None);
+            };
+            let events = self
+                .decoder
+                .feed(&chunk)
+                .map_err(|error| ClientError::Unexpected(error.to_string()))?;
+            self.pending.extend(events);
+        }
     }
 }
 

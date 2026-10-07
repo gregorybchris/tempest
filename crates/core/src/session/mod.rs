@@ -506,6 +506,15 @@ impl Session {
         self.after_removal(now);
     }
 
+    /// Reports a protocol violation only the driver can see, such as a frame that doesn't decode
+    /// or a request stream that ends without a response. The session closes the connection with
+    /// `protocol_violation`.
+    pub fn handle_violation(&mut self, now: Time, conn: ConnId, message: impl Into<String>) {
+        if self.conns.contains_key(&conn) {
+            self.fail(now, conn, violation(message));
+        }
+    }
+
     /// Reports the transport's round-trip time for a connection, which replaces the session's
     /// own estimate from request timing.
     pub fn handle_rtt(&mut self, now: Time, conn: ConnId, rtt: Duration) {

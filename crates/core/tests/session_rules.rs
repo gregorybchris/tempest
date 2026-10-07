@@ -431,6 +431,21 @@ fn messages_on_the_wrong_stream_are_violations() {
     );
 }
 
+#[test]
+fn violations_the_driver_sees_close_the_connection() {
+    let mut session = complete(Config::default());
+    open(&mut session, RangeList::new());
+    session.poll_actions();
+    session.handle_violation(Time::ZERO, C, "a frame did not decode");
+    let actions = session.poll_actions();
+    assert_eq!(closes(&actions), [GoodbyeReason::ProtocolViolation]);
+    assert_eq!(session.connection_count(), 0);
+
+    // A connection the session already closed is left alone.
+    session.handle_violation(Time::ZERO, C, "again");
+    assert!(session.poll_actions().is_empty());
+}
+
 /// Opens a connection to a provider with every chunk that serves us, returning the first
 /// request the session sends.
 fn fetching_session() -> (Session, RequestId, u32, u32) {

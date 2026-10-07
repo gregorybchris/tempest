@@ -2652,3 +2652,27 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Encoded manifests are saved by writing a temporary file, syncing it and renaming it over the old one, and checked against the bundle ID when loaded.
 
 **Rationale:** A task per bundle keeps each task's state small and lets the bundle task own its storage handle, so a slow disk under one bundle doesn't stall another's reads. A tree in memory costs about 0.4% of a bundle's size, and makes every proof a lookup. A downloader learns enough to prove any range it holds, because the Data that brought a range also brought the siblings of its ancestors. Verifying in storage puts hashing on the blocking pool and makes unverified writes impossible. Restoring modification times only at completion keeps later writes from changing them. Per-file resume is simple and needs no stored state, while trusting a partial file's chunks needs a record of which ones were verified.
+
+---
+
+## D-174: Production driver details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-068 and D-085 fix the shape of the engine: sans-IO sessions driven by actors over bounded channels. M4 needs the details: how tasks are split, how they avoid deadlock, how incoming connections find their bundle, and what the driver does about problems only it can see.
+
+**Options for routing:** one endpoint per bundle; one endpoint per installation, routing each accepted connection by the bundle ID in its Hello (chosen). **For channel cycles:** await every send; let the bundle task await nothing but storage, handing work out with `try_send` and oneshots (chosen). **For decision events:** a bounded mpsc that blocks the session when full; a broadcast channel whose slow subscribers miss events and are told how many (chosen). **For violations only the driver sees** (frames that don't decode, request streams that end without a message): close the connection in the driver and report it lost; a session method that closes it like any other violation (chosen).
+
+**Decision:**
+
+- A node task accepts connections and owns the table of bundles. A routing task per incoming connection reads Hello and hands the connection to that bundle's task, or closes it with `unknown_bundle`.
+- A bundle task owns the session and its storage. Connection tasks, request-stream tasks and dial tasks report to it through its bounded inbox, awaiting a send, so a busy bundle slows reading from the network. The bundle task never waits on them: control messages go to a connection's bounded queue with `try_send`, and answers and cancellations go through oneshots.
+- A peer whose control-stream queue fills, because it isn't reading, is disconnected with `done` and reported to the session as lost.
+- Cancelling a request stops the receiving side and resets the sending side. A provider that sees its response stream stopped resets it and reports the request reset.
+- Data that storage can't read after the session chose to send it is answered with Reject, and reported to the session as a reset request so the upload slot frees without counting bytes as sent.
+- A download's storage is laid out when the session stores the manifest. A storage failure other than failed verification stops the bundle with that error.
+- `Session::handle_violation` lets the driver report protocol violations the session can't see.
+- Decision events go out on a broadcast channel, and a watch channel carries a progress summary.
+- Each session's random seed comes from the operating system.
+
+**Rationale:** One endpoint per installation is what links advertise (D-126), and Hello is the first thing that names a bundle. Keeping the bundle task's only waits on storage rules out cycles of full channels without unbounded queues. A peer that doesn't read control messages is broken or hostile, and any bound on queued messages has to end somewhere. Logging and progress displays prefer a gap they are told about to a stalled transfer. Reporting driver-seen violations through the session keeps one place that closes connections and records why.

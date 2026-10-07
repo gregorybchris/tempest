@@ -15,24 +15,33 @@
 //! - [`range`]: chunk ranges and canonical range lists.
 //! - [`address`]: network addresses.
 //! - [`message`]: peer messages.
+//! - [`lan`]: LAN discovery messages.
+//! - [`relay`]: relay control messages, Forward and Forwarded datagrams, and relay identities.
+//! - [`tracker`]: the tracker API's JSON types.
 
 pub mod address;
 pub mod frame;
 pub mod hash;
+pub mod lan;
 pub mod layout;
 pub mod link;
 pub mod manifest;
 pub mod message;
 pub mod path;
 pub mod range;
+pub mod relay;
+mod text;
+pub mod tracker;
 pub mod tree;
 pub mod wire;
 
 pub use address::Address;
 pub use hash::{Hash, PeerId};
+pub use lan::LanMessage;
 pub use layout::ChunkLayout;
 pub use link::Link;
 pub use manifest::{BundleId, Entry, EntryKind, FileInfo, Manifest};
 pub use message::Message;
 pub use range::{ChunkRange, RangeList};
+pub use relay::{RelayDatagram, RelayIdentity, RelayMessage};
 pub use wire::{Decode, DecodeError, Encode, Reader, Writer};

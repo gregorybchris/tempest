@@ -2118,3 +2118,47 @@ When building a manifest, the client converts file names and symlink targets to 
 - Readers decode `%XX` escapes and take every other character literally. `+` is a plus, not a space (RFC 3986, not HTML forms).
 - The scheme is matched case-insensitively. A fragment is ignored.
 - A link is rejected if `bundle` is missing, a parameter allowed once appears twice, a known parameter has a malformed value, or `addr`/`relay` appear without `peer`. Rejecting rather than skipping bad values means a mangled link fails loudly.
+
+---
+
+## D-145: Size limits for relay control messages
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/relays.md` said relay control messages use the framing of `messages.md`, whose size limits are defined per peer message type, but gave no limits for its own types.
+
+**Options:** reuse the 16 MiB control-message limit; limit each type to its largest valid encoding.
+
+**Decision:** Each type is limited to its largest valid encoding: Register is exactly its type byte, Registered holds two IPv6 addresses at most, and RelayReject's message is at most 1 KiB, like Reject's. A relay connection is opened by strangers, so no frame should let one demand more memory than a valid message needs.
+
+---
+
+## D-146: Relay identity text details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/relays.md` defines `<relay key>@<host>:<port>` with a default port of 4775, but not whether the port may be omitted or what counts as a valid host.
+
+**Decision:**
+
+- Readers accept a missing `:<port>` as 4775. Writers always write the port.
+- A host is an IPv4 address, a bracketed IPv6 address, or an ASCII DNS name (internationalized names as punycode): dot-separated labels of 1–63 letters, digits and hyphens, not starting or ending with a hyphen, at most 253 characters, no trailing dot, and a last label that is not all digits. Names are lowercased; IPv4-mapped IPv6 addresses become IPv4.
+- The port is 1–65535, written without leading zeros or a sign.
+
+Strict parsing makes a mistyped relay in a config file or tracker response fail loudly, as with links (D-144).
+
+---
+
+## D-147: Tracker JSON details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/trackers.md` lists the API's fields but leaves some reading rules open.
+
+**Decision:**
+
+- In a response's peer entries, `peer`, `addrs` and `relay` are all required, and `relay` may be `null`, as in the request.
+- An unknown `error` code is accepted and kept, so a newer tracker's codes still parse. The client then acts on the HTTP status.
+- A malformed ID, address or relay identity anywhere in a body makes the whole body invalid, rather than skipping the bad value.
+- Text forms are the same as in links: IDs are lowercase hex and IPv4-mapped IPv6 addresses are read as IPv4.
+

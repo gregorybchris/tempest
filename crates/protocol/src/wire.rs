@@ -5,7 +5,8 @@
 
 use crate::hash::{HASH_LEN, Hash};
 
-/// Why bytes could not be decoded. Every variant is a protocol violation.
+/// Why bytes could not be decoded. Every variant except [`DecodeError::UnknownDatagramKind`] is a
+/// protocol violation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
     /// The input ended before the value did.
@@ -44,6 +45,10 @@ pub enum DecodeError {
     /// A message decoded but broke a rule.
     #[error("invalid message: {0}")]
     InvalidMessage(#[from] crate::message::MessageError),
+    /// A relay datagram had a kind other than Forward or Forwarded. The receiver drops it; unlike
+    /// the other variants, this is not a protocol violation.
+    #[error("unknown relay datagram kind {0}")]
+    UnknownDatagramKind(u8),
     /// A frame had a length of zero, so no message type.
     #[error("frame has no message type")]
     EmptyFrame,

@@ -67,9 +67,17 @@ Registered {
 
 RelayReject {
   reason:  u16                 // 0 = not_allowed, 1 = full, 2 = invalid
-  message: string              // human-readable detail; MAY be empty
+  message: string              // human-readable detail; MAY be empty; at most 1 KiB
 }
 ```
+
+**Size limits.** A receiver MUST treat a control frame whose `length` exceeds its type's limit as a protocol violation:
+
+| Message | Maximum `length` |
+| --- | --- |
+| Register | 1 (exactly its fixed size) |
+| Registered | 1 + 2 × 19 (two IPv6 addresses) |
+| RelayReject | 1 + 2 + 4 + 1 KiB |
 
 `Address` is defined in [messages.md](messages.md#common-structures).
 

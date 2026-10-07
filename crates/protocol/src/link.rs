@@ -4,7 +4,6 @@
 //! `tempest:?bundle=…&peer=…&addr=203.0.113.5:4433&name=Holiday%20Photos`.
 
 use std::fmt;
-use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::address::Address;
@@ -165,8 +164,7 @@ fn parse_hash(key: &'static str, value: &str) -> Result<Hash, ParseLinkError> {
 
 fn parse_address(key: &'static str, value: &str) -> Result<Address, ParseLinkError> {
     value
-        .parse::<SocketAddr>()
-        .map(Address::from)
+        .parse()
         .map_err(|_| ParseLinkError::InvalidAddress(key))
 }
 

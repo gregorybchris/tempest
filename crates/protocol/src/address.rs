@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
 
 use crate::wire::{Decode, DecodeError, Encode, Reader, Writer};
 
@@ -57,6 +58,22 @@ impl From<Address> for SocketAddr {
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+/// Why text could not be parsed as an address.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("an address must be ip:port, with IPv6 addresses in brackets")]
+pub struct ParseAddressError;
+
+/// Parses `ip:port`, with IPv6 addresses in brackets, canonicalizing as [`Address::new`] does.
+impl FromStr for Address {
+    type Err = ParseAddressError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<SocketAddr>()
+            .map(Self::from)
+            .map_err(|_| ParseAddressError)
     }
 }
 
@@ -145,6 +162,22 @@ mod tests {
             Address::from_bytes(&bytes),
             Err(DecodeError::MappedIpv4Address)
         );
+    }
+
+    #[test]
+    fn text_round_trips_and_rejects_bad_forms() {
+        for text in ["203.0.113.5:4433", "[2001:db8::1]:4433"] {
+            assert_eq!(text.parse::<Address>().unwrap().to_string(), text);
+        }
+        for text in [
+            "203.0.113.5",
+            "2001:db8::1:4433",
+            "host:1",
+            "1.2.3.4:65536",
+            "",
+        ] {
+            assert_eq!(text.parse::<Address>(), Err(ParseAddressError));
+        }
     }
 
     #[test]

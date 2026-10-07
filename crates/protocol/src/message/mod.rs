@@ -199,7 +199,7 @@ fn check_count(field: &'static str, count: usize, max: usize) -> Result<(), Mess
 }
 
 /// Fails with [`MessageError::TooLong`] if `len` exceeds `max`.
-fn check_len(field: &'static str, len: usize, max: usize) -> Result<(), MessageError> {
+pub(crate) fn check_len(field: &'static str, len: usize, max: usize) -> Result<(), MessageError> {
     if len > max {
         return Err(MessageError::TooLong { field, len, max });
     }

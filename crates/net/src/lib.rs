@@ -7,6 +7,7 @@
 //!   connections (D-018).
 //! - [`home`]: registering with a home relay, which lends this peer a relay address.
 //! - [`wrap`]: the layer beneath QUIC that carries packets through the home relay.
+//! - [`portmap`]: asking the router to forward a port to this peer.
 //! - [`stream`]: framed messages on QUIC streams.
 //! - [`storage`]: a bundle's chunks on disk, read and written by a storage task (D-086).
 //! - [`driver`]: a [`Node`] running `tempest-core` sessions over those connections and storage.
@@ -24,6 +25,7 @@ pub mod home;
 pub mod identity;
 pub mod lan;
 pub mod limit;
+pub mod portmap;
 pub mod storage;
 pub mod stream;
 pub mod tls;
@@ -41,6 +43,10 @@ pub use home::{HomeRelay, RelayChoice, RelayError, RelayFailure, RelayStatus};
 pub use identity::{Identity, IdentityError};
 pub use lan::{Lan, LanConfig};
 pub use limit::{RateLimit, SpeedLimits};
+pub use portmap::{
+    MappingError, MappingFailure, MappingProtocol, PortMapping, PortMappingConfig,
+    PortMappingStatus,
+};
 pub use storage::{
     Checkpoint, CheckpointError, Storage, StorageConfig, StorageError, StorageStats, Written,
 };

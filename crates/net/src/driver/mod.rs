@@ -37,6 +37,7 @@ use self::bundle::{BundleTask, Outputs, Report, Start};
 use crate::endpoint::{Connection, Endpoint, Incoming};
 use crate::home::HomeRelay;
 use crate::limit::{SpeedLimits, Throttle};
+use crate::portmap::PortMapping;
 use crate::storage::{Checkpoint, Storage, StorageConfig, StorageError};
 use crate::stream::read_message;
 
@@ -49,7 +50,7 @@ pub struct NodeConfig {
     /// Every bundle's storage settings.
     pub storage: StorageConfig,
     /// The direct addresses this peer tells others to reach it at, in Hello and Candidates. The
-    /// relay address comes from the endpoint's home relay.
+    /// port mapping's external address and the relay address come from the endpoint.
     pub addresses: Vec<Address>,
     /// How long a dial may take, per address.
     pub dial_timeout: Duration,
@@ -198,6 +199,7 @@ pub struct BundleHandle {
     peers: PeerSink,
     limits: SpeedLimits,
     home_relay: HomeRelay,
+    port_mapping: PortMapping,
     shutdown: Arc<watch::Sender<bool>>,
     task: JoinHandle<Result<Summary, DriverError>>,
 }
@@ -229,6 +231,11 @@ impl BundleHandle {
     /// The home relay of the node's endpoint, whose relay address trackers are told.
     pub fn home_relay(&self) -> &HomeRelay {
         &self.home_relay
+    }
+
+    /// The port mapping of the node's endpoint, whose external address trackers are told.
+    pub fn port_mapping(&self) -> &PortMapping {
+        &self.port_mapping
     }
 
     /// Somewhere for discovery to deliver peers to, apart from the handle.
@@ -446,6 +453,7 @@ impl Node {
             peers: PeerSink(inbox),
             limits,
             home_relay: self.endpoint.home_relay().clone(),
+            port_mapping: self.endpoint.port_mapping().clone(),
             shutdown,
             task,
         })

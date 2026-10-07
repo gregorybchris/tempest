@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tempest_net::RelayStatus;
+use tempest_net::{PortMappingStatus, RelayStatus};
 use tempest_protocol::{Address, BundleId};
 
 pub use self::access::Access;
@@ -47,6 +47,12 @@ pub struct EngineInfo {
     pub relay_address: Option<String>,
     /// Why no relay would register this peer, while unavailable.
     pub relay_errors: Vec<String>,
+    /// Port mapping: `off`, `mapping`, `mapped` or `unavailable`.
+    pub port_mapping: String,
+    /// The external address the router forwards to this peer, while mapped.
+    pub mapped_address: Option<String>,
+    /// Why no router would map the port, while unavailable.
+    pub port_mapping_errors: Vec<String>,
 }
 
 /// `POST /v1/transfers`: a download from a link, or a share of a local file or folder.
@@ -234,6 +240,16 @@ async fn engine_info(State(engine): State<Engine>) -> Result {
             failures.iter().map(ToString::to_string).collect(),
         ),
     };
+    let mapping = engine.port_mapping();
+    let (mapping_state, port_mapping_errors) = match &mapping {
+        PortMappingStatus::Off => ("off", Vec::new()),
+        PortMappingStatus::Mapping => ("mapping", Vec::new()),
+        PortMappingStatus::Mapped { .. } => ("mapped", Vec::new()),
+        PortMappingStatus::Unavailable { failures } => (
+            "unavailable",
+            failures.iter().map(ToString::to_string).collect(),
+        ),
+    };
     ok(&EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         peer_id: engine.peer_id().to_string(),
@@ -241,6 +257,9 @@ async fn engine_info(State(engine): State<Engine>) -> Result {
         relay: state.to_owned(),
         relay_address: relay.relay_address().as_ref().map(display),
         relay_errors,
+        port_mapping: mapping_state.to_owned(),
+        mapped_address: mapping.address().as_ref().map(display),
+        port_mapping_errors,
     })
 }
 

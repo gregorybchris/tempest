@@ -42,6 +42,10 @@ unicode-normalization = "0.1"
 
 # Network interfaces' addresses, to advertise in links.
 if-addrs = "0.15"
+# UPnP-IGD port mapping over tokio.
+igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
+# The default gateway, which NAT-PMP and PCP requests go to.
+netdev = { version = "0.46", default-features = false, features = ["gateway"] }
 # For O_NOFOLLOW when opening downloaded files.
 libc = "0.2"
 pem-rfc7468 = { version = "1", features = ["std"] }

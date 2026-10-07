@@ -407,6 +407,12 @@ impl Session {
         self.maybe_dial(now);
     }
 
+    /// Sets the addresses at which this peer accepts connections from now on, sent in Hello and
+    /// Candidates, as a port mapping's external address comes and goes.
+    pub fn set_addresses(&mut self, addresses: Vec<Address>) {
+        self.local.addresses = addresses;
+    }
+
     /// Sets the relay address this peer advertises from now on, as its home relay lends one or
     /// it is lost.
     pub fn set_relay(&mut self, relay: Option<Address>) {

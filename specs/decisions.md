@@ -2945,3 +2945,25 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `NodeConfig::punch_time` sets the time and turns punching off.
 
 **Rationale:** Keeping the decisions in the session makes them testable without sockets and lets the simulator share them. QUIC already retransmits a pending handshake, so one attempt per address is enough while it lasts; restarting covers attempts that fail at once. Abandoning attempts under way would close connections the other peer may consider open.
+
+---
+
+## D-188: Port mapping
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/connections.md` says clients SHOULD ask their router to forward a port (UPnP-IGD, NAT-PMP or PCP), and `protocol/relays.md` lists a port mapping's external address among the Candidates. M6 leaves open the libraries, the order of protocols, which sockets to map, lease times, what to do with a useless mapping, and where the external address goes.
+
+**Options for the protocols:** one crate for all three (iroh's `portmapper`, `crab_nat`); `igd-next` for UPnP-IGD and PCP and NAT-PMP written by hand (chosen). **For the order:** all at once; PCP, then NAT-PMP if the router answers in it, then UPnP-IGD (chosen). **For the default:** off; on (chosen).
+
+**Decision:**
+
+- Only the IPv4 socket is mapped, and only when bound to every interface or a private address. IPv6 has no NAT, and a socket on loopback or a public address has nothing to map.
+- PCP's MAP request goes to the default gateway (found with `netdev`). A NAT-PMP answer, or PCP's unsupported-version result, switches to NAT-PMP for that router. If neither maps the port, UPnP-IGD searches the network. Each failure is reported with its protocol in the endpoint's port mapping status; attempts that all fail are retried after a minute, doubling to an hour.
+- Mappings ask for a 2-hour lifetime and are renewed halfway, with the same PCP nonce and external port. A failed renewal is retried halfway to expiry until the lease runs out. UPnP routers that only grant permanent mappings get one, asked for again every 30 minutes.
+- A mapping whose external address is not public (double NAT, carrier-grade NAT) is removed and reported as a failure.
+- Mappings are removed when the endpoint closes or mapping is turned off, giving the router 2 s to answer.
+- The external address is advertised first among a peer's direct addresses: in Hello, and so in Candidates and Peers, in tracker announces (announcing again when it changes) and in share links.
+- The engine config's `port_mapping.enabled` (on by default) applies at once; `share` and `get` take `--no-port-mapping`. `share` waits for the outcome like it waits for the home relay.
+
+**Rationale:** PCP and NAT-PMP are small fixed-format protocols, so writing them keeps the dependency tree small and the parsers fuzzable; UPnP-IGD needs SSDP, HTTP and SOAP, which `igd-next` already does well. Trying PCP first asks the router that answers fastest with the most precise protocol, and the SSDP search only runs when it must. Mapping by default follows the protocol's SHOULD and is what lets two home users reach each other directly without a relay.

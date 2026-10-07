@@ -46,6 +46,34 @@ pub(crate) fn advertise(bound: &[SocketAddr], interfaces: &[IpAddr]) -> Vec<Addr
     addresses
 }
 
+/// Whether `ip` may be reachable from the internet: not loopback, private, link-local, shared
+/// (carrier-grade NAT), unique local or documentation.
+pub(crate) fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            let shared = a == 100 && (64..128).contains(&b);
+            !(v4.is_unspecified()
+                || v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || shared)
+        }
+        IpAddr::V6(v6) => {
+            let documentation = v6.segments()[0] == 0x2001 && v6.segments()[1] == 0x0db8;
+            !(v6.is_unspecified()
+                || v6.is_loopback()
+                || v6.is_multicast()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || documentation)
+        }
+    }
+}
+
 fn is_link_local_v6(ip: &IpAddr) -> bool {
     matches!(ip, IpAddr::V6(v6) if v6.is_unicast_link_local())
 }

@@ -493,9 +493,11 @@ impl EngineTask {
         self.save_folder = config.save_folder()?;
         self.config = config;
         self.changes = changes;
-        // New queue and speed limits and relays apply now, new trackers to shares' links.
+        // New queue and speed limits, relays and port mapping apply now, new trackers to shares'
+        // links.
         self.apply_speed_limits();
         self.apply_relays();
+        self.apply_port_mapping();
         self.refresh_runs();
         self.reschedule().await;
         self.emit_changes();
@@ -669,11 +671,23 @@ impl EngineTask {
         }
     }
 
+    /// Asks the router to forward the peer port, or stops. A held engine needs no port.
+    pub(super) fn apply_port_mapping(&self) {
+        if !self.hold {
+            let endpoint = self.node.endpoint();
+            endpoint.set_port_mapping(self.config.port_mapping.config());
+        }
+    }
+
     /// A share's link: the bundle, this peer and its addresses, and the config's trackers.
     fn share_link(&self, link: &Link) -> Link {
         let mut link = link.clone();
         link.peer = Some(self.peer_id);
-        link.addrs = self.addresses.clone();
+        link.addrs = self
+            .node
+            .endpoint()
+            .port_mapping()
+            .advertise(&self.addresses);
         link.relay = self.node.endpoint().relay_address();
         link.trackers = self.config.trackers.clone();
         link

@@ -159,6 +159,40 @@ fn the_registered_peer_sends_candidates_after_the_opening() {
 }
 
 #[test]
+fn addresses_set_later_go_in_hello_and_candidates() {
+    let mut session = complete();
+    // A port mapping's external address, then the interfaces' addresses.
+    let mapped = address(7, 40000);
+    session.set_addresses(vec![mapped, address(1, 4773)]);
+    connect(&mut session, DIRECT, 9, Direction::Dialed, PathKind::Direct);
+    let hellos: Vec<Vec<Address>> = session
+        .poll_actions()
+        .iter()
+        .filter_map(|a| match a {
+            Action::Send {
+                message: Message::Hello(hello),
+                ..
+            } => Some(hello.addresses.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hellos, [vec![mapped, address(1, 4773)]]);
+
+    open(
+        &mut session,
+        RELAYED,
+        8,
+        Direction::Accepted,
+        PathKind::Relayed,
+        RangeList::new(),
+    );
+    assert_eq!(
+        candidates_sent(&session.poll_actions()),
+        [(RELAYED, vec![mapped, address(1, 4773)])]
+    );
+}
+
+#[test]
 fn only_the_registered_peer_sends_candidates_first() {
     // This peer dialed the other's relay address, so it waits for the other's Candidates.
     let mut session = complete();

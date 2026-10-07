@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use tempest_core::Config;
 use tempest_core::config::Settings;
-use tempest_net::RelayChoice;
+use tempest_net::{PortMappingConfig, RelayChoice};
 use tempest_protocol::RelayIdentity;
 
 use crate::schedule::{LocalTime, Schedule};
@@ -45,6 +45,8 @@ pub struct EngineConfig {
     pub trackers: Vec<String>,
     /// Relays to pick a home relay from (D-029: none by default).
     pub relays: RelaySettings,
+    /// Asking the router to forward the peer port.
+    pub port_mapping: PortMappingSettings,
     /// Speed limits over every transfer together.
     pub limits: SpeedLimitSettings,
     /// When a complete transfer stops sharing. A transfer can override them.
@@ -260,6 +262,30 @@ mod relay_identities {
                     .map_err(|e| serde::de::Error::custom(format!("{text:?}: {e}")))
             })
             .collect()
+    }
+}
+
+/// Port mapping settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PortMappingSettings {
+    /// Whether to ask the router to forward the peer port, with PCP, NAT-PMP or UPnP-IGD.
+    pub enabled: bool,
+}
+
+impl Default for PortMappingSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl PortMappingSettings {
+    /// The settings as the endpoint takes them.
+    pub fn config(&self) -> PortMappingConfig {
+        PortMappingConfig {
+            enabled: self.enabled,
+            ..PortMappingConfig::default()
+        }
     }
 }
 
@@ -774,6 +800,18 @@ trackers: [https://tracker.example.org]
             .set("relays.known", json!(["relay.example.org"]))
             .unwrap_err();
         assert!(error.to_string().starts_with("relays.known: "), "{error}");
+    }
+
+    #[test]
+    fn port_mapping_is_on_by_default_and_applies_without_a_restart() {
+        let default = EngineConfig::default();
+        assert!(default.port_mapping.config().enabled);
+        let config = EngineConfig::from_yaml("port_mapping: { enabled: false }").unwrap();
+        assert!(!config.port_mapping.config().enabled);
+        let mut changed = default.clone();
+        changed.set("port_mapping.enabled", json!(false)).unwrap();
+        assert_eq!(changed, config);
+        assert!(changed.restart_required(&default).is_empty());
     }
 
     #[test]

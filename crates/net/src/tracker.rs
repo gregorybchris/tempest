@@ -5,7 +5,6 @@
 //! `completed` when the bundle completes and `stopped` when it stops, handing the peers each
 //! response lists to the bundle.
 
-use std::net::IpAddr;
 use std::time::Duration;
 
 use rustls_platform_verifier::BuilderVerifierExt;
@@ -19,8 +18,10 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+use crate::addresses::is_public;
 use crate::driver::{BundleHandle, PeerSink, Status};
 use crate::home::HomeRelay;
+use crate::portmap::PortMapping;
 
 /// The largest response body read from a tracker.
 pub const MAX_RESPONSE: usize = 1 << 20;
@@ -151,32 +152,6 @@ pub fn public_addresses(addresses: &[Address]) -> Vec<Address> {
         .collect()
 }
 
-fn is_public(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            let shared = a == 100 && (64..128).contains(&b);
-            !(v4.is_unspecified()
-                || v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_multicast()
-                || v4.is_documentation()
-                || shared)
-        }
-        IpAddr::V6(v6) => {
-            let documentation = v6.segments()[0] == 0x2001 && v6.segments()[1] == 0x0db8;
-            !(v6.is_unspecified()
-                || v6.is_loopback()
-                || v6.is_multicast()
-                || v6.is_unique_local()
-                || v6.is_unicast_link_local()
-                || documentation)
-        }
-    }
-}
-
 /// What a peer tells trackers about itself, for every bundle it announces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnnounceConfig {
@@ -185,7 +160,8 @@ pub struct AnnounceConfig {
     /// The UDP port of this peer's QUIC endpoint.
     pub port: u16,
     /// Direct addresses beyond the one the tracker observes. See [`public_addresses`]. The
-    /// relay address comes from the bundle's [home relay](BundleHandle::home_relay).
+    /// external address comes from the bundle's [port mapping](BundleHandle::port_mapping), the
+    /// relay address from its [home relay](BundleHandle::home_relay).
     pub addrs: Vec<Address>,
     /// How many peers to ask for.
     pub num_want: u32,
@@ -257,6 +233,7 @@ impl Announcer {
             status: bundle.status.clone(),
             peers: bundle.peer_sink(),
             home_relay: bundle.home_relay().clone(),
+            port_mapping: bundle.port_mapping().clone(),
             state,
         };
         Self {
@@ -343,8 +320,8 @@ impl Schedule {
         self.not_before = now + wait;
     }
 
-    /// This peer's relay address changed: the tracker should hear it with the next update,
-    /// as soon as `min_interval` since the last announce allows.
+    /// This peer's relay address or external address changed: the tracker should hear it with
+    /// the next update, as soon as `min_interval` since the last announce allows.
     fn address_changed(&mut self, now: Instant, min_interval: Duration) {
         let earliest = self.succeeded_at.map_or(now, |at| at + min_interval);
         self.next_update = self.next_update.min(earliest.max(now));
@@ -373,6 +350,7 @@ struct AnnounceTask {
     status: watch::Receiver<Status>,
     peers: PeerSink,
     home_relay: HomeRelay,
+    port_mapping: PortMapping,
     state: watch::Sender<TrackerState>,
 }
 
@@ -382,6 +360,8 @@ impl AnnounceTask {
         let mut complete = self.status.borrow_and_update().complete;
         let mut relay = self.home_relay.subscribe();
         let mut relay_address = relay.borrow_and_update().relay_address();
+        let mut mapping = self.port_mapping.subscribe();
+        let mut external = mapping.borrow_and_update().address();
         loop {
             tokio::select! {
                 () = tokio::time::sleep_until(schedule.due()) => {
@@ -410,6 +390,13 @@ impl AnnounceTask {
                         schedule.address_changed(Instant::now(), self.config.min_interval);
                     }
                 }
+                Ok(()) = mapping.changed() => {
+                    let address = mapping.borrow_and_update().address();
+                    if address != external {
+                        external = address;
+                        schedule.address_changed(Instant::now(), self.config.min_interval);
+                    }
+                }
                 // Asked to stop, or the announcer was dropped.
                 _ = stop.changed() => break,
             }
@@ -430,7 +417,7 @@ impl AnnounceTask {
             bundle: self.bundle,
             peer: self.config.peer,
             port: self.config.port,
-            addrs: self.config.addrs.clone(),
+            addrs: self.port_mapping.advertise(&self.config.addrs),
             relay: self.home_relay.address(),
             event,
             complete,

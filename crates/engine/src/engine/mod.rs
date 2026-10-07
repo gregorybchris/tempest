@@ -29,8 +29,8 @@ use std::time::{Duration, SystemTime};
 use tempest_core::Event;
 use tempest_net::{
     AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, HomeRelay, Identity,
-    IdentityError, Lan, LanConfig, Node, NodeConfig, RelayStatus, Storage, StorageError, Summary,
-    TrackerClient,
+    IdentityError, Lan, LanConfig, Node, NodeConfig, PortMapping, PortMappingStatus, RelayStatus,
+    Storage, StorageError, Summary, TrackerClient,
 };
 use tempest_protocol::link::ParseLinkError;
 use tempest_protocol::{Address, BundleId, Link, Manifest, PeerId};
@@ -179,6 +179,7 @@ pub struct Engine {
     peer_id: PeerId,
     addresses: Vec<Address>,
     home_relay: HomeRelay,
+    port_mapping: PortMapping,
 }
 
 type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
@@ -271,8 +272,10 @@ impl Engine {
                 }
             })?;
         let home_relay = endpoint.home_relay().clone();
+        let port_mapping = endpoint.port_mapping().clone();
         if !hold {
             endpoint.set_relays(config.relays.choice());
+            endpoint.set_port_mapping(config.port_mapping.config());
         }
         let lan = match config.lan.enabled && !hold {
             true => {
@@ -332,6 +335,7 @@ impl Engine {
             peer_id,
             addresses,
             home_relay,
+            port_mapping,
         })
     }
 
@@ -340,9 +344,15 @@ impl Engine {
         self.peer_id
     }
 
-    /// The direct addresses this peer advertises.
+    /// The direct addresses of this peer's network interfaces. Links also carry the port
+    /// mapping's external address.
     pub fn addresses(&self) -> &[Address] {
         &self.addresses
+    }
+
+    /// What port mapping is doing, and the external address it gives this peer while mapped.
+    pub fn port_mapping(&self) -> PortMappingStatus {
+        self.port_mapping.status()
     }
 
     /// What the home relay is doing, and the relay address it lends while registered.

@@ -7,7 +7,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, Identity, Lan, LanConfig,
-    Node, NodeConfig, RelayChoice, RelayStatus, TrackerClient,
+    Node, NodeConfig, PortMappingConfig, PortMappingStatus, RelayChoice, RelayStatus,
+    TrackerClient,
 };
 use tempest_protocol::lan::LAN_PORT;
 use tempest_protocol::{Address, RelayIdentity};
@@ -15,7 +16,7 @@ use tempest_protocol::{Address, RelayIdentity};
 /// How long a tracker request may take.
 const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long to wait for the home relay before going on without it.
+/// How long to wait for the home relay and port mapping before going on without them.
 const RELAY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The environment variable that overrides where the identity is stored.
@@ -40,6 +41,9 @@ pub struct PeerArgs {
     /// Neither look for peers on the local network nor announce this one there.
     #[arg(long)]
     pub no_lan: bool,
+    /// Don't ask the router to forward the peer port (with PCP, NAT-PMP or UPnP-IGD).
+    #[arg(long)]
+    pub no_port_mapping: bool,
     #[arg(long, value_name = "PORT", help = format!(
         "The UDP port of LAN discovery's multicast groups [default: {LAN_PORT}]"
     ))]
@@ -105,6 +109,24 @@ impl Peer {
         status.relay_address()
     }
 
+    /// Waits for the router to map the peer port, if port mapping is on, and returns the
+    /// external address. Warns if no router would map it.
+    pub async fn port_mapping(&self) -> Option<Address> {
+        let mut status = self.node.endpoint().port_mapping().subscribe();
+        let settled = status.wait_for(|status| *status != PortMappingStatus::Mapping);
+        let status = match tokio::time::timeout(RELAY_TIMEOUT, settled).await {
+            Ok(Ok(status)) => status.clone(),
+            // Still asking: the link goes out without it.
+            _ => return None,
+        };
+        if let PortMappingStatus::Unavailable { failures } = &status {
+            for failure in failures {
+                eprintln!("warning: no port mapping: {failure}");
+            }
+        }
+        status.address()
+    }
+
     /// Shuts the node down, waiting a moment for its Goodbyes to arrive. Connections that never
     /// finished their handshake, such as dials to an unreachable address, take seconds to
     /// drain, and nobody is waiting for their Goodbye.
@@ -128,6 +150,7 @@ impl PeerArgs {
             || !self.bind.is_empty()
             || !self.relay.is_empty()
             || self.no_lan
+            || self.no_port_mapping
             || self.lan_port.is_some()
     }
 
@@ -158,6 +181,10 @@ impl PeerArgs {
         endpoint.set_relays(RelayChoice {
             known: self.relay.clone(),
             from_trackers: true,
+        });
+        endpoint.set_port_mapping(match self.no_port_mapping {
+            true => PortMappingConfig::off(),
+            false => PortMappingConfig::default(),
         });
         let lan = if self.no_lan {
             None

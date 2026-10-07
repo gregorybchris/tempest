@@ -136,7 +136,7 @@ impl BundleTask {
         let Outputs { events, status } = outputs;
         let local = LocalPeer {
             peer_id: endpoint.peer_id(),
-            addresses: config.addresses.clone(),
+            addresses: endpoint.port_mapping().advertise(&config.addresses),
             relay: endpoint.relay_address(),
         };
         let settings = config.session.clone();
@@ -365,7 +365,13 @@ impl BundleTask {
             direction: connection.direction(),
             path: connection.path(),
         };
-        // Hello and Candidates carry the addresses the home relay lends and observes now.
+        // Hello and Candidates carry the port mapping's external address and the addresses the
+        // home relay lends and observes now.
+        let addresses = self
+            .endpoint
+            .port_mapping()
+            .advertise(&self.config.addresses);
+        self.session.set_addresses(addresses);
         self.session.set_relay(self.endpoint.relay_address());
         self.session
             .set_external_addresses(self.endpoint.external_addresses());

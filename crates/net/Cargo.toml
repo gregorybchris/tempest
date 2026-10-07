@@ -12,6 +12,8 @@ tempest-core.workspace = true
 tempest-protocol.workspace = true
 
 if-addrs.workspace = true
+igd-next.workspace = true
+netdev.workspace = true
 pem-rfc7468.workspace = true
 quinn.workspace = true
 reqwest.workspace = true
@@ -28,6 +30,7 @@ tokio.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
 proptest.workspace = true
 tempest-tracker.workspace = true
 tempfile.workspace = true

@@ -140,10 +140,18 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
     let mut handle = peer.node.share(storage).await?;
     let announcers = peer.announce(&args.tracker, &handle)?;
 
+    let (relay, mapped) = tokio::join!(peer.home_relay(), peer.port_mapping());
     link.peer = Some(peer.node.endpoint().peer_id());
-    link.addrs = peer.addresses.clone();
-    link.relay = peer.home_relay().await;
+    link.addrs = peer
+        .node
+        .endpoint()
+        .port_mapping()
+        .advertise(&peer.addresses);
+    link.relay = relay;
     println!("peer      {}", peer.node.endpoint().peer_id());
+    if let Some(mapped) = mapped {
+        println!("mapped    {mapped}");
+    }
     if let Some(relay) = link.relay {
         println!("relay     {relay}");
     }

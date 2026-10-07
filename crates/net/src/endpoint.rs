@@ -20,6 +20,7 @@ use tempest_protocol::{Address, PeerId};
 
 use crate::home::{HomeRelay, RelayChoice, RelayStatus};
 use crate::identity::Identity;
+use crate::portmap::{PortMapping, PortMappingConfig};
 use crate::tls::{self, PEER_ALPN, SERVER_NAME, UnexpectedPeer};
 use crate::wrap::{RelaySocket, is_virtual};
 
@@ -133,6 +134,7 @@ pub struct Endpoint {
     ipv6: Option<Socket>,
     transport: Arc<TransportConfig>,
     home: HomeRelay,
+    mapping: PortMapping,
 }
 
 /// One address family's socket: quinn's endpoint over the wrapping layer.
@@ -187,6 +189,7 @@ impl Endpoint {
             ipv6,
             transport,
             home: HomeRelay::default(),
+            mapping: PortMapping::default(),
         })
     }
 
@@ -225,6 +228,24 @@ impl Endpoint {
     /// This peer's relay address, while registered with a home relay.
     pub fn relay_address(&self) -> Option<Address> {
         self.home.address()
+    }
+
+    /// The port mapping: its status and the external address it gives this peer.
+    pub fn port_mapping(&self) -> &PortMapping {
+        &self.mapping
+    }
+
+    /// Sets whether and how to ask the router to forward the IPv4 socket's port, and starts
+    /// doing so if needed. Must be called within a tokio runtime.
+    pub fn set_port_mapping(&self, config: PortMappingConfig) {
+        let local = self
+            .ipv4
+            .as_ref()
+            .and_then(|socket| match socket.quic.local_addr() {
+                Ok(SocketAddr::V4(local)) => Some(local),
+                _ => None,
+            });
+        self.mapping.configure(local, config);
     }
 
     /// The addresses at which others see this peer: its address as its home relay observes it,
@@ -321,20 +342,23 @@ impl Endpoint {
         incoming.map(Incoming)
     }
 
-    /// Closes every connection with a Goodbye, including the relay connection, and stops
-    /// accepting.
+    /// Closes every connection with a Goodbye, including the relay connection, removes the port
+    /// mapping and stops accepting.
     pub fn close(&self, reason: GoodbyeReason, message: &str) {
         self.home.stop();
+        self.mapping.stop();
         for socket in self.sockets() {
             socket.close(VarInt::from_u32(reason as u32), reason_phrase(message));
         }
     }
 
-    /// Waits until every connection has finished closing, so the Goodbyes reach the other peers.
+    /// Waits until every connection has finished closing, so the Goodbyes reach the other peers,
+    /// and the router has been asked to remove the port mapping.
     pub async fn wait_idle(&self) {
         for socket in self.sockets() {
             socket.wait_idle().await;
         }
+        self.mapping.finished().await;
     }
 }
 

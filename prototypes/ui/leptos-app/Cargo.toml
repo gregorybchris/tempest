@@ -1,0 +1,20 @@
+[package]
+name = "leptos-app"
+version = "0.1.0"
+edition = "2021"
+description = "M0 prototype: Tempest UI in Leptos (client-side rendered WASM)"
+
+[dependencies]
+proto-core = { path = "../proto-core" }
+leptos = { version = "0.8", features = ["csr"] }
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = ["DomRect", "Element", "HtmlElement", "KeyboardEvent", "PointerEvent"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Not part of any parent workspace.
+[workspace]

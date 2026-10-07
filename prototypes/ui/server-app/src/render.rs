@@ -3,23 +3,53 @@
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use proto_core::chart::{self, Layout, Visible};
-use proto_core::{format, Bundle, BundleState, Cell, Path, Sample, World, GRID_COLS};
+use proto_core::{format, Bundle, BundleState, Cell, Decision, Path, Sample, World, GRID_COLS};
 
 /// UI state that isn't part of the simulated client.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ui {
     pub selected: usize,
     pub theme: &'static str,
     pub scanlines: bool,
     pub visible: Visible,
     pub zoom: Option<(u64, u64)>,
+    /// Pointer x over the chart, in viewBox units.
+    pub chart_x: Option<f64>,
+    /// Where a chart drag started, in viewBox units.
+    pub drag_from: Option<f64>,
+    /// The chunk-map cell under the pointer.
+    pub cell: Option<usize>,
+    /// Adds the Datastar attributes. Off for static snapshots.
+    pub live: bool,
 }
 
 impl Default for Ui {
     fn default() -> Self {
-        Self { selected: 0, theme: "green", scanlines: false, visible: Visible::default(), zoom: None }
+        Self {
+            selected: 0,
+            theme: "green",
+            scanlines: false,
+            visible: Visible::default(),
+            zoom: None,
+            chart_x: None,
+            drag_from: None,
+            cell: None,
+            live: false,
+        }
     }
 }
+
+/// `Some(expr)` in live mode, so maud renders the attribute; `None` otherwise.
+fn on(ui: &Ui, expr: impl Into<String>) -> Option<String> {
+    ui.live.then(|| expr.into())
+}
+
+/// Datastar expression: the pointer's x in chart viewBox units.
+const POINTER_X: &str = "(evt.clientX - el.getBoundingClientRect().left) / el.getBoundingClientRect().width * 960";
+
+/// Datastar expression for the keyboard shortcuts. The server maps keys to actions.
+const KEYS: &str = "evt.key.length == 1 && 'jkstdu0'.includes(evt.key) && !evt.metaKey && !evt.ctrlKey && !evt.altKey \
+    && !evt.target.matches('input, textarea, select, [contenteditable]') && @post('/key/' + evt.key)";
 
 pub const THEMES: [(&str, &str); 4] =
     [("green", "green"), ("amber", "amber"), ("vector", "vector"), ("beige", "beige")];
@@ -32,7 +62,8 @@ pub const CHART_HEIGHT: f64 = 240.0;
 pub fn page(world: &World, ui: &Ui, head_extra: Markup) -> Markup {
     html! {
         (DOCTYPE)
-        html lang="en" data-theme=(ui.theme) data-scanlines=(if ui.scanlines { "on" } else { "off" }) {
+        html lang="en" data-theme=(ui.theme) data-scanlines=(scanlines_attr(ui.scanlines))
+            data-signals=[on(ui, signals(selected(world, ui), ui))] "data-attr:data-theme"=[on(ui, "$theme")] "data-attr:data-scanlines"=[on(ui, "$scanlines")] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
@@ -43,23 +74,42 @@ pub fn page(world: &World, ui: &Ui, head_extra: Markup) -> Markup {
                 link rel="stylesheet" href="/tempest.css";
                 (head_extra)
             }
-            body {
+            body data-init=[on(ui, "@get('/updates')")] "data-on:keydown__window"=[on(ui, KEYS)] {
                 (app(world, ui))
             }
         }
     }
 }
 
+/// The Datastar signals: the `<html>` attributes and the chunk map's label,
+/// which changes too often to re-send the whole map.
+pub fn signals(b: &Bundle, ui: &Ui) -> String {
+    format!(
+        "{{\"theme\":\"{}\",\"scanlines\":\"{}\",\"chunkLabel\":\"{}\"}}",
+        ui.theme,
+        scanlines_attr(ui.scanlines),
+        chunk_label(b)
+    )
+}
+
+fn scanlines_attr(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+fn selected<'a>(world: &'a World, ui: &Ui) -> &'a Bundle {
+    &world.bundles[ui.selected.min(world.bundles.len() - 1)]
+}
+
 /// The app frame: everything inside `<body>`.
 pub fn app(world: &World, ui: &Ui) -> Markup {
-    let bundle = &world.bundles[ui.selected.min(world.bundles.len() - 1)];
+    let bundle = selected(world, ui);
     html! {
         div.app #app {
             (topbar(world, ui))
             (transfers(world, ui))
             main.detail #detail {
                 (summary(bundle))
-                (chunks(bundle))
+                (chunks(bundle, ui))
                 (rates(bundle, ui))
                 div.split {
                     (peers(bundle))
@@ -99,35 +149,63 @@ pub fn wordmark() -> Markup {
 }
 
 fn topbar(world: &World, ui: &Ui) -> Markup {
-    let down: Vec<f64> = sum_history(world, |s| s.down_bps);
-    let up: Vec<f64> = sum_history(world, |s| s.up_bps);
     html! {
         header.topbar {
             (wordmark())
-            div.meters {
-                div.meter.meter--down {
-                    span.meter__label { "download" }
-                    span.meter__value #meter-down { (format::rate(world.down_bps())) }
-                    (spark(&down, "down"))
-                }
-                div.meter.meter--up {
-                    span.meter__label { "upload" }
-                    span.meter__value #meter-up { (format::rate(world.up_bps())) }
-                    (spark(&up, "up"))
-                }
-                div.meter {
-                    span.meter__label { "peers" }
-                    span.meter__value #meter-peers { (world.peer_count()) }
+            (meters(world))
+            (controls(ui))
+        }
+    }
+}
+
+pub fn meters(world: &World) -> Markup {
+    let [down, up, peers] = meter_values(world);
+    html! {
+        div.meters {
+            div.meter.meter--down {
+                span.meter__label { "download" }
+                (down)
+                (meter_spark(world, "down"))
+            }
+            div.meter.meter--up {
+                span.meter__label { "upload" }
+                (up)
+                (meter_spark(world, "up"))
+            }
+            div.meter {
+                span.meter__label { "peers" }
+                (peers)
+            }
+        }
+    }
+}
+
+/// The three `.meter__value` elements, each with an id.
+pub fn meter_values(world: &World) -> [Markup; 3] {
+    [
+        html! { span.meter__value #meter-down { (format::rate(world.down_bps())) } },
+        html! { span.meter__value #meter-up { (format::rate(world.up_bps())) } },
+        html! { span.meter__value #meter-peers { (world.peer_count()) } },
+    ]
+}
+
+/// The total-rate sparkline for `key` (`down` or `up`).
+pub fn meter_spark(world: &World, key: &str) -> Markup {
+    let values = sum_history(world, |s| if key == "down" { s.down_bps } else { s.up_bps });
+    spark(&values, key)
+}
+
+pub fn controls(ui: &Ui) -> Markup {
+    html! {
+        div.controls {
+            div.themes role="group" aria-label="Theme" {
+                @for (key, label) in THEMES {
+                    button.theme-option type="button" data-theme-option=(key) aria-pressed=(bool_attr(ui.theme == key))
+                        "data-on:click"=[on(ui, format!("@post('/theme/{key}')"))] { (label) }
                 }
             }
-            div.controls {
-                div.themes role="group" aria-label="Theme" {
-                    @for (key, label) in THEMES {
-                        button.theme-option type="button" data-theme-option=(key) aria-pressed=(bool_attr(ui.theme == key)) { (label) }
-                    }
-                }
-                button.toggle #scanlines type="button" aria-pressed=(bool_attr(ui.scanlines)) { "scanlines" }
-            }
+            button.toggle #scanlines type="button" aria-pressed=(bool_attr(ui.scanlines))
+                "data-on:click"=[on(ui, "@post('/scanlines')")] { "scanlines" }
         }
     }
 }
@@ -155,17 +233,24 @@ fn transfers(world: &World, ui: &Ui) -> Markup {
     html! {
         aside.transfers aria-label="Transfers" {
             h2.transfers__title { "transfers" }
-            ul.transfer-list {
-                @for (i, b) in world.bundles.iter().enumerate() {
-                    li {
-                        button.transfer type="button" data-index=(i) aria-current=(bool_attr(i == ui.selected)) {
-                            span.transfer__name { (b.name) }
-                            span class=(format!("transfer__state {}", state_class(b.state))) { (b.state.label()) }
-                            span.transfer__bar { span.transfer__fill style=(format!("width:{:.2}%", b.progress * 100.0)) {} }
-                            span.transfer__meta {
-                                span { (format::percent(b.progress)) " of " (format::bytes(b.size_bytes)) }
-                                span { (transfer_rate(b)) }
-                            }
+            (transfer_list(world, ui))
+        }
+    }
+}
+
+pub fn transfer_list(world: &World, ui: &Ui) -> Markup {
+    html! {
+        ul.transfer-list {
+            @for (i, b) in world.bundles.iter().enumerate() {
+                li {
+                    button.transfer type="button" data-index=(i) aria-current=(bool_attr(i == ui.selected))
+                        "data-on:click"=[on(ui, format!("@post('/select/{i}')"))] {
+                        span.transfer__name { (b.name) }
+                        span class=(format!("transfer__state {}", state_class(b.state))) { (b.state.label()) }
+                        span.transfer__bar { span.transfer__fill style=(format!("width:{:.2}%", b.progress * 100.0)) {} }
+                        span.transfer__meta {
+                            span { (format::percent(b.progress)) " of " (format::bytes(b.size_bytes)) }
+                            span { (transfer_rate(b)) }
                         }
                     }
                 }
@@ -224,17 +309,28 @@ pub fn cell_attrs(cell: &Cell) -> (&'static str, String) {
     }
 }
 
-pub fn chunks(b: &Bundle) -> Markup {
+pub fn chunk_label(b: &Bundle) -> String {
+    format!("Chunk map: {} complete", format::percent(b.progress))
+}
+
+pub fn cell(i: usize, cell: &Cell) -> Markup {
+    let (class, style) = cell_attrs(cell);
+    html! { span class=(class) style=(style) data-cell=(i) {} }
+}
+
+pub fn chunks(b: &Bundle, ui: &Ui) -> Markup {
     html! {
         section.panel.panel--chunks #chunks {
             div.panel__head {
                 h2.panel-title { "chunks" }
                 span.chunkmap__scale { (format::count(b.chunk_count())) " chunks · " (format::count(b.chunks_per_cell())) " per cell" }
             }
-            div.chunkmap style=(format!("--cols:{GRID_COLS}")) role="img" aria-label=(format!("Chunk map: {} complete", format::percent(b.progress))) {
-                @for (i, cell) in b.cells.iter().enumerate() {
-                    @let (class, style) = cell_attrs(cell);
-                    span class=(class) style=(style) data-cell=(i) {}
+            div.chunkmap style=(format!("--cols:{GRID_COLS}")) role="img" aria-label=(chunk_label(b))
+                "data-attr:aria-label"=[on(ui, "$chunkLabel")]
+                "data-on:pointerover"=[on(ui, "evt.target.dataset.cell && @post('/chunks/hover', {payload: {cell: +evt.target.dataset.cell}})")]
+                "data-on:pointerleave"=[on(ui, "@post('/chunks/leave')")] {
+                @for (i, c) in b.cells.iter().enumerate() {
+                    (cell(i, c))
                 }
             }
             div.chunkmap__foot {
@@ -245,30 +341,64 @@ pub fn chunks(b: &Bundle) -> Markup {
                     span.key__item { span.cell.cell--missing style="--a:0.15" {} "missing, rare" }
                     span.key__item { span.cell.cell--gone {} "no source" }
                 }
-                span.chunkmap__readout #readout { "hover a cell for details" }
+                (readout(b, ui.cell))
             }
         }
     }
+}
+
+pub fn readout(b: &Bundle, cell: Option<usize>) -> Markup {
+    html! {
+        span.chunkmap__readout #readout { (readout_text(b, cell)) }
+    }
+}
+
+fn readout_text(b: &Bundle, cell: Option<usize>) -> String {
+    let Some((i, cell)) = cell.and_then(|i| Some((i, b.cells.get(i)?))) else {
+        return "hover a cell for details".into();
+    };
+    let (start, end) = b.cell_chunks(i);
+    let state = if cell.in_flight {
+        "downloading"
+    } else if cell.have >= 1.0 {
+        "have"
+    } else {
+        "missing"
+    };
+    let who = if cell.availability == 0 {
+        "no connected peer has them".to_string()
+    } else {
+        format!("{} of {} peers have them", cell.availability, b.peers.len())
+    };
+    format!("chunks {}–{} · {state} · {who}", format::count(start), format::count(end.saturating_sub(1)))
 }
 
 pub fn rates(b: &Bundle, ui: &Ui) -> Markup {
     let history: Vec<Sample> = b.history.iter().copied().collect();
     let c = chart::rates(&history, ui.zoom, Layout::rates(CHART_WIDTH, CHART_HEIGHT), ui.visible);
     let l = c.layout;
+    let overlay = chart_overlay(&c, &history, ui);
     html! {
         section.panel.panel--chart #rates {
             div.panel__head {
                 h2.panel-title { "rates" }
                 div.series-toggles {
                     @if c.zoomed {
-                        button.chart-reset type="button" #chart-reset { "reset zoom" }
+                        button.chart-reset type="button" #chart-reset "data-on:click"=[on(ui, "@post('/chart/reset')")] { "reset zoom" }
                     }
-                    button.series-toggle.series-toggle--down type="button" data-series="down" aria-pressed=(bool_attr(ui.visible.down)) { "download" }
-                    button.series-toggle.series-toggle--up type="button" data-series="up" aria-pressed=(bool_attr(ui.visible.up)) { "upload" }
+                    button.series-toggle.series-toggle--down type="button" data-series="down" aria-pressed=(bool_attr(ui.visible.down))
+                        "data-on:click"=[on(ui, "@post('/series/down')")] { "download" }
+                    button.series-toggle.series-toggle--up type="button" data-series="up" aria-pressed=(bool_attr(ui.visible.up))
+                        "data-on:click"=[on(ui, "@post('/series/up')")] { "upload" }
                 }
             }
             div.chart {
-                svg.chart__svg #chart viewBox=(format!("0 0 {} {}", l.width, l.height)) preserveAspectRatio="none" {
+                svg.chart__svg #chart viewBox=(format!("0 0 {} {}", l.width, l.height)) preserveAspectRatio="none"
+                    "data-on:pointermove"=[on(ui, format!("@post('/chart/move', {{payload: {{x: {POINTER_X}}}}})"))]
+                    "data-on:pointerdown"=[on(ui, format!("el.setPointerCapture(evt.pointerId); @post('/chart/down', {{payload: {{x: {POINTER_X}}}}})"))]
+                    "data-on:pointerup"=[on(ui, format!("@post('/chart/up', {{payload: {{x: {POINTER_X}}}}})"))]
+                    "data-on:pointerleave"=[on(ui, "@post('/chart/leave')")]
+                    "data-on:dblclick"=[on(ui, "@post('/chart/reset')")] {
                     g.chart__grid {
                         @for t in &c.y_ticks {
                             line x1=(l.plot_left()) x2=(l.plot_right()) y1=(t.pos) y2=(t.pos) {}
@@ -290,11 +420,51 @@ pub fn rates(b: &Bundle, ui: &Ui) -> Markup {
                     @for s in &c.series {
                         path class=(format!("chart__line chart__line--{}", s.key)) d=(s.line) vector-effect="non-scaling-stroke" {}
                     }
+                    @for el in &overlay.svg { (el) }
                 }
+                (overlay.tooltip)
             }
             p.chart__hint { "drag to zoom · double-click to reset" }
         }
     }
+}
+
+/// Pointer feedback drawn over the chart: the drag selection, the hover
+/// crosshair and dots (inside the SVG), and the tooltip (after it).
+pub struct ChartOverlay {
+    /// One entry per SVG element.
+    pub svg: Vec<Markup>,
+    pub tooltip: Markup,
+}
+
+pub fn chart_overlay(c: &chart::RateChart, history: &[Sample], ui: &Ui) -> ChartOverlay {
+    let l = c.layout;
+    let (top, bottom) = (l.plot_top(), l.plot_bottom());
+    let selection = ui.drag_from.zip(ui.chart_x).map(|(a, b)| {
+        let x0 = a.min(b).max(l.plot_left());
+        let x1 = a.max(b).min(l.plot_right());
+        (x0, (x1 - x0).max(0.0))
+    });
+    let hover = ui.chart_x.and_then(|x| chart::hover(c, history, ui.visible, x));
+    let mut svg = Vec::new();
+    if let Some((x, width)) = selection {
+        svg.push(html! { rect.chart__selection x=(x) y=(top) width=(width) height=(bottom - top) {} });
+    }
+    if let Some(h) = &hover {
+        svg.push(html! { line.chart__crosshair x1=(h.x) x2=(h.x) y1=(top) y2=(bottom) {} });
+        for (key, y) in &h.points {
+            svg.push(html! { circle class=(format!("chart__dot chart__dot--{key}")) cx=(h.x) cy=(y) r="3.5" {} });
+        }
+    }
+    let tooltip = html! {
+        @if let Some(h) = &hover {
+            div class=(if h.x > l.width * 0.7 { "chart__tooltip chart__tooltip--left" } else { "chart__tooltip" })
+                style=(format!("left:{:.3}%", h.x / l.width * 100.0)) {
+                @for line in &h.lines { div { (line) } }
+            }
+        }
+    };
+    ChartOverlay { svg, tooltip }
 }
 
 pub fn peers(b: &Bundle) -> Markup {
@@ -340,16 +510,25 @@ pub fn log(b: &Bundle) -> Markup {
                 p.detail__explain { "Nothing to decide until a peer is found." }
             } @else {
                 ol.log {
-                    @for d in b.decisions.iter().take(60) {
-                        li class=(format!("log__entry log--{}", d.kind.label())) {
-                            time.log__time { (format::clock(d.t_ms)) }
-                            span.log__kind { (d.kind.label()) }
-                            span.log__what { (d.what) }
-                            span.log__why { (d.why) }
-                        }
+                    @for d in b.decisions.iter().take(LOG_LEN) {
+                        (log_entry(d))
                     }
                 }
             }
+        }
+    }
+}
+
+/// Decisions shown in the log, newest first.
+pub const LOG_LEN: usize = 60;
+
+pub fn log_entry(d: &Decision) -> Markup {
+    html! {
+        li class=(format!("log__entry log--{}", d.kind.label())) {
+            time.log__time { (format::clock(d.t_ms)) }
+            span.log__kind { (d.kind.label()) }
+            span.log__what { (d.what) }
+            span.log__why { (d.why) }
         }
     }
 }

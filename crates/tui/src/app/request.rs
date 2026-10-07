@@ -248,27 +248,4 @@ impl Action {
     }
 }
 
-/// Tags typed as a comma-separated list: trimmed, without a leading `#`, empty ones dropped.
-pub fn parse_tags(text: &str) -> BTreeSet<String> {
-    text.split(',')
-        .map(|tag| tag.trim().trim_start_matches('#').trim())
-        .filter(|tag| !tag.is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tags_are_split_on_commas_and_trimmed() {
-        assert_eq!(
-            parse_tags(" music, #live,,  field recordings ,music"),
-            ["field recordings", "live", "music"]
-                .map(str::to_owned)
-                .into()
-        );
-        assert!(parse_tags(" , ").is_empty());
-    }
-}
+pub use tempest_api::settings::parse_tags;

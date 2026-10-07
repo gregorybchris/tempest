@@ -448,6 +448,97 @@ async fn every_route_works_and_fails_in_one_shape() {
     );
 }
 
+/// What clients type, as the shared parsing makes it, is what the engine keeps, and the
+/// clients' own reading of the settings (`tempest_api::settings`) sees it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_clients_settings_writes_round_trip() {
+    use tempest_api::prefs;
+    use tempest_api::schedule::Schedule;
+    use tempest_api::settings::{SettingsInfo, ValueKind, keys};
+
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    let app = router(engine.clone(), Access::Local);
+    let parse = |kind: ValueKind, text: &str| kind.parse(text).unwrap();
+    let weekdays = [true, true, true, true, true, false, false];
+    let schedule = Schedule::from_form(weekdays, "9:00", "17:30").unwrap();
+    let relay = format!("{}@relay.example.org:4775", "ab".repeat(32));
+    let changes = json!({
+        keys::DOWNLOAD: parse(ValueKind::Limit, "2.5M"),
+        keys::UPLOAD: parse(ValueKind::Limit, "none"),
+        keys::ALT_DOWNLOAD: parse(ValueKind::Limit, "500K"),
+        keys::ALT_UPLOAD: parse(ValueKind::Limit, "100K"),
+        keys::ALT_ENABLED: true,
+        keys::ALT_SCHEDULE: schedule,
+        keys::MAX_DOWNLOADS: parse(ValueKind::Count, "2"),
+        keys::MAX_UPLOADS: parse(ValueKind::Count, "none"),
+        keys::RATIO: parse(ValueKind::Ratio, "1.5"),
+        keys::TIME: parse(ValueKind::Duration, "12h"),
+        keys::ACTION: "remove",
+        keys::SAVE_FOLDER: parse(ValueKind::Folder, "/srv/downloads"),
+        keys::TRACKERS: ["https://tracker.example.org/announce"],
+        keys::RELAYS: [&relay],
+        keys::RELAYS_FROM_TRACKERS: false,
+        prefs::THEME: "vector",
+        prefs::SCANLINES: true,
+        prefs::CLEAN: true,
+        prefs::COLUMNS: ["size", "tags"],
+        prefs::VIEWS: [{ "name": "music", "query": "#music", "sort": "size" }],
+    });
+    let (status, body) = send(&app, Method::PATCH, "/v1/settings", Some(changes.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = send(&app, Method::GET, "/v1/settings", None).await;
+    let info: SettingsInfo = serde_json::from_value(body).unwrap();
+    let settings = &info.settings;
+    assert_eq!(settings.limits.download, Some(2_500_000));
+    assert_eq!(settings.limits.upload, None);
+    let alternative = &settings.limits.alternative;
+    assert_eq!(
+        (alternative.download, alternative.upload),
+        (Some(500_000), Some(100_000))
+    );
+    assert!(alternative.enabled && info.alternative_limits_active);
+    assert_eq!(
+        alternative
+            .schedule
+            .as_ref()
+            .map(Schedule::describe)
+            .as_deref(),
+        Some("Mon–Fri 09:00–17:30")
+    );
+    assert_eq!(settings.queue.max_active_downloads, Some(2));
+    assert_eq!(settings.queue.max_active_uploads, None);
+    assert_eq!(settings.sharing.ratio, Some(1.5));
+    assert_eq!(settings.sharing.time.as_deref(), Some("12h"));
+    assert_eq!(settings.sharing.action, "remove");
+    assert_eq!(settings.save_folder.as_deref(), Some("/srv/downloads"));
+    assert_eq!(settings.trackers, ["https://tracker.example.org/announce"]);
+    assert_eq!(settings.relays.known, [relay]);
+    assert!(!settings.relays.from_trackers);
+    let ui = &settings.ui;
+    assert_eq!(ui.theme, "vector");
+    assert!(ui.scanlines && ui.clean);
+    assert_eq!(prefs::columns(ui).len(), 2);
+    assert_eq!(ui.views[0].query, "#music");
+    // Every change is recorded as made through the API, so `x` can undo it.
+    let changed = changes.as_object().unwrap();
+    assert!(changed.keys().all(|key| info.changed.contains_key(key)));
+
+    // A setting given back to the config file.
+    let uri = format!("/v1/settings/{}", keys::DOWNLOAD);
+    let (_, body) = send(&app, Method::DELETE, &uri, None).await;
+    let info: SettingsInfo = serde_json::from_value(body).unwrap();
+    assert_eq!(info.settings.limits.download, None);
+    assert!(!info.changed.contains_key(keys::DOWNLOAD));
+
+    // A schedule cleared with the form's empty times.
+    let cleared = json!({ keys::ALT_SCHEDULE: Schedule::from_form(weekdays, "", "").unwrap() });
+    let (_, body) = send(&app, Method::PATCH, "/v1/settings", Some(cleared)).await;
+    let info: SettingsInfo = serde_json::from_value(body).unwrap();
+    assert_eq!(info.settings.limits.alternative.schedule, None);
+    engine.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn local_access_refuses_other_hosts_and_remote_access_needs_the_token() {
     let root = tempfile::tempdir().unwrap();

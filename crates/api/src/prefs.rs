@@ -14,6 +14,10 @@ pub const THEME: &str = "ui.theme";
 pub const COLUMNS: &str = "ui.columns";
 /// The setting holding the saved views.
 pub const VIEWS: &str = "ui.views";
+/// The setting switching the web UI's scanlines.
+pub const SCANLINES: &str = "ui.scanlines";
+/// The setting switching the web UI's effects off.
+pub const CLEAN: &str = "ui.clean";
 
 /// The optional columns `ui` shows, in the list's order, or the default ones.
 pub fn columns(ui: &UiSettings) -> Vec<Column> {
@@ -91,6 +95,7 @@ mod tests {
             theme: "pink".to_owned(),
             columns: Some(vec!["tags".to_owned(), "wat".to_owned(), "size".to_owned()]),
             views: Vec::new(),
+            ..UiSettings::default()
         };
         assert_eq!(columns(&ui), [Column::Size, Column::Tags]);
         assert_eq!(columns(&UiSettings::default()), Column::DEFAULT);

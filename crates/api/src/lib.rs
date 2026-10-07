@@ -4,12 +4,13 @@
 //! well as natively: they depend on serde and the protocol's types only.
 //!
 //! - The API's data: [`TransferInfo`] and its [`Status`], [`inspect`] for what is inside a
-//!   transfer, [`requests`] for request bodies, [`events`] for the event stream, [`ApiError`]
-//!   and [`ui`] for the clients' shared settings.
+//!   transfer, [`requests`] for request bodies, [`events`] for the event stream, [`ApiError`],
+//!   [`settings`] for the settings clients show and [`ui`] for the clients' shared look, and
+//!   [`schedule`] for the alternative limits' schedule.
 //! - What clients make of it, shared by the TUI and the web UI (D-119): [`model`] follows the
 //!   event stream, [`finding`] filters and sorts (D-192), [`columns`] decides which columns fit
-//!   (D-138), [`explain`] says what a transfer is doing in plain language, and [`prefs`] reads
-//!   and writes the `ui` settings.
+//!   (D-138), [`explain`] says what a transfer is doing in plain language, [`prefs`] reads
+//!   and writes the `ui` settings, and [`units`] shows and reads byte counts and limits.
 
 pub mod columns;
 mod error;
@@ -20,8 +21,11 @@ pub mod inspect;
 pub mod model;
 pub mod prefs;
 pub mod requests;
+pub mod schedule;
+pub mod settings;
 mod status;
 pub mod ui;
+pub mod units;
 pub mod words;
 
 use std::collections::{BTreeMap, BTreeSet};

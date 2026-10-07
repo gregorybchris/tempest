@@ -34,7 +34,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | `protocol` |
 | `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client | `protocol`, `core` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api` |
-| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations (D-200) | `protocol` |
+| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `protocol` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results | `core` |
 | `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
 | `ui-gallery` | A catalog of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |

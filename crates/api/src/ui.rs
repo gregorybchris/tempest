@@ -15,6 +15,12 @@ pub struct UiSettings {
     pub columns: Option<Vec<String>>,
     /// Saved views of the transfers list.
     pub views: Vec<SavedView>,
+    /// Scanlines over the web UI.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub scanlines: bool,
+    /// No glow, scanlines or animation in the web UI.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clean: bool,
 }
 
 impl Default for UiSettings {
@@ -23,6 +29,8 @@ impl Default for UiSettings {
             theme: "green".to_owned(),
             columns: None,
             views: Vec::new(),
+            scanlines: false,
+            clean: false,
         }
     }
 }

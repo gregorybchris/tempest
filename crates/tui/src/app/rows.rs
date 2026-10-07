@@ -1,7 +1,7 @@
 //! The Catalog and Settings areas: the engine's settings as sections of rows, and what `enter`,
 //! `a` and `x` do to the row under the cursor (D-196).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -13,61 +13,11 @@ use super::modal::{FormKind, Modal, ValueEdit, ValueTarget};
 use super::request::Request;
 use super::{App, Area, View};
 use crate::columns::Column;
-use crate::form::{DAYS, Field, Form};
+use crate::form::{Field, Form};
 use crate::format;
 use crate::prefs;
 
-/// What kind of value a row's prompt takes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueKind {
-    /// A speed, such as `2M`, or none.
-    Limit,
-    /// A whole number of transfers, or none.
-    Count,
-    /// A ratio above 0, or none.
-    Ratio,
-    /// A duration such as `12h`, or none.
-    Duration,
-    /// An absolute path, or nothing for the default.
-    Folder,
-}
-
-impl ValueKind {
-    /// The setting's value for `text`, or why it isn't one.
-    pub fn parse(self, text: &str) -> Result<Value, String> {
-        let text = text.trim();
-        let none = text.is_empty() || text.eq_ignore_ascii_case("none");
-        match self {
-            Self::Limit => format::parse_limit(text).map(|limit| json!(limit)),
-            Self::Count if none => Ok(Value::Null),
-            Self::Count => match text.parse::<u32>() {
-                Ok(count) if count > 0 => Ok(json!(count)),
-                _ => Err("Type a whole number from 1, or none for no limit.".to_owned()),
-            },
-            Self::Ratio if none => Ok(Value::Null),
-            Self::Ratio => match text.parse::<f64>() {
-                Ok(ratio) if ratio.is_finite() && ratio > 0.0 => Ok(json!(ratio)),
-                _ => Err("Type a ratio above 0, such as 2 or 1.5, or none.".to_owned()),
-            },
-            Self::Duration if none => Ok(Value::Null),
-            Self::Duration => Ok(json!(text)),
-            Self::Folder if text.is_empty() => Ok(Value::Null),
-            Self::Folder if Path::new(text).is_absolute() => Ok(json!(text)),
-            Self::Folder => Err("Type an absolute path, or nothing for the default.".to_owned()),
-        }
-    }
-
-    /// A line on what to type.
-    pub fn help(self) -> &'static str {
-        match self {
-            Self::Limit => "A speed such as 500K or 2.5M, or none.",
-            Self::Count => "A number of transfers, or none for no limit.",
-            Self::Ratio => "Bytes sent per byte received, such as 2, or none.",
-            Self::Duration => "A time such as 30m, 12h or 7d, or none.",
-            Self::Folder => "An absolute path on the engine's machine.",
-        }
-    }
-}
+pub use tempest_api::settings::ValueKind;
 
 /// What changing a row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,38 +114,7 @@ const ACTIONS: &[&str] = &["stop", "remove"];
 
 /// A schedule's days and times: "Mon–Fri 09:00–17:00".
 pub fn describe_schedule(schedule: &Schedule) -> String {
-    format!(
-        "{} {}–{}",
-        describe_days(&schedule.days),
-        schedule.from,
-        schedule.to
-    )
-}
-
-/// Days as runs: "Every day", "Mon–Fri", "Mon, Wed–Fri".
-fn describe_days(days: &BTreeSet<Weekday>) -> String {
-    if days.len() == 7 {
-        return "Every day".to_owned();
-    }
-    let on: Vec<usize> = (0..7)
-        .filter(|i| days.contains(&Weekday::ALL[*i]))
-        .collect();
-    let mut runs: Vec<(usize, usize)> = Vec::new();
-    for day in on {
-        match runs.last_mut() {
-            Some((_, end)) if *end + 1 == day => *end = day,
-            _ => runs.push((day, day)),
-        }
-    }
-    let runs: Vec<String> = runs
-        .into_iter()
-        .map(|(start, end)| match end - start {
-            0 => DAYS[start].to_owned(),
-            1 => format!("{}, {}", DAYS[start], DAYS[end]),
-            _ => format!("{}–{}", DAYS[start], DAYS[end]),
-        })
-        .collect();
-    runs.join(", ")
+    schedule.describe()
 }
 
 fn yes_no(on: bool) -> &'static str {
@@ -515,32 +434,12 @@ fn schedule_form(schedule: Option<&Schedule>) -> Form {
 
 /// The schedule `form` asks for, as the setting's value: `null` when both times are empty.
 pub(super) fn schedule_value(form: &Form) -> Result<Value, String> {
-    let (from, to) = (form.text("From"), form.text("To"));
-    if from.is_empty() && to.is_empty() {
-        return Ok(Value::Null);
-    }
-    let from: TimeOfDay = from.parse().map_err(|_| "From is a time such as 09:00.")?;
-    let to: TimeOfDay = to.parse().map_err(|_| "To is a time such as 17:00.")?;
-    let days: Vec<Weekday> = (0..7)
-        .filter(|day| form.days("Days")[*day])
-        .map(|day| Weekday::ALL[day])
-        .collect();
-    if days.is_empty() {
-        return Err("Pick at least one day.".to_owned());
-    }
-    Ok(json!({ "days": days, "from": from, "to": to }))
+    let days: [bool; 7] = std::array::from_fn(|day| form.days("Days")[day]);
+    let schedule = Schedule::from_form(days, &form.text("From"), &form.text("To"))?;
+    Ok(serde_json::to_value(schedule).expect("schedules serialize"))
 }
 
-/// A speed limit as a prompt starts with it: exact, in the largest unit that keeps it whole.
-pub(super) fn limit_input(limit: Option<u64>) -> String {
-    match limit {
-        None => String::new(),
-        Some(rate) if rate % 1_000_000_000 == 0 => format!("{}G", rate / 1_000_000_000),
-        Some(rate) if rate % 1_000_000 == 0 => format!("{}M", rate / 1_000_000),
-        Some(rate) if rate % 1000 == 0 => format!("{}K", rate / 1000),
-        Some(rate) => rate.to_string(),
-    }
-}
+pub(super) use crate::format::limit_input;
 
 impl App {
     /// The sections of the area shown, if it lists rows and the settings have loaded.
@@ -969,36 +868,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn values_are_read_by_kind() {
-        assert_eq!(ValueKind::Limit.parse("2M"), Ok(json!(2_000_000)));
-        assert_eq!(ValueKind::Limit.parse("none"), Ok(Value::Null));
-        assert_eq!(ValueKind::Count.parse("3"), Ok(json!(3)));
-        assert_eq!(ValueKind::Count.parse(""), Ok(Value::Null));
-        assert!(ValueKind::Count.parse("0").is_err());
-        assert!(ValueKind::Count.parse("two").is_err());
-        assert_eq!(ValueKind::Ratio.parse("1.5"), Ok(json!(1.5)));
-        assert!(ValueKind::Ratio.parse("-1").is_err());
-        assert_eq!(ValueKind::Duration.parse("12h"), Ok(json!("12h")));
-        assert_eq!(ValueKind::Duration.parse("None"), Ok(Value::Null));
-        assert_eq!(ValueKind::Folder.parse("/srv"), Ok(json!("/srv")));
-        assert_eq!(ValueKind::Folder.parse(""), Ok(Value::Null));
-        assert!(ValueKind::Folder.parse("srv").is_err());
-    }
-
-    #[test]
-    fn schedules_are_described_by_runs_of_days() {
-        let days = |list: &[usize]| list.iter().map(|d| Weekday::ALL[*d]).collect();
-        assert_eq!(describe_days(&days(&[0, 1, 2, 3, 4, 5, 6])), "Every day");
-        assert_eq!(describe_days(&days(&[0, 1, 2, 3, 4])), "Mon–Fri");
-        assert_eq!(describe_days(&days(&[5, 6])), "Sat, Sun");
-        assert_eq!(describe_days(&days(&[0, 2, 3, 4])), "Mon, Wed–Fri");
-        assert_eq!(limit_input(Some(2_000_000)), "2M");
-        assert_eq!(limit_input(Some(1_500_000)), "1500K");
-        assert_eq!(limit_input(Some(1_234)), "1234");
-        assert_eq!(limit_input(None), "");
-    }
 
     #[test]
     fn the_schedule_form_reads_back_as_a_setting() {

@@ -30,7 +30,7 @@ use crate::config::{EngineConfig, SharingAction, SharingLimits};
 use crate::events::{EngineEvent, EventLog};
 use crate::manifest::unix_millis;
 use crate::queue::{Candidate, QueueMove, reorder, schedule};
-use crate::schedule::LocalTime;
+use crate::schedule::local_now;
 use crate::status::{Phase, Status, StatusInput};
 use crate::store::{Kind, Store, TransferRow};
 
@@ -461,7 +461,7 @@ impl EngineTask {
             restart_required: (self.config.restart_required(&self.running).iter())
                 .map(|group| (*group).to_owned())
                 .collect(),
-            alternative_limits_active: self.config.limits.alternative_active(LocalTime::now()),
+            alternative_limits_active: self.config.limits.alternative_active(local_now()),
         }
     }
 
@@ -1268,7 +1268,7 @@ impl EngineTask {
     /// Applies the speed limits over every transfer in effect now: the usual ones, or the
     /// alternative ones while switched on or scheduled.
     fn apply_speed_limits(&self) {
-        let limits = self.config.limits.in_effect(LocalTime::now());
+        let limits = self.config.limits.in_effect(local_now());
         let node = self.node.limits();
         node.download.set_rate(limits.download);
         node.upload.set_rate(limits.upload);

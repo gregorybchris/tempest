@@ -3,15 +3,17 @@
 
 use std::future::Future;
 use std::pin::pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use quinn::{ReadError, RecvStream, SendStream, WriteError};
 use tempest_core::io::PathKind;
 use tempest_core::{ConnId, StreamId};
 use tempest_protocol::message::{GoodbyeReason, PeerRecord};
-use tempest_protocol::{Address, Message};
+use tempest_protocol::{Address, Message, PeerId};
 use tokio::sync::mpsc;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 
 use super::bundle::Report;
 use super::request::Incoming;
@@ -28,25 +30,10 @@ pub(super) async fn dial(
     timeout: Duration,
     inbox: mpsc::Sender<Report>,
 ) {
-    let attempt = |address: Address, path: PathKind| {
-        let endpoint = &endpoint;
-        async move {
-            let addr = address.socket_addr();
-            let attempt = async {
-                let connection = match path {
-                    PathKind::Direct => endpoint.dial(addr, Some(record.peer_id)).await,
-                    PathKind::Relayed => endpoint.dial_relayed(addr, Some(record.peer_id)).await,
-                }
-                .ok()?;
-                let (send, recv) = connection.quic().open_bi().await.ok()?;
-                Some((connection, send, recv))
-            };
-            tokio::time::timeout(timeout, attempt).await.ok().flatten()
-        }
-    };
+    let peer = record.peer_id;
     let direct = async {
         for &address in &record.addresses {
-            if let Some(opened) = attempt(address, PathKind::Direct).await {
+            if let Some(opened) = open(&endpoint, address, PathKind::Direct, peer, timeout).await {
                 return Some(opened);
             }
         }
@@ -54,18 +41,80 @@ pub(super) async fn dial(
     };
     let relayed = async {
         match record.relay {
-            Some(address) => attempt(address, PathKind::Relayed).await,
+            Some(address) => open(&endpoint, address, PathKind::Relayed, peer, timeout).await,
             None => None,
         }
     };
-    let Some((connection, send, recv)) = first_some(direct, relayed).await else {
-        let _ = inbox
-            .send(Report::DialFailed {
-                peer: record.peer_id,
-            })
-            .await;
-        return;
+    match first_some(direct, relayed).await {
+        Some(opened) => report_dialed(opened, &inbox).await,
+        None => {
+            let _ = inbox.send(Report::DialFailed { peer }).await;
+        }
+    }
+}
+
+/// Dials `peer` at every one of `addresses` at once, to punch through both peers' routers
+/// (`protocol/relays.md`, Upgrading to a direct connection). An attempt that fails is started
+/// again until `time` runs out or `stop` is set, and every connection that opens is reported
+/// like any dial. Attempts already under way when `stop` is set run their course, since the
+/// other peer may have completed them.
+pub(super) fn punch(
+    endpoint: &Endpoint,
+    peer: PeerId,
+    addresses: Vec<Address>,
+    time: Duration,
+    inbox: &mpsc::Sender<Report>,
+    stop: Arc<AtomicBool>,
+) {
+    let deadline = Instant::now() + time;
+    for address in addresses {
+        let (endpoint, inbox, stop) = (endpoint.clone(), inbox.clone(), stop.clone());
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return;
+                }
+                if let Some(opened) = open(&endpoint, address, PathKind::Direct, peer, left).await {
+                    report_dialed(opened, &inbox).await;
+                    return;
+                }
+                // Some attempts fail at once, as for an address of a family without a socket.
+                tokio::time::sleep(PUNCH_RETRY.min(left)).await;
+            }
+        });
+    }
+}
+
+/// The pause before an attempt to punch through to an address that failed is started again.
+const PUNCH_RETRY: Duration = Duration::from_millis(250);
+
+/// A connection and its control stream, opened by dialing.
+type Opened = (Connection, SendStream, RecvStream);
+
+/// Dials `peer` at `address` and opens the control stream, all within `timeout`.
+async fn open(
+    endpoint: &Endpoint,
+    address: Address,
+    path: PathKind,
+    peer: PeerId,
+    timeout: Duration,
+) -> Option<Opened> {
+    let addr = address.socket_addr();
+    let attempt = async {
+        let connection = match path {
+            PathKind::Direct => endpoint.dial(addr, Some(peer)).await,
+            PathKind::Relayed => endpoint.dial_relayed(addr, Some(peer)).await,
+        }
+        .ok()?;
+        let (send, recv) = connection.quic().open_bi().await.ok()?;
+        Some((connection, send, recv))
     };
+    tokio::time::timeout(timeout, attempt).await.ok().flatten()
+}
+
+/// Hands a dialed connection to the bundle, or closes it if the bundle has stopped.
+async fn report_dialed((connection, send, recv): Opened, inbox: &mpsc::Sender<Report>) {
     let report = Report::Dialed {
         connection: connection.clone(),
         send,

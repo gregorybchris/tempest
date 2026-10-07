@@ -36,7 +36,7 @@ use crate::chunks::ChunkSet;
 use crate::config::{Config, ConfigError, WhenComplete};
 use crate::event::{CloseCause, Event, EventKind};
 use crate::io::{
-    Action, Closed, ConnId, ConnInfo, Direction, Inbound, OutRequest, RequestId, StreamId,
+    Action, Closed, ConnId, ConnInfo, Direction, Inbound, OutRequest, PathKind, RequestId, StreamId,
 };
 use crate::select::ChunkSelector;
 use crate::time::Time;
@@ -69,6 +69,8 @@ pub enum SessionError {
 pub struct Session {
     config: Config,
     local: LocalPeer,
+    /// Addresses at which others see this peer, listed first in Candidates.
+    external: Vec<Address>,
     bundle_id: BundleId,
     /// Set once the manifest is known.
     bundle: Option<Bundle>,
@@ -76,6 +78,8 @@ pub struct Session {
     /// Peers this session may dial, with the earliest time to try each.
     known: BTreeMap<PeerId, KnownPeer>,
     dialing: BTreeSet<PeerId>,
+    /// Peers the driver is dialing directly to replace a relayed connection.
+    punching: BTreeSet<PeerId>,
     banned: BTreeSet<PeerId>,
     /// The earliest time a known peer may be dialed, as of the last dialing decision. It may be
     /// stale, but only too early, which costs one wasted timer.
@@ -154,11 +158,13 @@ impl Session {
             custom_uploader: false,
             config,
             local,
+            external: Vec::new(),
             bundle_id,
             bundle: None,
             conns: BTreeMap::new(),
             known: BTreeMap::new(),
             dialing: BTreeSet::new(),
+            punching: BTreeSet::new(),
             banned: BTreeSet::new(),
             next_dial: None,
             next_conn_review: Time::ZERO,
@@ -407,6 +413,12 @@ impl Session {
         self.local.relay = relay;
     }
 
+    /// Sets the addresses at which others see this peer, such as its address as its home relay
+    /// observes it. Candidates lists them before [`LocalPeer::addresses`].
+    pub fn set_external_addresses(&mut self, addresses: Vec<Address>) {
+        self.external = addresses;
+    }
+
     /// Reports that a [`Action::Dial`] failed.
     pub fn handle_dial_failed(&mut self, now: Time, peer: PeerId) {
         self.dialing.remove(&peer);
@@ -437,7 +449,7 @@ impl Session {
             Some((GoodbyeReason::BadData, "banned for sending bad data"))
         } else if info.peer == self.local.peer_id {
             Some((GoodbyeReason::Done, "connected to itself"))
-        } else if self.at_connection_limit() {
+        } else if self.at_connection_limit() && !self.is_upgrade(info) {
             made_room = self.make_room(now);
             (!made_room).then_some((GoodbyeReason::TooManyConnections, ""))
         } else {
@@ -640,8 +652,13 @@ impl Session {
             self.manifest_request = None;
         }
         self.uploading -= state.incoming.values().filter(|i| i.sending).count() as u32;
-        if let Some(known) = self.known.get_mut(&state.peer()) {
+        let peer = state.peer();
+        if let Some(known) = self.known.get_mut(&peer) {
             known.next_attempt = now + self.config.connections.redial_delay;
+        }
+        if !self.conns.values().any(|c| c.peer() == peer) {
+            // A hole punch that outlives every connection with the peer just runs out.
+            self.punching.remove(&peer);
         }
         Some(state)
     }
@@ -658,6 +675,19 @@ impl Session {
         self.maybe_dial(now);
         self.update_idle(now);
         self.check_linger(now);
+    }
+
+    /// Whether a new connection is the first direct one with a peer this peer is connected to
+    /// only through relays, as a hole punch makes. It is let in over the connection limit,
+    /// since it replaces a connection.
+    fn is_upgrade(&self, info: ConnInfo) -> bool {
+        let mut paths = (self.conns.values())
+            .filter(|c| c.peer() == info.peer)
+            .map(|c| c.info.path)
+            .peekable();
+        info.path == PathKind::Direct
+            && paths.peek().is_some()
+            && paths.all(|path| path == PathKind::Relayed)
     }
 
     fn at_connection_limit(&self) -> bool {
@@ -782,14 +812,8 @@ impl Session {
                 self.add_peers(now, peers.peers);
                 Ok(())
             }
-            Message::Candidates(_) => {
-                // Hole punching is the driver's job; the session only owes a reply.
-                if !conn.sent_candidates {
-                    conn.sent_candidates = true;
-                    let mut addresses = self.local.addresses.clone();
-                    addresses.truncate(MAX_CANDIDATES);
-                    self.send(id, Message::Candidates(Candidates { addresses }));
-                }
+            Message::Candidates(candidates) => {
+                self.on_candidates(id, candidates.addresses);
                 Ok(())
             }
             Message::Hello(_) | Message::Have(_) => {
@@ -833,6 +857,7 @@ impl Session {
         if !self.conns.contains_key(&id) {
             return Ok(());
         }
+        self.after_opening(id);
         self.update_want(id);
         let held = std::mem::take(&mut self.conns.get_mut(&id).expect("open").held);
         for (stream, message) in held {
@@ -953,5 +978,76 @@ impl Session {
             let want = tempest_protocol::message::Want { wanted };
             self.send(id, Message::Want(want));
         }
+    }
+
+    // ----- Upgrading to a direct connection -----
+
+    /// Takes the first step of upgrading a newly opened connection (`protocol/relays.md`,
+    /// Upgrading to a direct connection): the registered peer of a relayed connection, the one
+    /// whose relay address was dialed, sends Candidates. A direct connection ends any hole punch
+    /// with its peer.
+    fn after_opening(&mut self, id: ConnId) {
+        let conn = &self.conns[&id];
+        let (peer, info) = (conn.peer(), conn.info);
+        match (info.path, info.direction) {
+            (PathKind::Direct, _) => {
+                if self.punching.remove(&peer) {
+                    self.actions.push(Action::StopPunching { peer });
+                }
+            }
+            (PathKind::Relayed, Direction::Accepted) if !self.has_direct(peer) => {
+                self.send_candidates(id);
+            }
+            (PathKind::Relayed, _) => {}
+        }
+    }
+
+    /// Replies to the other peer's first Candidates on a connection, and has the driver dial
+    /// them if the connection is relayed: both peers have now sent and received Candidates.
+    fn on_candidates(&mut self, id: ConnId, addresses: Vec<Address>) {
+        let conn = self.conns.get_mut(&id).expect("open");
+        if conn.received_candidates {
+            return;
+        }
+        conn.received_candidates = true;
+        if !conn.sent_candidates {
+            self.send_candidates(id);
+        }
+        let conn = &self.conns[&id];
+        let peer = conn.peer();
+        if conn.info.path == PathKind::Relayed && !self.has_direct(peer) {
+            self.punching.insert(peer);
+            self.actions.push(Action::Punch {
+                conn: id,
+                peer,
+                addresses,
+            });
+        }
+    }
+
+    fn send_candidates(&mut self, id: ConnId) {
+        self.conns.get_mut(&id).expect("open").sent_candidates = true;
+        let addresses = self.candidates();
+        self.send(id, Message::Candidates(Candidates { addresses }));
+    }
+
+    /// The addresses at which this peer might be reached directly: the external ones first,
+    /// then those it accepts connections at, without repeats.
+    fn candidates(&self) -> Vec<Address> {
+        let mut addresses: Vec<Address> = Vec::new();
+        for &address in self.external.iter().chain(&self.local.addresses) {
+            if !addresses.contains(&address) {
+                addresses.push(address);
+            }
+        }
+        addresses.truncate(MAX_CANDIDATES);
+        addresses
+    }
+
+    /// Whether an open direct connection with `peer` exists.
+    fn has_direct(&self, peer: PeerId) -> bool {
+        self.conns
+            .values()
+            .any(|c| c.peer() == peer && c.info.path == PathKind::Direct && c.is_open())
     }
 }

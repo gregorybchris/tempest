@@ -420,7 +420,7 @@ fn get_reaches_the_sharer_through_its_relay() {
     let relay_address = link.relay.expect("the link has the relay address");
     assert!(relay_address.ip().is_loopback());
 
-    // Without its direct addresses, the sharer can only be reached through the relay.
+    // Without its direct addresses, the sharer is reached through the relay first.
     let relayed = Link {
         addrs: Vec::new(),
         ..link

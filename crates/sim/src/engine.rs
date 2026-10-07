@@ -998,6 +998,8 @@ impl<'a, 's> Simulation<'a, 's> {
             } => self.close(conn, Closed::Goodbye { reason, message }),
             // The simulator already holds the manifest.
             Action::StoreManifest { .. } => {}
+            // The simulator models hole punching itself, as an upgrade of the relayed connection.
+            Action::Punch { .. } | Action::StopPunching { .. } => {}
         }
     }
 

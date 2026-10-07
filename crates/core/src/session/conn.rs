@@ -67,6 +67,8 @@ pub(super) struct Conn {
     pub incoming: BTreeMap<StreamId, Incoming>,
     /// Whether this peer has sent Candidates.
     pub sent_candidates: bool,
+    /// Whether the other peer has sent Candidates.
+    pub received_candidates: bool,
     /// Bytes of verified Data received.
     pub received: Meter,
     /// Bytes of Data sent.
@@ -145,6 +147,7 @@ impl Conn {
             held: Vec::new(),
             incoming: BTreeMap::new(),
             sent_candidates: false,
+            received_candidates: false,
             received: Meter::new(config.upload.rate_window, now),
             sent: Meter::new(config.upload.rate_window, now),
         }

@@ -1,5 +1,6 @@
 //! Nodes reaching each other through a relay on localhost: the seeder registers with its home
-//! relay, and the downloader knows only the seeder's relay address.
+//! relay, and the downloader knows only the seeder's relay address. Unless they hole-punch, the
+//! connection stays relayed.
 
 use std::collections::HashSet;
 use std::fs;
@@ -8,13 +9,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tempest_core::event::CloseCause;
 use tempest_core::io::PathKind;
 use tempest_core::{Event, EventKind};
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Destination, Endpoint, EndpointConfig, Identity, Node,
     NodeConfig, RelayChoice, RelayError, RelayStatus, Storage, StorageConfig, TrackerClient,
 };
-use tempest_protocol::message::PeerRecord;
+use tempest_protocol::message::{GoodbyeReason, PeerRecord};
 use tempest_protocol::relay::{RelayHost, RelayRejectReason};
 use tempest_protocol::tracker::{AnnounceEvent, AnnounceRequest};
 use tempest_protocol::tree::{self, CHUNK_SIZE};
@@ -64,8 +66,17 @@ impl TestRelay {
     }
 }
 
+/// A node on localhost that doesn't hole-punch, so connections through a relay stay relayed:
+/// on localhost, every punch would succeed.
 fn start_node(identity: Identity) -> Node {
-    let config = NodeConfig::default();
+    let config = NodeConfig {
+        punch_time: None,
+        ..NodeConfig::default()
+    };
+    start_node_with(identity, config)
+}
+
+fn start_node_with(identity: Identity, config: NodeConfig) -> Node {
     let endpoint_config = EndpointConfig {
         max_open_requests: config.session.upload.max_open_requests,
         ..EndpointConfig::localhost()
@@ -377,5 +388,94 @@ async fn a_relay_a_tracker_recommends_becomes_home_and_is_announced() {
     };
     within(heard).await;
     announcer.stop().await;
+    seeder.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relayed_transfer_finishes_over_a_direct_connection() {
+    let relay = TestRelay::start(RelayConfig::localhost());
+    let seeder = start_node_with(Identity::generate().unwrap(), NodeConfig::default());
+    let relay_address = use_relay(&seeder, &relay).await.relay_address().unwrap();
+    // Slow enough that requests are still open when the relayed connection closes.
+    seeder.limits().upload.set_rate(Some(2_000_000));
+    let dir = tempfile::tempdir().unwrap();
+    let shared = share(&seeder, dir.path()).await;
+
+    let downloader = start_node_with(Identity::generate().unwrap(), NodeConfig::default());
+    let mut events = within(async {
+        let out = tempfile::tempdir().unwrap();
+        let record = PeerRecord {
+            peer_id: seeder.endpoint().peer_id(),
+            addresses: Vec::new(),
+            relay: Some(relay_address),
+        };
+        let handle = downloader
+            .download(
+                shared.bundle_id(),
+                Destination::Dir(out.path().into()),
+                vec![record],
+            )
+            .await
+            .unwrap();
+        let events = handle.events.resubscribe();
+        let mut status = handle.status.clone();
+        status.wait_for(|status| status.complete).await.unwrap();
+        for name in ["small.txt", "big.bin"] {
+            let want = fs::read(dir.path().join(name)).unwrap();
+            assert!(fs::read(out.path().join(name)).unwrap() == want, "{name}");
+        }
+        events
+    })
+    .await;
+
+    let mut relayed = None;
+    let mut direct = HashSet::new();
+    let mut over_relay = false;
+    let mut duplicate_closed = false;
+    let mut received_direct = 0;
+    // The events about connections, to show if an assertion fails.
+    let mut log = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if !matches!(
+            event.kind,
+            EventKind::Received { .. } | EventKind::Requested { .. }
+        ) {
+            log.push(event.to_string());
+        }
+        match event.kind {
+            EventKind::Connected { conn, path, .. } => match path {
+                PathKind::Relayed => assert!(relayed.replace(conn).is_none(), "one relayed"),
+                PathKind::Direct => _ = direct.insert(conn),
+            },
+            EventKind::ManifestReceived { conn, .. } | EventKind::Requested { conn, .. } => {
+                over_relay |= Some(conn) == relayed;
+            }
+            EventKind::Received { conn, bytes, .. } if direct.contains(&conn) => {
+                received_direct += bytes;
+            }
+            EventKind::Closed { conn, cause, .. } if Some(conn) == relayed => {
+                let reason = match cause {
+                    CloseCause::Local { reason, .. } | CloseCause::Remote { reason, .. } => {
+                        Some(reason)
+                    }
+                    CloseCause::Lost => None,
+                };
+                duplicate_closed = reason == Some(GoodbyeReason::Duplicate);
+            }
+            _ => {}
+        }
+    }
+    assert!(relayed.is_some(), "the transfer started through the relay");
+    assert!(over_relay, "the relayed connection carried the transfer");
+    assert!(!direct.is_empty(), "a direct connection opened");
+    assert!(
+        duplicate_closed,
+        "the relayed connection closed as a duplicate: {log:#?}"
+    );
+    assert!(
+        received_direct > 0,
+        "data arrived over the direct connection"
+    );
+    downloader.shutdown().await;
     seeder.shutdown().await;
 }

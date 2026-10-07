@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use quinn::{RecvStream, SendStream};
@@ -11,7 +12,8 @@ use tempest_core::{
     Action, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response, Session, StreamId, Time,
 };
 use tempest_protocol::message::{Hello, ManifestMessage, PeerRecord, Reject, RejectReason};
-use tempest_protocol::{BundleId, Message, PeerId, RangeList};
+use tempest_protocol::{Address, BundleId, Message, PeerId, RangeList};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::Instant;
 
@@ -113,6 +115,8 @@ pub(super) struct BundleTask {
     answers: HashMap<(ConnId, StreamId), oneshot::Sender<Answer>>,
     /// This peer's requests in flight; sending on one cancels it.
     cancels: HashMap<(ConnId, RequestId), oneshot::Sender<()>>,
+    /// Hole punches under way, by peer; setting the flag stops one.
+    punches: HashMap<PeerId, Arc<AtomicBool>>,
     events: broadcast::Sender<Event>,
     status: watch::Sender<Status>,
     /// Why the bundle stopped, if storage failed.
@@ -160,6 +164,7 @@ impl BundleTask {
             next_conn: 0,
             answers: HashMap::new(),
             cancels: HashMap::new(),
+            punches: HashMap::new(),
             events,
             status,
             failure: None,
@@ -360,8 +365,10 @@ impl BundleTask {
             direction: connection.direction(),
             path: connection.path(),
         };
-        // Hello carries the relay address the home relay lends now.
+        // Hello and Candidates carry the addresses the home relay lends and observes now.
         self.session.set_relay(self.endpoint.relay_address());
+        self.session
+            .set_external_addresses(self.endpoint.external_addresses());
         self.session.handle_connected(now, conn, info);
         if let Some(hello) = hello {
             debug_assert_eq!(info.direction, Direction::Accepted);
@@ -389,9 +396,9 @@ impl BundleTask {
                 let Some(entry) = self.conns.get(&conn) else {
                     return;
                 };
-                if entry.control.try_send(message).is_err() {
-                    // The other peer isn't reading its control stream, or the connection task
-                    // has ended because the connection did.
+                // A closed outbox means the connection task has ended, and it reports why.
+                if let Err(TrySendError::Full(_)) = entry.control.try_send(message) {
+                    // The other peer isn't reading its control stream.
                     entry.connection.close(
                         tempest_protocol::message::GoodbyeReason::Done,
                         "control stream backed up",
@@ -447,6 +454,16 @@ impl BundleTask {
                 }
                 self.forget(conn);
             }
+            Action::Punch {
+                conn,
+                peer,
+                addresses,
+            } => self.punch(conn, peer, addresses),
+            Action::StopPunching { peer } => {
+                if let Some(stop) = self.punches.remove(&peer) {
+                    stop.store(true, Ordering::Relaxed);
+                }
+            }
             Action::StoreManifest { manifest, .. } => {
                 let Some(destination) = self.destination.take() else {
                     return;
@@ -468,6 +485,32 @@ impl BundleTask {
                 }
             }
         }
+    }
+
+    /// Starts a hole punch with `peer`, connected through `conn`. The address the peer's packets
+    /// reach this one's home relay from is dialed first, since it is usually the best
+    /// (`protocol/relays.md`, Upgrading to a direct connection).
+    fn punch(&mut self, conn: ConnId, peer: PeerId, addresses: Vec<Address>) {
+        let Some(time) = self.config.punch_time else {
+            return;
+        };
+        let sender = (self.conns.get(&conn)).and_then(|entry| {
+            self.endpoint
+                .relayed_sender(entry.connection.remote_address())
+        });
+        let mut targets: Vec<Address> = sender.into_iter().collect();
+        for address in addresses {
+            if !targets.contains(&address) {
+                targets.push(address);
+            }
+        }
+        // Forget punches that have ended, and stop any other with the same peer.
+        self.punches.retain(|_, stop| Arc::strong_count(stop) > 1);
+        let stop = Arc::new(AtomicBool::new(false));
+        if let Some(old) = self.punches.insert(peer, stop.clone()) {
+            old.store(true, Ordering::Relaxed);
+        }
+        conn::punch(&self.endpoint, peer, targets, time, &self.inbox, stop);
     }
 
     /// What to send for the session's reply.

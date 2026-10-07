@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tempest_protocol::message::{GoodbyeReason, ManifestMessage, PeerRecord, Reject};
 use tempest_protocol::tree::VerifyError;
-use tempest_protocol::{Manifest, Message, PeerId};
+use tempest_protocol::{Address, Manifest, Message, PeerId};
 
 /// A connection, named by the driver. IDs must not be reused within a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -189,6 +189,24 @@ pub enum Action {
         reason: GoodbyeReason,
         /// A human-readable reason phrase.
         message: String,
+    },
+    /// Dial `peer` directly at each of `addresses` for a few seconds, to replace the relayed
+    /// connection `conn` (`protocol/relays.md`, Upgrading to a direct connection). Each dial
+    /// that succeeds is reported with [`Session::handle_connected`]; failures are not reported.
+    ///
+    /// [`Session::handle_connected`]: crate::Session::handle_connected
+    Punch {
+        /// The relayed connection, through which the driver may know another address to dial.
+        conn: ConnId,
+        /// The other peer.
+        peer: PeerId,
+        /// The other peer's candidate addresses.
+        addresses: Vec<Address>,
+    },
+    /// Stop starting dials for a [`Action::Punch`] with `peer`: a direct connection has opened.
+    StopPunching {
+        /// The other peer.
+        peer: PeerId,
     },
     /// The manifest arrived and matched the bundle ID: store it. Data can be verified from now on.
     StoreManifest {

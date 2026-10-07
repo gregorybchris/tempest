@@ -224,6 +224,12 @@ impl RelaySocket {
         }
     }
 
+    /// The sender a virtual address stands for, as the relay sees it.
+    pub(crate) fn sender(&self, addr: SocketAddr) -> Option<Address> {
+        let route = self.state().addrs.route(addr, Instant::now())?;
+        Some(route.from)
+    }
+
     /// Wraps each of `transmit`'s packets in Forward on the relay connection. Packets with no
     /// route, or too large for the relay connection, are dropped like lost packets.
     fn send_through_relay(&self, transmit: &Transmit) {

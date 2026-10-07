@@ -382,6 +382,8 @@ impl Swarm {
             Action::StoreManifest { manifest, .. } => {
                 assert_eq!(&manifest, self.nodes[i].content.manifest());
             }
+            // Every connection here is direct.
+            Action::Punch { .. } | Action::StopPunching { .. } => {}
         }
     }
 

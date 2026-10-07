@@ -53,6 +53,9 @@ pub struct NodeConfig {
     pub addresses: Vec<Address>,
     /// How long a dial may take, per address.
     pub dial_timeout: Duration,
+    /// How long a hole punch keeps dialing a peer's candidate addresses, to replace a relayed
+    /// connection with a direct one. `None` turns hole punching off.
+    pub punch_time: Option<Duration>,
     /// How long an accepted connection may take to send Hello.
     pub hello_timeout: Duration,
     /// How often each connection reports QUIC's round-trip time to its session.
@@ -73,6 +76,7 @@ impl Default for NodeConfig {
             storage: StorageConfig::default(),
             addresses: Vec::new(),
             dial_timeout: Duration::from_secs(10),
+            punch_time: Some(Duration::from_secs(5)),
             hello_timeout: Duration::from_secs(10),
             rtt_interval: Duration::from_secs(1),
             inbox: 1024,

@@ -18,7 +18,7 @@ use tempest_core::io::{Closed, Direction, PathKind};
 use tempest_protocol::message::{GoodbyeReason, MAX_REASON_MESSAGE_LEN};
 use tempest_protocol::{Address, PeerId};
 
-use crate::home::{HomeRelay, RelayChoice};
+use crate::home::{HomeRelay, RelayChoice, RelayStatus};
 use crate::identity::Identity;
 use crate::tls::{self, PEER_ALPN, SERVER_NAME, UnexpectedPeer};
 use crate::wrap::{RelaySocket, is_virtual};
@@ -225,6 +225,26 @@ impl Endpoint {
     /// This peer's relay address, while registered with a home relay.
     pub fn relay_address(&self) -> Option<Address> {
         self.home.address()
+    }
+
+    /// The addresses at which others see this peer: its address as its home relay observes it,
+    /// while registered.
+    pub fn external_addresses(&self) -> Vec<Address> {
+        match self.home.status() {
+            RelayStatus::Registered {
+                observed_address, ..
+            } => vec![observed_address],
+            _ => Vec::new(),
+        }
+    }
+
+    /// The address a peer reached through the home relay sends from, as the relay sees it,
+    /// given the virtual address its connection has (see [`Connection::remote_address`]).
+    pub fn relayed_sender(&self, addr: SocketAddr) -> Option<Address> {
+        if !is_virtual(addr) {
+            return None;
+        }
+        self.socket(addr)?.wrap.sender(addr)
     }
 
     /// Sets the relays to pick a home relay from, and registers with the one that answers

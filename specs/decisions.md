@@ -2925,3 +2925,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** One endpoint keeps one socket per family, as the protocol requires, and lets duplicate resolution compare relayed and direct connections by path. Racing handshakes measures latency with the connection that will be used anyway. Using recommended relays by default is what makes relays work without configuration, since none ship. Waiting for MTU discovery avoids advertising an address whose first packets would be dropped.
 
+
+---
+
+## D-187: Hole punching and the upgrade to direct
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** M6 upgrades relayed connections to direct ones (`protocol/relays.md`, Upgrading to a direct connection). The protocol leaves open how the work splits between session and driver, how long and how often to dial, what "stops dialing" means for attempts already under way, and how an upgrade fits the connection limit.
+
+**Options for the split:** the driver runs the whole exchange; the session decides when to send Candidates and when to punch, and the driver dials (chosen). **For dialing:** one attempt per candidate, relying on QUIC's retransmissions; one attempt per candidate, started again if it fails, for a fixed time (chosen); a new attempt per candidate at a fixed interval. **For stopping:** abandon attempts under way; start no new ones but let those under way finish (chosen). **For the connection limit:** count the upgrade like any connection; let in a peer's first direct connection while it has only relayed ones (chosen).
+
+**Decision:**
+
+- The session sends Candidates on a relayed connection it accepted, once opened, and acts only on the first Candidates it receives on a connection. Its candidates are the driver's external addresses (the address the home relay observes) followed by the addresses it accepts connections at.
+- Once it has sent and received Candidates on a relayed connection, with no direct connection open to the peer, the session asks the driver to punch; when a direct connection with the peer opens, it asks the driver to stop.
+- The driver dials every candidate at once, the Forwarded `from` address first, for 5 s. A failed attempt is started again after 250 ms. Stopping starts no new attempts; attempts under way finish and are reported, and duplicate resolution sorts them out, so the higher-ID peer never drops a connection the other side may have completed.
+- A peer's first direct connection is let in over the connection limit while every other connection with that peer is relayed, since it replaces one.
+- `NodeConfig::punch_time` sets the time and turns punching off.
+
+**Rationale:** Keeping the decisions in the session makes them testable without sockets and lets the simulator share them. QUIC already retransmits a pending handshake, so one attempt per address is enough while it lasts; restarting covers attempts that fail at once. Abandoning attempts under way would close connections the other peer may consider open.

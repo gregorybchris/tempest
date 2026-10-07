@@ -85,21 +85,22 @@ impl BitTorrent {
             .retain(|c| ctx.peer(*c).is_some_and(|p| p.wants));
         let served = ctx.peers.iter().filter(|p| p.serving && p.wants).count();
         let free = (self.slots + self.optimistic.slots).saturating_sub(served);
-        let waiting: Vec<ConnId> = ctx
-            .peers
-            .iter()
-            .filter(|p| p.wants && !p.serving)
-            .map(|p| p.conn)
-            .collect();
-        decisions.extend(
-            waiting
-                .choose_multiple(rng, free)
-                .map(|&conn| ServeDecision {
-                    conn,
-                    serve: true,
-                    reason: ServeReason::FreeSlot,
-                }),
-        );
+        // The fastest uploaders to this peer first, as at a review; ties at random.
+        let mut waiting: Vec<&PeerView> =
+            ctx.peers.iter().filter(|p| p.wants && !p.serving).collect();
+        waiting.shuffle(rng);
+        waiting.sort_by(|a, b| b.receive_rate.total_cmp(&a.receive_rate));
+        decisions.extend(waiting.iter().take(free).map(|p| ServeDecision {
+            conn: p.conn,
+            serve: true,
+            reason: if p.receive_rate > 0.0 {
+                ServeReason::Reciprocal {
+                    rate: p.receive_rate as u64,
+                }
+            } else {
+                ServeReason::FreeSlot
+            },
+        }));
         decisions
     }
 }
@@ -234,6 +235,34 @@ mod tests {
                 .iter()
                 .all(|d| d.reason == ServeReason::NotWanted || d.reason == ServeReason::FreeSlot)
         );
+    }
+
+    #[test]
+    fn a_free_slot_goes_to_the_fastest_waiting_uploader() {
+        let mut peers: Vec<PeerView> = (1..=8).map(peer).collect();
+        let mut strategy = BitTorrent::new(&UploadSettings::default());
+        let mut rng = Rng::seed_from_u64(4);
+        let ctx = UploadContext {
+            now: at(0),
+            complete: false,
+            peers: &peers.clone(),
+        };
+        let served = apply(&mut peers, &strategy.review(&ctx, &mut rng));
+        // Two waiting peers start uploading to us, one faster; a served peer stops wanting.
+        let waiting: Vec<usize> = (0..8).filter(|&i| !peers[i].serving).collect();
+        peers[waiting[0]].receive_rate = 100.0;
+        peers[waiting[1]].receive_rate = 500.0;
+        peers[served[0] as usize - 1].wants = false;
+        let ctx = UploadContext {
+            now: at(1),
+            complete: false,
+            peers: &peers.clone(),
+        };
+        let decisions = strategy.review(&ctx, &mut rng);
+        let started: Vec<&ServeDecision> = decisions.iter().filter(|d| d.serve).collect();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].conn, peers[waiting[1]].conn);
+        assert_eq!(started[0].reason, ServeReason::Reciprocal { rate: 500 });
     }
 
     #[test]

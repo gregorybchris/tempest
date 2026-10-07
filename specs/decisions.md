@@ -2560,3 +2560,33 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** Sampling costs one pass over the chunks per sample and needs no bookkeeping beyond the counts. The mean over time separates a swarm that keeps every chunk alive from one where a chunk lingers at one copy or disappears, which a single minimum can't. Counts rather than fractions keep the value readable; the samples hold the peers present for anyone who wants fractions.
 
+---
+
+## D-169: A limit on dials in progress
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** In the first validation flash crowd, 100 peers arriving together each dialed up to 50 peers from the tracker. The first 50 filled each other's connection limits; the others filled theirs with dials that were then refused, and meanwhile refused the peers dialing them. Half the swarm waited for the 60 s redial delay before getting a byte.
+
+**Options:** a shorter redial delay after a `too_many_connections` refusal (peers retrying at the same moments collide again); counting only open connections against the limit (lets a peer exceed it); a cap on connections being dialed or dialed and not yet open, like libtorrent's half-open limit (chosen).
+
+**Decision:** A session dials at most `connections.max_dialing` peers at once (default 8), counting dials in progress and dialed connections not yet open. It dials more as those open or fail. The rest of the connection limit stays free for peers that dial it.
+
+**Rationale:** The cap leaves room for incoming connections whatever the timing, and costs a newcomer only a few round trips to fill its connections. In a flash crowd of 100 peers fetching 16 MiB, the last peer then finished in 30 s instead of 78 s.
+
+---
+
+## D-170: Choking that withholds from peers it doesn't serve
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** Validation against Legout et al. (D-078) found free riders downloading as fast as contributors under the BitTorrent strategy (D-154). Two leaks caused it: requests accepted while a peer was served were still answered after it stopped being served, and slots freed between reviews went to waiting peers at random, free riders included, which happened far more often than reviews.
+
+**Options for waiting requests:** answer them (as before); refuse them with `busy` when the peer stops being served, as BitTorrent's choke discards pending requests (chosen). **For slots freed between reviews:** fill them at random (as before); by receive rate, ties at random, as BitTorrent's rechoke does (chosen).
+
+**Decision:**
+
+- When a provider stops serving a peer, it refuses that peer's requests it hasn't started answering with Reject (`busy`). `protocol/messages.md` (Serving) now says a provider MAY do this.
+- Between reviews, the BitTorrent strategy fills free slots with the waiting peers that upload to this peer fastest, ties at random. This amends D-154, which filled them at random.
+
+**Rationale:** Serving is how a provider says whom it will answer; answering after it said no undoes the decision. Ordering by rate keeps reciprocators ahead of peers that give nothing, while newcomers still get free slots when no reciprocator is waiting, and the optimistic slot. With both changes, free riders take about 15% longer than home peers in the free-rider validation scenario, against no difference under the cooperative strategy. Strategic clients (D-166) still finish meaningfully sooner than BitTorrent peers, by about 13%, but with more spread across seeds: their test now runs 20 seeds.

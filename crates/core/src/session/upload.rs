@@ -226,7 +226,25 @@ impl Session {
             conn.we_serve = decision.serve;
             let peer = conn.peer();
             let serving = decision.serve;
+            // Requests waiting for an upload slot are refused, so that a peer no longer served
+            // gets no more than what is already being sent.
+            let waiting: Vec<StreamId> = if serving {
+                Vec::new()
+            } else {
+                conn.incoming
+                    .iter()
+                    .filter(|(_, i)| !i.sending)
+                    .map(|(&stream, _)| stream)
+                    .collect()
+            };
+            for stream in &waiting {
+                conn.incoming.remove(stream);
+            }
             self.send(decision.conn, Message::Serving(Serving { serving }));
+            for stream in waiting {
+                let message = "not serving you now".to_owned();
+                self.reject(decision.conn, stream, RejectReason::Busy, message);
+            }
             self.emit(
                 now,
                 EventKind::ServingChanged {

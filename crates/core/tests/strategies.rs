@@ -460,7 +460,7 @@ fn bittorrent_serves_by_reciprocity() {
     let mut swarm = Swarm::new();
     let origin = swarm.add_complete(1, Config::default(), &content);
     swarm.nodes[origin].upload_rate = Some(200_000);
-    let fetchers: Vec<usize> = (2..9)
+    let fetchers: Vec<usize> = (2..14)
         .map(|n| swarm.add_empty(n, Config::default(), &content))
         .collect();
     for &f in &fetchers {

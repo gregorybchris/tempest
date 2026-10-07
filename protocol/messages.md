@@ -192,7 +192,7 @@ Serving {
 
 At the start of every connection each peer is treated as not serving (`serving = no`). Which peers a provider serves, and when, is policy: the provider's upload strategy.
 
-A requester SHOULD NOT send Requests to a provider that is not serving it. A provider that receives a Request while not serving the requester MAY answer it with Reject (`busy`).
+A requester SHOULD NOT send Requests to a provider that is not serving it. A provider that receives a Request while not serving the requester MAY answer it with Reject (`busy`). When a provider stops serving a peer, it MAY likewise reject that peer's Requests it hasn't started answering.
 
 **Rationale.** Upload strategies such as BitTorrent's (serve a few peers at a time, chosen by reciprocity, plus a rotating newcomer) work best when requesters know in advance whether they'll be served. Strategies that decide request by request can simply serve everyone who wants data.
 

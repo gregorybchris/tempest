@@ -300,6 +300,10 @@ impl Default for UploadSettings {
 pub struct ConnectionSettings {
     /// The most connections for the bundle.
     pub max: u32,
+    /// The most connections this peer dials at once: being dialed, or dialed and not yet open.
+    /// The rest of the limit stays free for peers that dial this one, so that peers arriving
+    /// together don't fill their limits with dials to peers that will refuse them.
+    pub max_dialing: u32,
     /// How long to wait before dialing a peer again after a connection to it failed or ended.
     #[serde(with = "duration")]
     pub redial_delay: Duration,
@@ -327,6 +331,7 @@ impl Default for ConnectionSettings {
     fn default() -> Self {
         Self {
             max: 50,
+            max_dialing: 8,
             redial_delay: Duration::from_secs(60),
             idle_after: Duration::from_secs(60),
             review_interval: Duration::from_secs(30),
@@ -437,6 +442,7 @@ impl Config {
             ),
             ("requests.min_in_flight", self.requests.min_in_flight),
             ("connections.max", self.connections.max),
+            ("connections.max_dialing", self.connections.max_dialing),
         ] {
             if value == 0 {
                 return Err(ConfigError::Zero(field));

@@ -6,11 +6,14 @@ mod common;
 use std::time::Duration;
 
 use common::{file_bytes, peer_id};
+use tempest_core::config::WhenComplete;
 use tempest_core::content::MemoryContent;
+use tempest_core::event::ServeReason;
 use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
+use tempest_core::upload::{ServeDecision, UploadContext, UploadStrategy};
 use tempest_core::{
-    Action, Config, ConnId, EventKind, Inbound, LocalPeer, Reply, RequestId, Response, Session,
-    StreamId, Time,
+    Action, Config, ConnId, EventKind, Inbound, LocalPeer, Reply, RequestId, Response, Rng,
+    Session, StreamId, Time,
 };
 use tempest_protocol::message::{
     Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, Reject,
@@ -669,4 +672,98 @@ fn peer_exchange_respects_the_protocol_limits() {
     let again = shared(&session.poll_actions());
     assert_eq!(again.len(), 60);
     assert!(again.iter().all(|&(_, n)| n == 50));
+}
+
+#[test]
+fn dials_leave_room_for_peers_that_dial_in() {
+    let bundle_id = content().manifest().bundle_id();
+    let mut config = Config::default();
+    config.connections.max_dialing = 3;
+    let mut session = Session::new(config, local(5), bundle_id, 0).unwrap();
+    let dialed = |actions: &[Action]| -> Vec<PeerId> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Dial(record) => Some(record.peer_id),
+                _ => None,
+            })
+            .collect()
+    };
+    session.add_peers(Time::ZERO, (10..30).map(|n| common::record(peer_id(n))));
+    let first = dialed(&session.poll_actions());
+    assert_eq!(first.len(), 3);
+    assert_eq!(session.next_timer(), None, "no dial waits on a timer");
+
+    // A dial that connects stays pending until the connection opens.
+    connect(&mut session, ConnId(1), first[0], Direction::Dialed);
+    assert!(dialed(&session.poll_actions()).is_empty());
+    // Peers that dial in are accepted meanwhile.
+    connect(&mut session, ConnId(2), peer_id(40), Direction::Accepted);
+    assert_eq!(session.connection_count(), 2);
+    control(&mut session, ConnId(1), Message::Hello(hello(bundle_id)));
+    control(&mut session, ConnId(1), Message::Have(Have::default()));
+    assert_eq!(dialed(&session.poll_actions()).len(), 1);
+
+    // A failed dial frees its place too.
+    session.handle_dial_failed(Time::ZERO, first[1]);
+    assert_eq!(dialed(&session.poll_actions()).len(), 1);
+}
+
+/// Serves every peer that wants data until `until`, then nobody.
+#[derive(Debug)]
+struct ServeUntil(Time);
+
+impl UploadStrategy for ServeUntil {
+    fn review(&mut self, ctx: &UploadContext<'_>, _rng: &mut Rng) -> Vec<ServeDecision> {
+        ctx.peers
+            .iter()
+            .map(|p| ServeDecision {
+                conn: p.conn,
+                serve: p.wants && ctx.now < self.0,
+                reason: ServeReason::FreeSlot,
+            })
+            .collect()
+    }
+
+    fn next_review(&self) -> Option<Time> {
+        Some(self.0)
+    }
+}
+
+#[test]
+fn a_peer_no_longer_served_loses_its_waiting_requests() {
+    let mut config = Config::default();
+    config.upload.parallel_responses = 1;
+    config.strategies.when_complete = WhenComplete::Unchanged;
+    let mut session = complete(config);
+    let until = Time::ZERO + Duration::from_secs(5);
+    session.set_upload_strategy(Box::new(ServeUntil(until)));
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    session.poll_actions();
+    for stream in 1..=3 {
+        request(&mut session, stream, chunks(3 + stream as u32, 1));
+    }
+    assert_eq!(
+        replies(&session.poll_actions()),
+        [(1, Reply::Data { start: 4, count: 1 })]
+    );
+
+    session.handle_timer(until);
+    let actions = session.poll_actions();
+    assert!(sent(&actions).contains(&Message::Serving(Serving { serving: false })));
+    let refused = replies(&actions);
+    assert_eq!(refused.len(), 2);
+    assert!(
+        refused
+            .iter()
+            .all(|(_, r)| reject_reason(r) == Some(RejectReason::Busy))
+    );
+    // What was already being sent still counts.
+    let done = Inbound::DataSent {
+        stream: StreamId(1),
+    };
+    session.handle_message(until, C, done);
+    assert!(replies(&session.poll_actions()).is_empty());
+    assert_eq!(session.uploaded(), CHUNK as u64);
 }

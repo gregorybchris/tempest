@@ -649,8 +649,21 @@ impl Session {
         self.conns.len() + self.dialing.len() >= self.config.connections.max as usize
     }
 
+    /// Connections this peer is dialing or has dialed and not yet opened.
+    fn dials_pending(&self) -> usize {
+        let unopened = self
+            .conns
+            .values()
+            .filter(|c| c.info.direction == Direction::Dialed && !c.is_open())
+            .count();
+        self.dialing.len() + unopened
+    }
+
     fn may_dial(&self) -> bool {
-        !self.stopped && !self.complete && !self.at_connection_limit()
+        !self.stopped
+            && !self.complete
+            && !self.at_connection_limit()
+            && self.dials_pending() < self.config.connections.max_dialing as usize
     }
 
     /// Known peers that could be dialed, ignoring when.
@@ -668,7 +681,8 @@ impl Session {
         if !self.may_dial() {
             return;
         }
-        let room = self.config.connections.max as usize - self.conns.len() - self.dialing.len();
+        let room = (self.config.connections.max as usize - self.conns.len() - self.dialing.len())
+            .min(self.config.connections.max_dialing as usize - self.dials_pending());
         let (eligible, later): (Vec<_>, Vec<_>) = self
             .dial_candidates()
             .map(|(&peer, known)| (peer, known.next_attempt))
@@ -681,7 +695,7 @@ impl Session {
             self.actions
                 .push(Action::Dial(self.known[&peer].record.clone()));
         }
-        // With eligible peers left over, the limit is reached and dialing waits for room.
+        // With eligible peers left over, a limit is reached and dialing waits for room.
         self.next_dial = if leftover {
             Some(now)
         } else {
@@ -814,6 +828,7 @@ impl Session {
         self.fill(now, id);
         self.share_peers(now);
         self.after_holdings(now, id);
+        self.maybe_dial(now);
         Ok(())
     }
 

@@ -67,10 +67,10 @@ fn probe_times(behavior: &str, seeds: u64) -> BTreeMap<u64, f64> {
 /// Piatek et al. found BitTyrant downloads faster than BitTorrent in swarms with uneven upload
 /// capacity. Here it gets more from the fast peers while giving them less.
 #[test]
-#[ignore = "slow: about 15 s in release; CI runs it"]
+#[ignore = "slow: about 35 s in release; CI runs it"]
 fn strategic_clients_download_faster_among_bittorrent_peers() {
-    let normal = probe_times("normal", 10);
-    let strategic = probe_times("strategic", 10);
+    let normal = probe_times("normal", 20);
+    let strategic = probe_times("strategic", 20);
     let difference = Bootstrap::default()
         .compare(&normal, &strategic, Meaningful::default())
         .unwrap();

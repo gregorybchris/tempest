@@ -46,9 +46,11 @@ async fn start_tracker() -> (String, oneshot::Sender<()>) {
 }
 
 /// A node on IPv4 loopback that tells peers its address in Hello, so peer exchange can pass it
-/// on.
+/// on. It keeps sharing after it completes: a downloader that lingers only briefly could leave
+/// before the third peer, which has no tracker, learns of the seeder from it.
 fn start_node() -> Node {
     let mut config = NodeConfig::default();
+    config.session.lingering.keep_sharing = true;
     let endpoint_config = EndpointConfig {
         max_open_requests: config.session.upload.max_open_requests,
         ..EndpointConfig::localhost()
@@ -194,8 +196,7 @@ async fn a_swarm_grows_through_the_tracker_and_peer_exchange() {
             assert!(target.path().join("swarm").is_dir(), "peer {n}");
         }
 
-        // Every announcer was heard, and the seeder counted itself complete. (Downloaders that
-        // finish lingering stop and leave the swarm, so its size here depends on timing.)
+        // Every announcer was heard, and the seeder counted itself complete.
         for announcer in [&first_announcer, &second_announcer, &seeder_announcer] {
             let state = announcer.state.borrow().clone();
             assert!(state.announces >= 1 && state.error.is_none(), "{state:?}");

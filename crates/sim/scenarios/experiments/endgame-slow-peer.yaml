@@ -1,0 +1,21 @@
+# Backlog experiment: endgame variants when one peer uploads at 1/50 of everyone else's speed.
+# Results are noted in specs/simulation.md.
+name: endgame-slow-peer
+description: 30 home peers and one very slow peer fetch a release from one origin.
+duration: 30m
+seeds: 10
+bundle: { files: [{ size: 16MiB }] }
+network: { latency: 25ms }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 50Mbps, down: 100Mbps }
+  - class: home
+    count: 30
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 5s }
+  - class: slow
+    bandwidth: { up: 200kbps, down: 50Mbps }
+experiment:
+  vary:
+    strategies.endgame: [limited, "off", classic]

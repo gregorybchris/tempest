@@ -1,4 +1,5 @@
-# A flash crowd on one origin, comparing chunk selection and upload strategies.
+# A flash crowd on one origin, comparing chunk selection and upload strategies. Chunk selection
+# makes little difference here; specs/simulation.md (Validation) says why.
 name: flash-crowd
 description: 200 home peers arrive within minutes of a release on one origin.
 duration: 2h

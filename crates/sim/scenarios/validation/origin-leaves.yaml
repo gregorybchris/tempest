@@ -1,0 +1,20 @@
+# Rarest-first keeps every chunk in the swarm when the origin leaves early (Legout et al.,
+# Bharambe et al.). See crates/sim/tests/validation.rs.
+name: origin-leaves
+description: 100 home peers fetch a release from an origin that leaves after about 30 seconds.
+duration: 5m
+seeds: 10
+bundle: { files: [{ size: 16MiB }] }
+network: { latency: 25ms }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+    # About 4.5 copies' worth of upload, then gone.
+    churn: { session: 30s, shape: 50 }
+  - class: home
+    count: 100
+    bandwidth: { up: 2Mbps, down: 50Mbps }
+experiment:
+  vary:
+    strategies.chunk_selection: [rarest-first, random, sequential]

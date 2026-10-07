@@ -1,0 +1,19 @@
+# Rarest-first and choking come close to the fastest possible distribution of one release to a
+# crowd that arrives at once (Bharambe et al.). See crates/sim/tests/validation.rs.
+name: flash-crowd-bound
+description: 100 home peers fetch a release from one origin at the same moment, and stay.
+duration: 10m
+seeds: 10
+bundle: { files: [{ size: 64MiB }] }
+network: { latency: 25ms }
+settings: { overrides: { lingering.keep_sharing: true } }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: home
+    count: 100
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+experiment:
+  vary:
+    strategies.chunk_selection: [rarest-first, random]

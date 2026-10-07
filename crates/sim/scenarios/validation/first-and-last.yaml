@@ -1,0 +1,17 @@
+# Newcomers are slow to get their first chunks, while the last chunks come about as fast as
+# the rest (Legout et al.'s first blocks problem). See crates/sim/tests/validation.rs.
+name: first-and-last
+description: 100 home peers join a release over about a minute and stay.
+duration: 10m
+seeds: 10
+bundle: { files: [{ size: 32MiB }] }
+network: { latency: 25ms }
+settings: { overrides: { lingering.keep_sharing: true } }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: home
+    count: 100
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+    arrivals: { pattern: flash-crowd, decay: 30s }

@@ -42,7 +42,8 @@ jobs:
             cmp "$scenario-1.tsv" "$scenario-2.tsv"
             cat "$scenario-1.tsv"
           done
-      # The 1,000-peer swarm into DuckDB, and the golden baseline over every saved seed.
+      # The slow tests, among them the 1,000-peer swarm into DuckDB and the validation scenarios,
+      # and the golden baseline over every saved seed.
       - name: Slow simulation tests
         run: cargo test --release -p tempest-sim -- --include-ignored
         env:

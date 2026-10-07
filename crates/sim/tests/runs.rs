@@ -239,14 +239,23 @@ peers: [{ class: origin, count: 3, starts: complete }]
     assert_eq!(result.end, tempest_core::Time::ZERO);
 }
 
-#[test]
-fn example_scenarios_load() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+/// Loads every scenario file under `dir`, returning how many there were.
+fn load_all(dir: &Path) -> usize {
     let mut count = 0;
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
-        Scenario::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        count += 1;
+        if path.is_dir() {
+            count += load_all(&path);
+        } else {
+            Scenario::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            count += 1;
+        }
     }
-    assert!(count >= 3);
+    count
+}
+
+#[test]
+fn example_scenarios_load() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+    assert!(load_all(&dir) >= 3);
 }

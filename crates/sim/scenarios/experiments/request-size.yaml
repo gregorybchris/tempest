@@ -1,0 +1,20 @@
+# Backlog experiment: request size and how much is kept in flight, on long links.
+# Results are noted in specs/simulation.md.
+name: request-size
+description: 30 fiber peers 100 ms from the core fetch a release from one origin.
+duration: 30m
+seeds: 10
+bundle: { files: [{ size: 16MiB }] }
+network: { latency: 100ms }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 100Mbps, down: 100Mbps }
+  - class: fiber
+    count: 30
+    bandwidth: { up: 50Mbps, down: 100Mbps }
+    arrivals: { pattern: flash-crowd, decay: 5s }
+experiment:
+  vary:
+    requests.chunks: [16, 1, 4, 64]
+    requests.in_flight_factor: [2, 1, 4]

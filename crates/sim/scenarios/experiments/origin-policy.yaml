@@ -1,0 +1,19 @@
+# Backlog experiment: how the origin serves a crowd that arrives at once, when its upload is
+# the bottleneck. Results are noted in specs/simulation.md.
+name: origin-policy
+description: 100 home peers fetch a release from an origin with half their upload.
+duration: 1h
+seeds: 10
+bundle: { files: [{ size: 32MiB }] }
+network: { latency: 25ms }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 5Mbps, down: 100Mbps }
+  - class: home
+    count: 100
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+experiment:
+  vary:
+    strategies.superseed: [false, true]
+    strategies.when_complete: [round-robin, unchanged]

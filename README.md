@@ -14,6 +14,23 @@ It aims to be easy to understand first, configurable and measurable second, fast
 
 The full protocol is in [`protocol/`](protocol/README.md).
 
+## Install
+
+Prebuilt binaries for macOS, Linux and Windows are on the [releases page](https://github.com/gregorybchris/tempest/releases). Windows also has an MSI.
+
+```sh
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/releases/latest/download/tempest-installer.sh | sh
+
+# Homebrew
+brew install gregorybchris/tap/tempest
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/gregorybchris/tempest/releases/latest/download/tempest-installer.ps1 | iex"
+```
+
+To build from source, run `cargo install --path crates/tempest`.
+
 ## Status
 
 In development. See the [roadmap](specs/roadmap.md).

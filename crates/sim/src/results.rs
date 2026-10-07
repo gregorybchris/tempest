@@ -23,7 +23,7 @@ pub use duckdb;
 pub const GIT_COMMIT: Option<&str> = option_env!("TEMPEST_GIT_COMMIT");
 
 /// The schema version this build writes. A database with another version is refused.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 /// The tables. Times in the summary tables are seconds of simulated time from the start of a
 /// run; event times are nanoseconds. A run's resolved scenario is its variant's.
@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS runs (
     first_peer_p50_s DOUBLE,         -- from arrival to the first open connection
     upload_utilization DOUBLE,       -- payload uploaded / upload capacity while present
     fairness DOUBLE,                 -- Jain's index of upload/download ratios
+    rarest_copies DOUBLE,            -- mean over samples of present peers holding the rarest chunk
     payload_bytes UBIGINT NOT NULL,  -- payload in the Data sent
     overhead_bytes UBIGINT NOT NULL, -- everything else sent
     duplicate_bytes UBIGINT NOT NULL -- payload received more than once, in endgame
@@ -97,6 +98,16 @@ CREATE TABLE IF NOT EXISTS peers (
     bad UBIGINT NOT NULL,            -- payload bytes received that failed verification
     intact BOOLEAN,                  -- with real payloads: whether it holds the bundle exactly
     PRIMARY KEY (run_id, peer)
+);
+
+-- One per sample per run: how many present peers held each chunk.
+CREATE TABLE IF NOT EXISTS availability (
+    run_id BIGINT NOT NULL,
+    time_s DOUBLE NOT NULL,
+    peers INTEGER NOT NULL,          -- peers present
+    rarest INTEGER NOT NULL,         -- present peers holding the rarest chunk
+    mean DOUBLE NOT NULL,            -- present peers holding a chunk, on average
+    PRIMARY KEY (run_id, time_s)
 );
 
 -- One per kind of message per run.
@@ -317,7 +328,7 @@ impl Recorder<'_> {
         let metrics = result.metrics(self.scenario);
         let secs = |d: Option<std::time::Duration>| d.map(|d| d.as_secs_f64());
         conn.execute(
-            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 run,
                 self.experiment,
@@ -337,6 +348,7 @@ impl Recorder<'_> {
                 secs(metrics.first_peer_p50),
                 metrics.upload_utilization,
                 metrics.fairness,
+                metrics.rarest_copies,
                 result.payload_sent,
                 metrics.overhead,
                 metrics.duplicate,
@@ -369,6 +381,18 @@ impl Recorder<'_> {
             ])?;
         }
         peers.flush()?;
+
+        let mut availability = conn.appender("availability")?;
+        for sample in &result.availability {
+            availability.append_row(params![
+                run,
+                sample.time.since_epoch().as_secs_f64(),
+                sample.peers,
+                sample.rarest,
+                sample.mean,
+            ])?;
+        }
+        availability.flush()?;
 
         let overhead = result.overhead_by_message();
         let mut traffic = conn.appender("traffic")?;

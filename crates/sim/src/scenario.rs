@@ -41,6 +41,9 @@ pub struct Scenario {
     /// How many seeds to run each variant with: seeds 1 to `seeds`. Default 1.
     #[serde(default = "one")]
     pub seeds: u32,
+    /// How often a run samples how many peers hold each chunk. Default 10 seconds.
+    #[serde(default = "default_sample_interval", with = "duration")]
+    pub sample_interval: Duration,
     /// Whether peers exchange real bytes or only their sizes. Default `virtual`.
     #[serde(default)]
     pub payload: Payload,
@@ -395,6 +398,10 @@ fn default_duration() -> Duration {
     Duration::from_secs(3600)
 }
 
+fn default_sample_interval() -> Duration {
+    Duration::from_secs(10)
+}
+
 impl Scenario {
     /// Reads and checks a scenario file.
     pub fn load(path: &Path) -> Result<Self, ScenarioError> {
@@ -431,6 +438,9 @@ impl Scenario {
     pub fn validate(&self) -> Result<(), ScenarioError> {
         if self.seeds == 0 {
             return Err(invalid("seeds", "must be at least 1"));
+        }
+        if self.sample_interval.is_zero() {
+            return Err(invalid("sample_interval", "must be more than 0"));
         }
         if self.peers.is_empty() {
             return Err(invalid("peers", "needs at least one class"));
@@ -593,6 +603,7 @@ peers:
         let scenario = Scenario::from_yaml(MINIMAL).unwrap();
         assert_eq!(scenario.seeds, 1);
         assert_eq!(scenario.duration, Duration::from_secs(3600));
+        assert_eq!(scenario.sample_interval, Duration::from_secs(10));
         assert_eq!(scenario.payload, Payload::Virtual);
         assert_eq!(scenario.peer_count(), 2);
         assert_eq!(scenario.peers[0].starts, Start::Complete);
@@ -689,6 +700,8 @@ experiment:
         assert!(e.starts_with("peers[1].class:"), "{e}");
         let e = error(&format!("{MINIMAL}seeds: 0"));
         assert!(e.starts_with("seeds:"), "{e}");
+        let e = error(&format!("{MINIMAL}sample_interval: 0s"));
+        assert!(e.starts_with("sample_interval:"), "{e}");
         let e = error(&format!("{MINIMAL}payload: real\n").replace("1MiB", "1GiB"));
         assert!(e.starts_with("payload:"), "{e}");
         let e = error(&MINIMAL.replace(

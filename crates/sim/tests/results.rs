@@ -50,6 +50,7 @@ fn count(db: &Database, sql: &str) -> i64 {
 const SMALL: &str = "
 name: small
 seeds: 2
+sample_interval: 500ms
 bundle: { files: [{ size: 1MiB }, { size: 100KiB }] }
 network: { latency: 10ms, loss: 1% }
 peers:
@@ -205,6 +206,14 @@ fn metrics_match_the_runs() {
         first_byte
     );
     assert_eq!(column::<u64>(&conn, &runs("duplicate_bytes")), duplicate);
+    let rarest: Vec<Option<f64>> = metrics.iter().map(|m| m.rarest_copies).collect();
+    assert_eq!(column::<Option<f64>>(&conn, &runs("rarest_copies")), rarest);
+    let samples: usize = results.iter().map(|r| r.availability.len()).sum();
+    assert!(samples > 0);
+    assert_eq!(
+        count_in(&conn, "SELECT count(*) FROM availability") as usize,
+        samples
+    );
     for m in &metrics {
         let fairness = m.fairness.unwrap();
         assert!(fairness > 0.0 && fairness <= 1.0, "{fairness}");

@@ -74,6 +74,22 @@ pub struct RunResult {
     pub digest: String,
     /// The log, if [`RunOptions::keep_log`] was set.
     pub log: Vec<Entry>,
+    /// How many present peers held each chunk, every [`Scenario::sample_interval`] while the
+    /// run lasted.
+    pub availability: Vec<Sample>,
+}
+
+/// How many present peers held each chunk at one time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sample {
+    /// When.
+    pub time: Time,
+    /// The number of peers present.
+    pub peers: u32,
+    /// The number of present peers holding the rarest chunk.
+    pub rarest: u32,
+    /// The mean number of present peers holding a chunk.
+    pub mean: f64,
 }
 
 /// What one peer did in a run.
@@ -281,6 +297,9 @@ struct Simulation<'a, 's> {
     traffic: BTreeMap<&'static str, Traffic>,
     payload_sent: u64,
     events: u64,
+    /// How many present peers hold each chunk.
+    copies: Vec<u32>,
+    availability: Vec<Sample>,
 }
 
 /// A peer's ID, derived from its index so that it is the same in every run.
@@ -331,6 +350,7 @@ impl<'a, 's> Simulation<'a, 's> {
         // Routers draw from their own stream, so that adding them leaves the rest of the world
         // as it was.
         let mut routers = stream(3);
+        let bundle_chunks = bundle.chunk_count();
         let mut sim = Self {
             scenario,
             manifest_bytes: bundle.manifest().to_bytes(),
@@ -355,6 +375,8 @@ impl<'a, 's> Simulation<'a, 's> {
             traffic: BTreeMap::new(),
             payload_sent: 0,
             events: 0,
+            copies: vec![0; bundle_chunks as usize],
+            availability: Vec::new(),
         };
 
         for (class, spec) in scenario.peers.iter().enumerate() {
@@ -434,13 +456,24 @@ impl<'a, 's> Simulation<'a, 's> {
 
     fn run(mut self) -> RunResult {
         let limit = Time::ZERO + self.scenario.duration;
+        let interval = self.scenario.sample_interval;
+        let mut next_sample = Time::ZERO + interval;
         while self.waiting > 0 {
-            match self.queue.peek_time() {
-                Some(time) if time <= limit => {}
+            let time = match self.queue.peek_time() {
+                Some(time) if time <= limit => time,
                 _ => {
                     self.now = limit;
+                    while next_sample <= limit {
+                        self.sample(next_sample);
+                        next_sample += interval;
+                    }
                     break;
                 }
+            };
+            // Samples see everything that happened before them.
+            while next_sample < time {
+                self.sample(next_sample);
+                next_sample += interval;
             }
             let (time, event) = self.queue.pop().expect("peeked");
             self.now = time;
@@ -473,6 +506,36 @@ impl<'a, 's> Simulation<'a, 's> {
             log_len,
             digest,
             log,
+            availability: self.availability,
+        }
+    }
+
+    /// Records how many present peers hold each chunk.
+    fn sample(&mut self, time: Time) {
+        let peers = self
+            .peers
+            .iter()
+            .filter(|p| p.state == State::Present)
+            .count();
+        let total: u64 = self.copies.iter().map(|&c| u64::from(c)).sum();
+        self.availability.push(Sample {
+            time,
+            peers: peers as u32,
+            rarest: self.copies.iter().copied().min().unwrap_or(0),
+            mean: total as f64 / self.copies.len().max(1) as f64,
+        });
+    }
+
+    /// Counts the chunks `peer`'s session holds as one more copy each, or one fewer.
+    fn count_held(&mut self, peer: usize, delta: i32) {
+        let Some(have) = self.peers[peer].session.as_ref().and_then(|s| s.have()) else {
+            return;
+        };
+        for chunk in have.iter() {
+            let copies = &mut self.copies[chunk as usize];
+            *copies = copies
+                .checked_add_signed(delta)
+                .expect("copies stay counted");
         }
     }
 
@@ -619,6 +682,7 @@ impl<'a, 's> Simulation<'a, 's> {
         });
         peer.state = State::Present;
         peer.outcome.arrived = Some(now);
+        self.count_held(index, 1);
         self.record(index, now, Record::Arrived);
         self.announce(index);
         self.after(index);
@@ -658,6 +722,7 @@ impl<'a, 's> Simulation<'a, 's> {
             self.session(peer).shutdown(now);
             self.flush(peer);
         }
+        self.count_held(peer, -1);
         let state = &mut self.peers[peer];
         state.state = State::Gone;
         state.timer = None;
@@ -783,8 +848,19 @@ impl<'a, 's> Simulation<'a, 's> {
         } else {
             state.outcome.bad += payload;
         }
+        let missing: Vec<u32> = match session.have() {
+            Some(have) => (start..start + count)
+                .filter(|&c| !have.contains(c))
+                .collect(),
+            None => Vec::new(),
+        };
         let response = Response::Data(check);
         session.handle_message(now, conn, Inbound::Response { request, response });
+        if let Some(have) = session.have() {
+            for chunk in missing.into_iter().filter(|&c| have.contains(c)) {
+                self.copies[chunk as usize] += 1;
+            }
+        }
         self.after(peer);
     }
 

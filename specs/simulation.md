@@ -88,7 +88,7 @@ This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run
 - completion-time distribution (median, 90th and 99th percentile)
 - time to first peer and to first byte
 - upload utilization
-- availability of the rarest chunk over time (not yet measured)
+- availability of the rarest chunk over time (D-168)
 - fairness (Jain's index of upload/download ratios)
 - overhead bytes by message type
 - duplicate bytes during endgame

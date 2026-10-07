@@ -2541,3 +2541,22 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `tempest sim run` prints the comparison after the summary, with the reference variant chosen by `--reference` (default: the first). The comparison is derived from the results database's `runs` table and these constants, so the database stores nothing more.
 
 **Rationale:** The bootstrap needs no assumptions about the shape of the distribution and works the same for medians and paired differences. Pairing removes the world-to-world variation that dominates between seeds. With fewer than 5 pairs a percentile bootstrap can't produce a useful interval. A minimum effect keeps consistent but negligible differences, common with deterministic paired runs, from being called meaningful; 2% is below what a user would notice and above the noise of most metrics.
+
+---
+
+## D-168: Availability of the rarest chunk
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-162 left the availability of the rarest chunk unmeasured. Validating rarest-first (D-078) needs it.
+
+**Options for measuring:** tracking the minimum as chunks spread; sampling every chunk's count periodically (chosen). **For the headline value:** the minimum over the run; the mean over samples (chosen); the count as a fraction of the peers present.
+
+**Decision:**
+
+- The simulator keeps, for each chunk, how many present peers hold it. Every `sample_interval` of simulated time (a scenario setting, default 10 s) until the run ends, it records the peers present, the count of the rarest chunk and the mean count. A sample sees everything that happened before its time.
+- The headline metric **rarest copies** is the mean of the rarest chunk's count over a run's samples. The results database keeps it with each run, and every sample in an `availability` table (schema version 2).
+- Comparisons across seeds (D-167) also report it, and the fraction of downloaders that completed.
+
+**Rationale:** Sampling costs one pass over the chunks per sample and needs no bookkeeping beyond the counts. The mean over time separates a swarm that keeps every chunk alive from one where a chunk lingers at one copy or disappears, which a single minimum can't. Counts rather than fractions keep the value readable; the samples hold the peers present for anyone who wants fractions.
+

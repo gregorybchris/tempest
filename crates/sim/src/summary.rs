@@ -74,6 +74,15 @@ impl RunResult {
         jain(&ratios)
     }
 
+    /// The mean, over the run's samples, of how many present peers held the rarest chunk.
+    /// `None` if the run took no samples.
+    pub fn rarest_copies(&self) -> Option<f64> {
+        let samples = &self.availability;
+        (!samples.is_empty()).then(|| {
+            samples.iter().map(|s| f64::from(s.rarest)).sum::<f64>() / samples.len() as f64
+        })
+    }
+
     /// Overhead bytes by message: for Data, its framing and proofs; for everything else, all of
     /// it.
     pub fn overhead_by_message(&self) -> BTreeMap<&'static str, u64> {
@@ -99,6 +108,7 @@ impl RunResult {
             first_peer_p50: percentile(&self.first_peer_times(), 0.5),
             upload_utilization: self.upload_utilization(scenario),
             fairness: self.fairness(),
+            rarest_copies: self.rarest_copies(),
             overhead: self.overhead(),
             duplicate: self.duplicate(),
         }
@@ -146,6 +156,8 @@ pub struct RunMetrics {
     pub upload_utilization: Option<f64>,
     /// See [`RunResult::fairness`].
     pub fairness: Option<f64>,
+    /// See [`RunResult::rarest_copies`].
+    pub rarest_copies: Option<f64>,
     /// Bytes sent that weren't chunk payload.
     pub overhead: u64,
     /// Payload bytes received more than once (endgame duplicates).
@@ -188,6 +200,8 @@ pub struct VariantSummary {
     pub mean_utilization: Option<f64>,
     /// The mean fairness index of the runs that have one.
     pub mean_fairness: Option<f64>,
+    /// The mean rarest-chunk availability of the runs that have one.
+    pub mean_rarest: Option<f64>,
     /// The mean simulated length of a run.
     pub mean_end: Duration,
     /// The mean overhead bytes per run.
@@ -237,6 +251,7 @@ pub fn summarize(scenario: &Scenario, results: &[RunResult]) -> Vec<VariantSumma
                         .collect(),
                 ),
                 mean_fairness: mean_of(runs.iter().filter_map(|r| r.fairness()).collect()),
+                mean_rarest: mean_of(runs.iter().filter_map(|r| r.rarest_copies()).collect()),
             })
         })
         .collect()
@@ -278,11 +293,12 @@ pub fn table(summaries: &[VariantSummary]) -> String {
         "first byte",
         "utilization",
         "fairness",
+        "rarest",
         "length",
         "overhead",
         "duplicate",
     ];
-    let rows: Vec<[String; 12]> = summaries
+    let rows: Vec<[String; 13]> = summaries
         .iter()
         .map(|s| {
             let times = &s.completion_times;
@@ -296,6 +312,8 @@ pub fn table(summaries: &[VariantSummary]) -> String {
                 seconds(percentile(&s.first_byte_times, 0.5)),
                 ratio(s.mean_utilization),
                 ratio(s.mean_fairness),
+                s.mean_rarest
+                    .map_or_else(|| "-".to_owned(), |v| format!("{v:.1}")),
                 seconds(Some(s.mean_end)),
                 bytes(s.mean_overhead),
                 bytes(s.mean_duplicate),

@@ -106,11 +106,11 @@ fn compares_variants_with_the_chosen_reference() {
         .collect();
     // One row per metric and variant. Requesting one chunk at a time gets the first byte
     // sooner on every seed.
-    assert_eq!(rows.len(), 10, "{stdout}");
-    assert!(rows[0].starts_with("completion p50"), "{stdout}");
-    assert!(rows[1].contains("requests.chunks=1") && rows[1].ends_with("reference"));
-    assert!(rows[4].starts_with("first byte p50"), "{stdout}");
-    assert!(rows[4].ends_with("worse"), "{stdout}");
+    assert_eq!(rows.len(), 14, "{stdout}");
+    assert!(rows[2].starts_with("completion p50"), "{stdout}");
+    assert!(rows[3].contains("requests.chunks=1") && rows[3].ends_with("reference"));
+    assert!(rows[6].starts_with("first byte p50"), "{stdout}");
+    assert!(rows[6].ends_with("worse"), "{stdout}");
 
     // A part of more than one name is ambiguous.
     let output = run("requests");

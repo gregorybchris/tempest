@@ -191,6 +191,8 @@ pub enum Verdict {
 /// A headline metric compared across variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Metric {
+    /// The fraction of downloaders that completed.
+    Completed,
     /// The median completion time.
     CompletionP50,
     /// The 90th percentile completion time.
@@ -201,37 +203,46 @@ pub enum Metric {
     Utilization,
     /// Jain's fairness index.
     Fairness,
+    /// The mean availability of the rarest chunk.
+    RarestCopies,
 }
 
 impl Metric {
     /// Every metric, in table order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
+        Self::Completed,
         Self::CompletionP50,
         Self::CompletionP90,
         Self::FirstByteP50,
         Self::Utilization,
         Self::Fairness,
+        Self::RarestCopies,
     ];
 
     /// A short name.
     pub fn name(self) -> &'static str {
         match self {
+            Self::Completed => "completed",
             Self::CompletionP50 => "completion p50",
             Self::CompletionP90 => "completion p90",
             Self::FirstByteP50 => "first byte p50",
             Self::Utilization => "utilization",
             Self::Fairness => "fairness",
+            Self::RarestCopies => "rarest copies",
         }
     }
 
     /// The run's value, if it has one. Times are in seconds.
     pub fn value(self, metrics: &RunMetrics) -> Option<f64> {
         match self {
+            Self::Completed => (metrics.downloaders > 0)
+                .then(|| metrics.completed as f64 / metrics.downloaders as f64),
             Self::CompletionP50 => metrics.completion_p50.map(|d| d.as_secs_f64()),
             Self::CompletionP90 => metrics.completion_p90.map(|d| d.as_secs_f64()),
             Self::FirstByteP50 => metrics.first_byte_p50.map(|d| d.as_secs_f64()),
             Self::Utilization => metrics.upload_utilization,
             Self::Fairness => metrics.fairness,
+            Self::RarestCopies => metrics.rarest_copies,
         }
     }
 
@@ -570,13 +581,16 @@ mod tests {
         let text = table(&rows, 0.95);
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].contains("95% CI"), "{text}");
-        assert!(lines[1].starts_with("completion p50") && lines[1].ends_with("reference"));
+        // Metrics without values show dashes.
         assert!(
-            lines[2].contains("-20.0s (-20.0%)") && lines[2].ends_with("better"),
+            lines[1].starts_with("completed") && lines[1].contains(" - "),
             "{text}"
         );
-        // Metrics without values show dashes.
-        assert!(lines[4].contains(" - "), "{text}");
+        assert!(lines[3].starts_with("completion p50") && lines[3].ends_with("reference"));
+        assert!(
+            lines[4].contains("-20.0s (-20.0%)") && lines[4].ends_with("better"),
+            "{text}"
+        );
     }
 
     proptest! {

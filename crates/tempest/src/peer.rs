@@ -156,30 +156,11 @@ impl PeerArgs {
     }
 }
 
-/// `identity.pem` in Tempest's folder in the per-user data directory: the local application
-/// data folder on Windows, Application Support on macOS, and the XDG data directory elsewhere.
+/// `identity.pem` in Tempest's folder in the per-user data directory, which the engine uses
+/// too.
 fn default_identity_path() -> Result<PathBuf> {
-    let missing = || {
+    let data_dir = tempest_engine::config::default_data_dir().with_context(|| {
         format!("cannot find the per-user data directory; pass --identity or set {IDENTITY_ENV}")
-    };
-    let absolute = |path: PathBuf| Some(path).filter(|path| path.is_absolute());
-    let env = |name: &str| std::env::var_os(name).map(PathBuf::from).and_then(absolute);
-    let home = || std::env::home_dir().and_then(absolute);
-
-    let data_dir = if cfg!(windows) {
-        env("LOCALAPPDATA")
-    } else if cfg!(target_os = "macos") {
-        home().map(|home| home.join("Library/Application Support"))
-    } else {
-        env("XDG_DATA_HOME").or_else(|| home().map(|home| home.join(".local/share")))
-    };
-    let tempest = if cfg!(any(windows, target_os = "macos")) {
-        "Tempest"
-    } else {
-        "tempest"
-    };
-    Ok(data_dir
-        .with_context(missing)?
-        .join(tempest)
-        .join("identity.pem"))
+    })?;
+    Ok(data_dir.join("identity.pem"))
 }

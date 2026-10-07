@@ -1,0 +1,496 @@
+//! The engine task and its handle.
+//!
+//! The engine task owns the node, the state store and every transfer's record, and is the only
+//! place they change (D-085). [`Engine`] sends it commands. Work that takes time runs in tasks
+//! of its own, which report back through a second inbox:
+//!
+//! - opening a transfer's storage, which may hash files (the transfer is "checking");
+//! - a supervisor per running bundle, which owns its [`BundleHandle`] and its tracker
+//!   announcers, forwards its decision events, takes checkpoints when asked, stops it, and
+//!   reports how it ended;
+//! - deleting a removed transfer's files.
+//!
+//! Every half second the task reads each running bundle's status, records what changed (the
+//! manifest's arrival, completion, progress, rates), emits snapshots of transfers that changed,
+//! and asks downloads for a checkpoint of their verified chunks every half minute.
+
+mod supervisor;
+mod task;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+
+use tempest_core::Event;
+use tempest_net::{
+    AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, Identity, IdentityError,
+    Lan, LanConfig, Node, NodeConfig, Storage, StorageError, Summary, TrackerClient,
+};
+use tempest_protocol::link::ParseLinkError;
+use tempest_protocol::{Address, BundleId, Link, Manifest, PeerId};
+use tokio::sync::{mpsc, oneshot};
+
+use self::task::EngineTask;
+use crate::TransferInfo;
+use crate::config::{ConfigError, EngineConfig};
+use crate::events::Subscription;
+use crate::manifest::{BuildError, BundleInfo, base_dir, build_manifest, unix_millis};
+use crate::queue::QueueMove;
+use crate::store::{Store, StoreError};
+
+/// How often running transfers' statuses are read.
+const TICK: Duration = Duration::from_millis(500);
+/// How often a running download's verified chunks are recorded.
+const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(30);
+/// How many events are kept for clients that resume.
+const EVENT_BUFFER: usize = 4096;
+/// How long a tracker request may take.
+const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long stopping waits for trackers to hear `stopped`.
+const ANNOUNCE_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long shutting down waits for Goodbyes to reach other peers.
+const GOODBYE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Why the engine could not do something.
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    /// The config is invalid.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    /// The state database failed.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The identity could not be loaded or created.
+    #[error("identity: {0}")]
+    Identity(#[from] IdentityError),
+    /// A file system operation failed.
+    #[error("{}: {source}", path.display())]
+    Io {
+        /// The file or directory.
+        path: PathBuf,
+        /// What went wrong.
+        source: std::io::Error,
+    },
+    /// The peer port could not be bound.
+    #[error("cannot bind UDP port {port}: {source}")]
+    Bind {
+        /// The port.
+        port: u16,
+        /// What went wrong.
+        source: std::io::Error,
+    },
+    /// The text is not a `tempest:` link.
+    #[error("not a valid tempest: link: {0}")]
+    InvalidLink(#[from] ParseLinkError),
+    /// The file or folder can't be shared.
+    #[error(transparent)]
+    Build(#[from] BuildError),
+    /// Storage for the share could not be opened.
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+    /// The bundle is already a transfer.
+    #[error("bundle {0} is already added")]
+    AlreadyAdded(BundleId),
+    /// No transfer has this ID.
+    #[error("no transfer {0}")]
+    NotFound(BundleId),
+    /// The transfer is being removed.
+    #[error("transfer {0} is still being removed")]
+    Removing(BundleId),
+    /// No category has this name.
+    #[error("no category {0:?}")]
+    UnknownCategory(String),
+    /// A name, tag or category is empty or only whitespace.
+    #[error("{0} must not be empty")]
+    Empty(&'static str),
+    /// A path must be absolute and valid UTF-8.
+    #[error("{} must be an absolute path in UTF-8", .0.display())]
+    InvalidPath(PathBuf),
+    /// The engine has shut down.
+    #[error("the engine has shut down")]
+    Stopped,
+}
+
+/// How to add a transfer from a link.
+#[derive(Debug, Clone, Default)]
+pub struct AddOptions {
+    /// Where to make the bundle's folder. Defaults to the category's save folder, then the
+    /// config's.
+    pub save_folder: Option<PathBuf>,
+    /// The transfer's category.
+    pub category: Option<String>,
+    /// The transfer's tags.
+    pub tags: BTreeSet<String>,
+    /// Add it stopped rather than started.
+    pub stopped: bool,
+}
+
+/// How to share a file or folder.
+#[derive(Debug, Clone, Default)]
+pub struct ShareOptions {
+    /// The bundle's name. Defaults to the file or folder's name.
+    pub name: Option<String>,
+    /// A description of the bundle.
+    pub comment: String,
+    /// The transfer's category. Its save folder is not used: a share stays where it is.
+    pub category: Option<String>,
+    /// The transfer's tags.
+    pub tags: BTreeSet<String>,
+}
+
+/// A handle to the engine. Clones share it. Once every handle is dropped the engine shuts down
+/// as [`shutdown`](Self::shutdown) does, without anyone waiting.
+#[derive(Debug, Clone)]
+pub struct Engine {
+    commands: mpsc::Sender<Command>,
+    peer_id: PeerId,
+    addresses: Vec<Address>,
+}
+
+type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
+
+/// What the engine is asked to do.
+enum Command {
+    List(oneshot::Sender<Vec<TransferInfo>>),
+    AddLink(Link, AddOptions, Reply<TransferInfo>),
+    AddShare(Box<NewShare>, Reply<TransferInfo>),
+    Start(BundleId, bool, Reply<TransferInfo>),
+    Stop(BundleId, Reply<TransferInfo>),
+    Remove(BundleId, bool, Reply<()>),
+    Rename(BundleId, Option<String>, Reply<TransferInfo>),
+    SetTags(BundleId, BTreeSet<String>, Reply<TransferInfo>),
+    SetCategory(BundleId, Option<String>, Reply<TransferInfo>),
+    SetSettings(
+        BundleId,
+        BTreeMap<String, serde_json::Value>,
+        Reply<TransferInfo>,
+    ),
+    Move(BundleId, QueueMove, Reply<Vec<TransferInfo>>),
+    Categories(oneshot::Sender<BTreeMap<String, PathBuf>>),
+    SetCategoryFolder(String, PathBuf, Reply<()>),
+    RemoveCategory(String, Reply<()>),
+    Subscribe(Option<u64>, oneshot::Sender<Subscription>),
+    Shutdown(oneshot::Sender<()>),
+}
+
+/// A share whose manifest has been built.
+struct NewShare {
+    manifest: Manifest,
+    base: PathBuf,
+    options: ShareOptions,
+}
+
+impl Engine {
+    /// Starts the engine: opens its state, binds its peer port, and resumes the transfers that
+    /// were running. Must be called within a tokio runtime.
+    pub async fn open(config: EngineConfig) -> Result<Self, EngineError> {
+        config.validate()?;
+        let data_dir = config.data_dir()?;
+        std::fs::create_dir_all(&data_dir).map_err(|source| EngineError::Io {
+            path: data_dir.clone(),
+            source,
+        })?;
+        let store = Store::open(&data_dir.join("state.db"))?;
+        let identity = Identity::load_or_create(&data_dir.join("identity.pem"))?;
+        let session = config.session()?;
+
+        let endpoint_config = EndpointConfig {
+            max_open_requests: session.upload.max_open_requests,
+            ..endpoint_config(&config)
+        };
+        let port = config.peers.port;
+        let endpoint = Endpoint::bind(identity, &endpoint_config)
+            .map_err(|source| EngineError::Bind { port, source })?;
+        let addresses =
+            tempest_net::direct_addresses(&endpoint.local_addrs()).map_err(|source| {
+                EngineError::Io {
+                    path: PathBuf::from("network interfaces"),
+                    source,
+                }
+            })?;
+        let lan = match config.lan.enabled {
+            true => {
+                let lan_config = LanConfig {
+                    port: config.lan.port,
+                    ..LanConfig::default()
+                };
+                // Without a network to discover peers on, transfers still work.
+                Lan::start(&endpoint, lan_config).ok()
+            }
+            false => None,
+        };
+        let announce = AnnounceConfig {
+            addrs: tempest_net::public_addresses(&addresses),
+            ..AnnounceConfig::new(
+                endpoint.peer_id(),
+                endpoint.local_addrs().first().map_or(0, |a| a.port()),
+            )
+        };
+        let tracker = TrackerClient::new(TRACKER_TIMEOUT).map_err(|e| EngineError::Io {
+            path: PathBuf::from("tracker client"),
+            source: std::io::Error::other(e.to_string()),
+        })?;
+        let peer_id = endpoint.peer_id();
+        let node = Node::start(
+            endpoint,
+            NodeConfig {
+                session,
+                addresses: addresses.clone(),
+                ..NodeConfig::default()
+            },
+        );
+
+        let (internal, internal_receiver) = mpsc::channel(256);
+        let mut task = EngineTask::new(task::Parts {
+            save_folder: config.save_folder()?,
+            config,
+            store,
+            node,
+            lan,
+            tracker,
+            announce,
+            peer_id,
+            addresses: addresses.clone(),
+            internal,
+        });
+        task.load()?;
+        let (commands, receiver) = mpsc::channel(64);
+        tokio::spawn(task.run(receiver, internal_receiver));
+        Ok(Self {
+            commands,
+            peer_id,
+            addresses,
+        })
+    }
+
+    /// This peer's ID.
+    pub fn peer_id(&self) -> PeerId {
+        self.peer_id
+    }
+
+    /// The addresses this peer advertises.
+    pub fn addresses(&self) -> &[Address] {
+        &self.addresses
+    }
+
+    async fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> Option<T> {
+        let (reply, response) = oneshot::channel();
+        self.commands.send(command(reply)).await.ok()?;
+        response.await.ok()
+    }
+
+    async fn call<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, EngineError> {
+        self.ask(command).await.unwrap_or(Err(EngineError::Stopped))
+    }
+
+    /// Every transfer, in queue order.
+    pub async fn list(&self) -> Vec<TransferInfo> {
+        self.ask(Command::List).await.unwrap_or_default()
+    }
+
+    /// One transfer.
+    pub async fn get(&self, id: BundleId) -> Option<TransferInfo> {
+        self.list().await.into_iter().find(|t| t.id == id)
+    }
+
+    /// Adds a download from a `tempest:` link. It starts once the queue lets it, unless added
+    /// stopped. Its peers come from the link, its trackers and the config's, the local network
+    /// and peer exchange, all at once.
+    pub async fn add_link(
+        &self,
+        link: &str,
+        options: AddOptions,
+    ) -> Result<TransferInfo, EngineError> {
+        let link: Link = link.parse()?;
+        self.call(|reply| Command::AddLink(link, options, reply))
+            .await
+    }
+
+    /// Makes a bundle from the file or folder at `path` and shares it from there. The returned
+    /// transfer's `link` is the bundle's link.
+    pub async fn add_path(
+        &self,
+        path: &Path,
+        options: ShareOptions,
+    ) -> Result<TransferInfo, EngineError> {
+        let info = BundleInfo {
+            name: options.name.clone(),
+            comment: options.comment.clone(),
+            created: unix_millis(SystemTime::now()),
+        };
+        let path = path.to_owned();
+        let built = tokio::task::spawn_blocking(move || {
+            let manifest = build_manifest(&path, info)?;
+            Ok::<_, BuildError>((manifest, base_dir(&path)?))
+        })
+        .await
+        .expect("building a manifest panicked");
+        let (manifest, base) = built?;
+        let share = Box::new(NewShare {
+            manifest,
+            base,
+            options,
+        });
+        self.call(|reply| Command::AddShare(share, reply)).await
+    }
+
+    /// Starts a transfer, through the queue. Clears an error, and makes a completed transfer
+    /// share again.
+    pub async fn start(&self, id: BundleId) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::Start(id, false, reply)).await
+    }
+
+    /// Starts a transfer at once, bypassing the queue.
+    pub async fn force_start(&self, id: BundleId) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::Start(id, true, reply)).await
+    }
+
+    /// Stops a transfer.
+    pub async fn stop(&self, id: BundleId) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::Stop(id, reply)).await
+    }
+
+    /// Removes a transfer once it has stopped, deleting its files too if `delete_files` is set:
+    /// the bundle's entries, and a download's bundle folder once empty.
+    pub async fn remove(&self, id: BundleId, delete_files: bool) -> Result<(), EngineError> {
+        self.call(|reply| Command::Remove(id, delete_files, reply))
+            .await
+    }
+
+    /// Shows a transfer under `name`, or under the bundle's own name again with `None`.
+    pub async fn rename(
+        &self,
+        id: BundleId,
+        name: Option<String>,
+    ) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::Rename(id, name, reply)).await
+    }
+
+    /// Replaces a transfer's tags.
+    pub async fn set_tags(
+        &self,
+        id: BundleId,
+        tags: BTreeSet<String>,
+    ) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::SetTags(id, tags, reply)).await
+    }
+
+    /// Puts a transfer in a category, or none. Its data stays where it is: a category's save
+    /// folder applies only to downloads added in it.
+    pub async fn set_category(
+        &self,
+        id: BundleId,
+        category: Option<String>,
+    ) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::SetCategory(id, category, reply))
+            .await
+    }
+
+    /// Replaces a transfer's own session settings, by dotted key, applied over the config's.
+    /// They take effect the next time it starts.
+    pub async fn set_transfer_settings(
+        &self,
+        id: BundleId,
+        settings: BTreeMap<String, serde_json::Value>,
+    ) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::SetSettings(id, settings, reply))
+            .await
+    }
+
+    /// Moves a transfer in the queue, and returns every transfer in the new order.
+    pub async fn move_in_queue(
+        &self,
+        id: BundleId,
+        to: QueueMove,
+    ) -> Result<Vec<TransferInfo>, EngineError> {
+        self.call(|reply| Command::Move(id, to, reply)).await
+    }
+
+    /// Every category and its save folder.
+    pub async fn categories(&self) -> BTreeMap<String, PathBuf> {
+        self.ask(Command::Categories).await.unwrap_or_default()
+    }
+
+    /// Adds a category, or changes its save folder.
+    pub async fn set_category_folder(
+        &self,
+        name: &str,
+        save_folder: &Path,
+    ) -> Result<(), EngineError> {
+        let (name, folder) = (name.to_owned(), save_folder.to_owned());
+        self.call(|reply| Command::SetCategoryFolder(name, folder, reply))
+            .await
+    }
+
+    /// Removes a category, taking it off every transfer.
+    pub async fn remove_category(&self, name: &str) -> Result<(), EngineError> {
+        let name = name.to_owned();
+        self.call(|reply| Command::RemoveCategory(name, reply))
+            .await
+    }
+
+    /// Subscribes to the engine's events: those after event `after` that are still buffered,
+    /// then new ones. With `None`, only new ones.
+    pub async fn subscribe(&self, after: Option<u64>) -> Result<Subscription, EngineError> {
+        self.ask(|reply| Command::Subscribe(after, reply))
+            .await
+            .ok_or(EngineError::Stopped)
+    }
+
+    /// Stops every transfer, records where each one got to, and shuts the node down. Running
+    /// transfers start again when the engine next opens.
+    pub async fn shutdown(&self) {
+        let _ = self.ask(Command::Shutdown).await;
+    }
+}
+
+fn endpoint_config(config: &EngineConfig) -> EndpointConfig {
+    let port = config.peers.port;
+    if config.peers.bind.is_empty() {
+        return EndpointConfig::any(port);
+    }
+    let mut endpoint = EndpointConfig {
+        ipv4: None,
+        ipv6: None,
+        ..EndpointConfig::default()
+    };
+    for ip in &config.peers.bind {
+        match ip {
+            std::net::IpAddr::V4(v4) => {
+                endpoint.ipv4 = Some(std::net::SocketAddrV4::new(*v4, port));
+            }
+            std::net::IpAddr::V6(v6) => {
+                endpoint.ipv6 = Some(std::net::SocketAddrV6::new(*v6, port, 0, 0));
+            }
+        }
+    }
+    endpoint
+}
+
+/// What spawned tasks report to the engine task.
+enum Internal {
+    /// A transfer's storage was opened, or failed to open.
+    Opened {
+        id: BundleId,
+        generation: u64,
+        result: Result<Storage, StorageError>,
+    },
+    /// Decision events from a running bundle, and how many were dropped before them.
+    Decisions {
+        id: BundleId,
+        events: Vec<Event>,
+        missed: u64,
+    },
+    /// A running bundle's checkpoint.
+    Checkpoint {
+        id: BundleId,
+        generation: u64,
+        checkpoint: Checkpoint,
+    },
+    /// A bundle stopped.
+    Finished {
+        id: BundleId,
+        generation: u64,
+        result: Result<Summary, DriverError>,
+    },
+}

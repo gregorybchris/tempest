@@ -2780,3 +2780,26 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** Saving the tree costs about 0.2% of the bundle per save and keeps every stored chunk servable at once. The size and modification time catch the usual ways files change between runs, and checking a changed file against saved leaves costs one read and no download. Checkpoints only record synced data, so a crash loses at most the chunks written since the last one.
 
+
+---
+
+## D-180: Engine structure
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-079 to D-082 and D-118 fix what the engine does. M5 needs how: who owns what, what the queue counts, how statuses are decided, and what the event stream carries.
+
+**Options for ownership:** shared state behind locks; one engine task owning the node, the store and every record, with helper tasks reporting back (chosen, per D-085). **For the queue:** one global limit; separate limits for incomplete and complete transfers, with force-started ones outside both (chosen). **For "completed":** any complete transfer that isn't running; one that stopped sharing on its own (chosen), while one the user stopped is "stopped". **For the event stream:** snapshots only; snapshots and decision events, numbered per run, with a bounded replay buffer (chosen).
+
+**Decision:**
+
+- The engine task owns the node, LAN discovery, the tracker client and the SQLite connection, and handles commands one at a time. Opening storage, which may hash, runs in a task of its own while the transfer is "checking". A supervisor task per running bundle owns its handle and tracker announcers, forwards its decision events, takes checkpoints and reports how it ended.
+- Transfers are identified by bundle ID; adding a bundle twice is refused. Each run gets a generation number, so reports from an earlier run are ignored.
+- The queue is one order over all transfers. Up to `max_active_downloads` incomplete and `max_active_uploads` complete transfers run, first in queue order; force-started transfers run regardless and take no slot. Errored and completed transfers wait until started again.
+- A running download with no progress for 20 seconds is stalled, with a reason from its connection and peer counts. A complete transfer whose session stopped by itself, after lingering (D-065), is completed.
+- Every half second the engine reads running bundles' statuses, records the manifest when it arrives and completion when it happens, and emits a snapshot of each transfer that changed. Every event is numbered from 1 per engine run; the last 4,096 are kept, so a subscriber can resume after the last one it saw, or learns that it missed some.
+- Discovery for each running transfer uses, at once, the link's peer, the peers saved for the bundle, the link's and the config's trackers, LAN discovery, and peer exchange in the session.
+- Known peers are saved from links only, until the driver reports the addresses of peers it reached.
+- The config file is YAML with `settings` (a profile and overrides, as in scenarios), `peers`, `lan`, `api`, `data_dir`, `save_folder`, `queue` and `trackers`. A transfer's own overrides apply after the config's. The state database and the identity live in the data directory.
+
+**Rationale:** One owner keeps every change to a transfer in one place, in order, and makes the store's writes simple. Separate limits match how qBittorrent and Transmission users think about slots, since finished transfers cost little. Telling "stopped" from "completed" says whether the user or the swarm rule ended a transfer. Numbering events per run is enough for SSE resume, since a restarted engine's subscribers must refresh their view anyway.

@@ -16,6 +16,7 @@ tempest-core = { path = "crates/core", version = "0.1.0" }
 tempest-sim = { path = "crates/sim", version = "0.1.0" }
 tempest-net = { path = "crates/net", version = "0.1.0" }
 tempest-tracker = { path = "crates/tracker", version = "0.1.0" }
+tempest-engine = { path = "crates/engine", version = "0.1.0" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -26,9 +27,11 @@ getrandom = { version = "0.3", features = ["std"] }
 # No default features: core must never reach for the OS's randomness (D-068).
 rand = { version = "0.9", default-features = false, features = ["alloc"] }
 rand_chacha = { version = "0.9", default-features = false }
+# Bundled so no system SQLite is needed (D-082).
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Only parsing is needed: scenario files are read, never written.
+# Scenario files are only read; the engine also writes its config file.
 serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
 sha2 = "0.10"
 thiserror = "2"

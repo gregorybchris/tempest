@@ -1,6 +1,5 @@
 //! The `tempest` binary.
 
-mod bundle;
 mod get;
 mod peer;
 mod progress;

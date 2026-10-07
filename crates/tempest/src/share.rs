@@ -1,15 +1,14 @@
 //! `tempest share`: build a bundle's manifest, print its link, and serve it.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
+use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis};
 use tempest_net::{DEFAULT_PORT, Storage, StorageConfig};
 use tempest_protocol::{Link, Manifest};
 
-use crate::bundle::{BundleInfo, build_manifest, unix_millis};
 use crate::peer::{Peer, PeerArgs};
 use crate::progress::{StatusLine, bytes};
 
@@ -131,16 +130,4 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
     let summary = handle.finished().await?;
     eprintln!("uploaded {}", bytes(summary.uploaded));
     Ok(())
-}
-
-/// The directory the bundle's entry paths are relative to: the folder itself, or the folder
-/// holding a single shared file.
-fn base_dir(path: &Path) -> Result<PathBuf> {
-    let absolute =
-        fs::canonicalize(path).with_context(|| format!("cannot read {}", path.display()))?;
-    if absolute.is_dir() {
-        return Ok(absolute);
-    }
-    let parent = absolute.parent().context("a file always has a parent")?;
-    Ok(parent.to_owned())
 }

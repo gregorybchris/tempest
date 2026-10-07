@@ -1,0 +1,29 @@
+[package]
+name = "tempest-engine"
+description = "Tempest's engine: transfers, their saved state, and the client's config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tempest-core.workspace = true
+tempest-net.workspace = true
+tempest-protocol.workspace = true
+
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde-saphyr = { workspace = true, features = ["serialize"] }
+thiserror.workspace = true
+tokio.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[lints]
+workspace = true

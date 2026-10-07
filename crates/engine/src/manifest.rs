@@ -1,11 +1,11 @@
-//! Building a manifest from a file or folder on disk.
+//! Building a bundle's manifest from a file or folder on disk.
 
 use std::fs::{self, File, Metadata};
-use std::io::{ErrorKind, Read};
-use std::path::Path;
+use std::io::{self, ErrorKind, Read};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, bail};
+use tempest_protocol::manifest::ManifestError;
 use tempest_protocol::tree::RootHasher;
 use tempest_protocol::{Entry, FileInfo, Manifest};
 use unicode_normalization::UnicodeNormalization;
@@ -21,22 +21,74 @@ pub struct BundleInfo {
     pub created: i64,
 }
 
+/// Why a file or folder can't be made into a bundle.
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    /// Reading something failed.
+    #[error("cannot read {}: {source}", path.display())]
+    Read {
+        /// What could not be read.
+        path: PathBuf,
+        /// Why.
+        source: io::Error,
+    },
+    /// A name or link target is not valid UTF-8.
+    #[error("{what} of {} is not UTF-8", path.display())]
+    NotUtf8 {
+        /// The file, folder or symlink.
+        path: PathBuf,
+        /// "the name" or "the link target".
+        what: &'static str,
+    },
+    /// The path has no name of its own to name the bundle after, such as `/`.
+    #[error("{} has no name; give the bundle one", path.display())]
+    NoName {
+        /// The path.
+        path: PathBuf,
+    },
+    /// The folder holds nothing to share.
+    #[error("{} is empty", path.display())]
+    Empty {
+        /// The folder.
+        path: PathBuf,
+    },
+    /// Something that is neither a file, a folder nor a symlink, such as a socket.
+    #[error("{} is not a file, folder or symlink", path.display())]
+    Unsupported {
+        /// The path.
+        path: PathBuf,
+    },
+    /// The entries break a manifest rule, such as a name no platform allows.
+    #[error("cannot share this as a bundle: {0}")]
+    Manifest(#[from] ManifestError),
+}
+
+fn read_error(path: &Path) -> impl FnOnce(io::Error) -> BuildError + '_ {
+    move |source| BuildError::Read {
+        path: path.to_owned(),
+        source,
+    }
+}
+
 /// The `creator` field of bundles made by this program.
 pub fn creator() -> String {
     format!("tempest {}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Builds the manifest for the file or folder at `path`, hashing every file.
+/// Builds the manifest for the file or folder at `path`, hashing every file. This blocks, so
+/// call it from a blocking thread in async code.
 ///
 /// A folder's contents become the bundle's entries. A single file becomes a bundle with one
 /// entry named after it. Symlinks inside a folder are kept as symlinks; `path` itself is followed.
-pub fn build_manifest(path: &Path, info: BundleInfo) -> Result<Manifest> {
-    let metadata = fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
-    let own_name = || -> Result<String> {
-        let absolute = fs::canonicalize(path)?;
+pub fn build_manifest(path: &Path, info: BundleInfo) -> Result<Manifest, BuildError> {
+    let metadata = fs::metadata(path).map_err(read_error(path))?;
+    let own_name = || -> Result<String, BuildError> {
+        let absolute = fs::canonicalize(path).map_err(read_error(path))?;
         match absolute.file_name() {
             Some(name) => utf8_name(name, &absolute),
-            None => bail!("{} has no name; pass --name", path.display()),
+            None => Err(BuildError::NoName {
+                path: path.to_owned(),
+            }),
         }
     };
     let name = match info.name {
@@ -48,38 +100,60 @@ pub fn build_manifest(path: &Path, info: BundleInfo) -> Result<Manifest> {
     if metadata.is_dir() {
         add_dir_contents(path, "", &mut entries)?;
         if entries.is_empty() {
-            bail!("{} is empty", path.display());
+            return Err(BuildError::Empty {
+                path: path.to_owned(),
+            });
         }
     } else if metadata.is_file() {
         entries.push(file_entry(path, own_name()?, &metadata)?);
     } else {
-        bail!("{} is not a file or folder", path.display());
+        return Err(BuildError::Unsupported {
+            path: path.to_owned(),
+        });
     }
 
-    Manifest::new(name, info.comment, info.created, creator(), entries)
-        .context("cannot share this as a bundle")
+    Ok(Manifest::new(
+        name,
+        info.comment,
+        info.created,
+        creator(),
+        entries,
+    )?)
+}
+
+/// The directory a bundle built from `path` has its entry paths relative to: the folder itself,
+/// or the folder holding a single file.
+pub fn base_dir(path: &Path) -> Result<PathBuf, BuildError> {
+    let absolute = fs::canonicalize(path).map_err(read_error(path))?;
+    if absolute.is_dir() {
+        return Ok(absolute);
+    }
+    match absolute.parent() {
+        Some(parent) => Ok(parent.to_owned()),
+        None => Err(BuildError::NoName { path: absolute }),
+    }
 }
 
 /// Adds an entry for everything inside `dir`, whose path in the bundle is `prefix`.
-fn add_dir_contents(dir: &Path, prefix: &str, entries: &mut Vec<Entry>) -> Result<()> {
-    let read_dir = fs::read_dir(dir).with_context(|| format!("cannot read {}", dir.display()))?;
-    for item in read_dir {
-        let item = item.with_context(|| format!("cannot read {}", dir.display()))?;
+fn add_dir_contents(dir: &Path, prefix: &str, entries: &mut Vec<Entry>) -> Result<(), BuildError> {
+    for item in fs::read_dir(dir).map_err(read_error(dir))? {
+        let item = item.map_err(read_error(dir))?;
         let fs_path = item.path();
         let name = utf8_name(&item.file_name(), &fs_path)?;
         let path = match prefix {
             "" => name,
             _ => format!("{prefix}/{name}"),
         };
-        let metadata = fs::symlink_metadata(&fs_path)
-            .with_context(|| format!("cannot read {}", fs_path.display()))?;
+        let metadata = fs::symlink_metadata(&fs_path).map_err(read_error(&fs_path))?;
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            let target = fs::read_link(&fs_path)
-                .with_context(|| format!("cannot read link {}", fs_path.display()))?;
+            let target = fs::read_link(&fs_path).map_err(read_error(&fs_path))?;
             let target = target
                 .to_str()
-                .with_context(|| format!("link target of {} is not UTF-8", fs_path.display()))?
+                .ok_or_else(|| BuildError::NotUtf8 {
+                    path: fs_path.clone(),
+                    what: "the link target",
+                })?
                 .replace(std::path::MAIN_SEPARATOR, "/");
             entries.push(Entry::symlink(path, target.nfc().collect::<String>()));
         } else if file_type.is_dir() {
@@ -91,16 +165,15 @@ fn add_dir_contents(dir: &Path, prefix: &str, entries: &mut Vec<Entry>) -> Resul
         } else if file_type.is_file() {
             entries.push(file_entry(&fs_path, path, &metadata)?);
         } else {
-            bail!("{} is not a file, folder or symlink", fs_path.display());
+            return Err(BuildError::Unsupported { path: fs_path });
         }
     }
     Ok(())
 }
 
 /// Hashes the file at `fs_path` into an entry at bundle path `path`.
-fn file_entry(fs_path: &Path, path: String, metadata: &Metadata) -> Result<Entry> {
-    let context = || format!("cannot read {}", fs_path.display());
-    let mut file = File::open(fs_path).with_context(context)?;
+fn file_entry(fs_path: &Path, path: String, metadata: &Metadata) -> Result<Entry, BuildError> {
+    let mut file = File::open(fs_path).map_err(read_error(fs_path))?;
     let mut hasher = RootHasher::new();
     let mut buffer = vec![0; 1 << 20];
     loop {
@@ -108,10 +181,10 @@ fn file_entry(fs_path: &Path, path: String, metadata: &Metadata) -> Result<Entry
             Ok(0) => break,
             Ok(n) => hasher.update(&buffer[..n]),
             Err(e) if e.kind() == ErrorKind::Interrupted => {}
-            Err(e) => return Err(e).with_context(context),
+            Err(e) => return Err(read_error(fs_path)(e)),
         }
     }
-    let modified = metadata.modified().with_context(context)?;
+    let modified = metadata.modified().map_err(read_error(fs_path))?;
     Ok(Entry::file(
         path,
         FileInfo {
@@ -124,10 +197,11 @@ fn file_entry(fs_path: &Path, path: String, metadata: &Metadata) -> Result<Entry
 }
 
 /// A file name as NFC text, as manifests require.
-fn utf8_name(name: &std::ffi::OsStr, fs_path: &Path) -> Result<String> {
-    let name = name
-        .to_str()
-        .with_context(|| format!("the name of {} is not UTF-8", fs_path.display()))?;
+fn utf8_name(name: &std::ffi::OsStr, fs_path: &Path) -> Result<String, BuildError> {
+    let name = name.to_str().ok_or_else(|| BuildError::NotUtf8 {
+        path: fs_path.to_owned(),
+        what: "the name",
+    })?;
     Ok(name.nfc().collect())
 }
 
@@ -194,7 +268,7 @@ mod tests {
         assert!(build_manifest(dir.path(), info()).is_err());
         fs::write(dir.path().join("a:b"), "x").unwrap();
         let error = build_manifest(dir.path(), info()).unwrap_err();
-        assert!(format!("{error:#}").contains("a:b"), "{error:#}");
+        assert!(error.to_string().contains("a:b"), "{error}");
     }
 
     #[test]

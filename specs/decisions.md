@@ -3088,3 +3088,38 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** The settings already persist, validate and reach every client, local or remote, with no new file format. One choice follows the user across interfaces and machines that share an engine.
 
+---
+
+## D-196: The TUI's Share, Catalog and Settings areas
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-136 and D-139 make Share, Catalog and Settings areas of their own. They need layouts and keys that fit the TUI's one-table key model (D-191) without letting typing clash with area keys such as `1`-`4` and `q`.
+
+**Decision:**
+
+- **Share** shows a form (path, name, comment, category, tags), the shares, and the selected share's whole link. The form takes the keys only after `a`, until `esc` or `enter`; while the engine builds the bundle the form says so. `y` copies a link with an OSC 52 escape, which works over SSH; terminals without it ignore it. `enter` opens a share's detail in Transfers.
+- **Catalog** and **Settings** are sections of rows, a label and a value each, with the selected row's meaning below. `enter` or `space` changes a row (a prompt, a form, a toggle or the next choice), `a` adds (a tracker or relay in Catalog, by the section under the cursor; a category in Settings), and `x` removes an entry or gives a setting changed through the API the config file's value again (`DELETE /v1/settings/{key}`). `•` marks such settings. `tab` jumps between sections. Groups awaiting a restart show as a line above the rows.
+- Values are typed as the TUI shows them: speeds as `500K` or `2.5M`, `none` for no limit, durations as the engine reads them. The prompt starts with the exact value, so `enter` alone changes nothing.
+- `L` opens a transfer's own speed and sharing limits from the list or detail. Empty keeps the engine's setting and `none` overrides it with no limit; the transfer's other overrides stay.
+- Catalog says plainly that browsing what trackers list arrives with M9.
+- Help scrolls with `j`/`k` when it is taller than the terminal.
+- The settings, which have no events, are fetched when Catalog or Settings opens, after each change and every five seconds while one shows.
+
+**Rationale:** An explicit focus for the share form keeps every area's keys predictable, as the add modal does. Rows with one change key, one add key and one remove key cover every setting kind without a mode per kind, and showing the meaning of the row under the cursor keeps labels short.
+
+---
+
+## D-197: Custom columns and saved views
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-118 lists custom columns and saved views without saying what they hold; D-138 says they add to the columns' priority order.
+
+**Decision:**
+
+- The user picks which optional columns show from size, ↓, ↑, ETA, peers and ratio (the default set) plus category, tags and the date added (UTC). Name, progress and status always show, and narrow terminals still drop the chosen ones in D-138's order, the new ones last.
+- A saved view is a named filter, status and sort, not columns, so applying one never rearranges the list's shape. Saving under an existing name replaces it.
+- TUI keys: `|` picks columns, `v` lists the views (`enter` shows one, `x` deletes it) and `V` saves the current one.
+
+**Rationale:** Views answer "show me these, in this order"; columns are a standing preference. Keeping them apart makes each simpler to explain, and both live in `ui` (D-195).

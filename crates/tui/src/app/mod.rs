@@ -2,23 +2,36 @@
 //! needs the engine or the system comes back as a [`Request`] for the runtime to carry out.
 
 mod inside;
+mod limits;
 mod modal;
 mod request;
+mod rows;
+mod share;
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tempest_engine::api::QueueStep;
 use tempest_engine::api::client::ApiEvent;
-use tempest_engine::{Status, TransferInfo};
+use tempest_engine::config::SavedView;
+use tempest_engine::{SettingsView, Status, TransferInfo};
 use tempest_protocol::BundleId;
 
 pub use self::inside::{Fetched, Inside, Look};
-pub use self::modal::{AddField, AddForm, Modal, PickItem, PickKind, TextKind};
+pub use self::modal::{
+    AddField, AddForm, FormKind, Modal, PickItem, PickKind, TextKind, ValueEdit, ValueTarget,
+};
 pub use self::request::{Action, Reply, Request, Target, parse_tags};
+pub use self::rows::{Edit, Row, Section as RowSection, ValueKind, describe_schedule};
+pub use self::share::ShareArea;
 use crate::chunkmap;
+use crate::columns::Column;
 use crate::commands::{Command, Section};
 use crate::finding::{Finding, SortKey, StatusFilter};
 use crate::input::Input;
 use crate::model::Model;
+use crate::prefs;
 use crate::theme::Theme;
 
 /// The app's areas (D-136), in navigation order. Transfers is home.
@@ -116,18 +129,24 @@ pub enum Screen {
     Chunks,
     /// A transfer's rates chart.
     Rates,
-    /// Share, Catalog or Settings.
-    Other,
+    /// The Share area.
+    Share,
+    /// The Catalog area.
+    Catalog,
+    /// The Settings area.
+    Settings,
 }
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::List,
         Self::Detail,
         Self::Chunks,
         Self::Rates,
-        Self::Other,
+        Self::Share,
+        Self::Catalog,
+        Self::Settings,
     ];
 }
 
@@ -166,6 +185,10 @@ const NOTICE_TICKS: u8 = 5;
 /// How far page up and down move.
 const PAGE: isize = 10;
 
+/// How many ticks (seconds) the Catalog and Settings areas wait between fetching the settings,
+/// which have no events.
+const SETTINGS_TICKS: u8 = 5;
+
 /// The most rows the summary tab has.
 pub const SUMMARY_ROWS: usize = 14;
 
@@ -199,8 +222,30 @@ pub struct App {
     pub size: (u16, u16),
     /// What is open over the list.
     pub modal: Option<Modal>,
-    /// The categories' names, once fetched.
-    pub categories: Option<Vec<String>>,
+    /// Every category's save folder by name, once fetched.
+    pub categories: Option<BTreeMap<String, PathBuf>>,
+    /// The engine's settings, once fetched.
+    pub settings: Option<SettingsView>,
+    /// Why the settings couldn't be fetched, if they couldn't.
+    pub settings_error: Option<String>,
+    /// Whether the settings are being fetched.
+    settings_pending: bool,
+    /// Ticks since the settings were last fetched.
+    settings_age: u8,
+    /// Whether the theme, columns and views kept in the settings have been taken in.
+    prefs_loaded: bool,
+    /// Changes to what the user keeps that haven't been answered yet.
+    ui_pending: usize,
+    /// The list's optional columns that show (D-197).
+    pub columns: Vec<Column>,
+    /// The saved views.
+    pub views: Vec<SavedView>,
+    /// The Share area's state.
+    pub share: ShareArea,
+    /// The cursor among the Catalog area's rows.
+    catalog_row: usize,
+    /// The cursor among the Settings area's rows.
+    settings_row: usize,
     /// A message about something that just happened.
     pub notice: Option<Notice>,
     /// Whether the user asked to quit.
@@ -226,6 +271,17 @@ impl App {
             size: (80, 24),
             modal: None,
             categories: None,
+            settings: None,
+            settings_error: None,
+            settings_pending: false,
+            settings_age: 0,
+            prefs_loaded: false,
+            ui_pending: 0,
+            columns: Column::DEFAULT.to_vec(),
+            views: Vec::new(),
+            share: ShareArea::default(),
+            catalog_row: 0,
+            settings_row: 0,
             notice: None,
             quit: false,
         }
@@ -254,7 +310,9 @@ impl App {
             (Area::Transfers, View::Detail) => Screen::Detail,
             (Area::Transfers, View::Chunks) => Screen::Chunks,
             (Area::Transfers, View::Rates) => Screen::Rates,
-            _ => Screen::Other,
+            (Area::Share, _) => Screen::Share,
+            (Area::Catalog, _) => Screen::Catalog,
+            (Area::Settings, _) => Screen::Settings,
         }
     }
 
@@ -265,11 +323,19 @@ impl App {
             return false;
         }
         let selected = self.selected.is_some();
+        let share = self.selected_share().is_some();
         match command.section() {
-            Section::Move => screen == Screen::Detail || !self.visible().is_empty(),
+            Section::Move => match screen {
+                Screen::List => !self.visible().is_empty(),
+                Screen::Share => share,
+                _ => true,
+            },
+            Section::Transfer if screen == Screen::Share => share,
             Section::Transfer | Section::Queue => command == Command::Add || selected,
             Section::View => selected,
             Section::Find => command != Command::ClearFilters || self.finding.filtering(),
+            Section::Share => command == Command::NewShare || share,
+            Section::Change => self.settings.is_some(),
             Section::App => true,
         }
     }
@@ -277,9 +343,12 @@ impl App {
     /// The keys that work right now, most useful first. The last always shows.
     pub fn hints(&self) -> Vec<Hint> {
         if let Some(modal) = &self.modal {
-            return Self::modal_hints(modal);
+            return self.modal_hints(modal);
         }
-        const ORDER: [Command; 17] = [
+        if self.screen() == Screen::Share && self.share.editing {
+            return self.share_hints();
+        }
+        const ORDER: [Command; 26] = [
             Command::ClearFilters,
             Command::Back,
             Command::Down,
@@ -288,12 +357,21 @@ impl App {
             Command::Chunks,
             Command::Rates,
             Command::StartStop,
+            Command::NewShare,
+            Command::Change,
+            Command::AddEntry,
+            Command::AddCategory,
+            Command::RemoveEntry,
+            Command::ShowShare,
             Command::Filter,
             Command::Add,
             Command::Palette,
             Command::Remove,
             Command::Sort,
             Command::GoTransfers,
+            Command::Copy,
+            Command::Views,
+            Command::NextSection,
             Command::Theme,
             Command::Quit,
             Command::Help,
@@ -327,7 +405,7 @@ impl App {
     /// The current screen's name, as help titles it.
     pub fn screen_title(&self) -> &'static str {
         match self.screen() {
-            Screen::List | Screen::Other => self.area.title(),
+            Screen::List | Screen::Share | Screen::Catalog | Screen::Settings => self.area.title(),
             Screen::Detail => "Detail",
             Screen::Chunks => "Chunk map",
             Screen::Rates => "Rates",
@@ -365,9 +443,8 @@ impl App {
         self.change_finding(|finding| finding.text = text);
     }
 
-    /// Called once a second. Returns the fetch that keeps the open view up to date, if it
-    /// needs one.
-    pub fn tick(&mut self) -> Option<Request> {
+    /// Called once a second. Returns the fetches that keep the open view up to date.
+    pub fn tick(&mut self) -> Vec<Request> {
         self.model.sample();
         if let Some(notice) = &mut self.notice {
             notice.ticks_left = notice.ticks_left.saturating_sub(1);
@@ -375,7 +452,56 @@ impl App {
                 self.notice = None;
             }
         }
-        self.fetch()
+        self.settings_age = self.settings_age.saturating_add(1);
+        let rows = matches!(self.area, Area::Catalog | Area::Settings);
+        let stale = rows && self.settings_age >= SETTINGS_TICKS;
+        let settings = (stale || !self.prefs_loaded)
+            .then(|| self.load_settings())
+            .flatten();
+        self.fetch().into_iter().chain(settings).collect()
+    }
+
+    /// The fetch of the settings and categories, unless one is under way.
+    pub fn load_settings(&mut self) -> Option<Request> {
+        if self.settings_pending {
+            return None;
+        }
+        self.settings_pending = true;
+        Some(Request::Settings)
+    }
+
+    /// Takes in the engine's settings. What the user keeps (D-195) is taken in once, at the
+    /// start, and again whenever no change to it is waiting for an answer, so a fetch never
+    /// undoes a change just made.
+    fn take_settings(&mut self, view: SettingsView) {
+        let ui = &view.settings.ui;
+        if !self.prefs_loaded {
+            self.theme = prefs::theme(ui);
+            self.prefs_loaded = true;
+        }
+        if self.ui_pending == 0 {
+            self.columns = prefs::columns(ui);
+            self.views = ui.views.clone();
+        }
+        self.settings = Some(view);
+        self.settings_error = None;
+        self.settings_age = 0;
+    }
+
+    fn take_categories(&mut self, categories: BTreeMap<String, PathBuf>) {
+        let names: Vec<String> = categories.keys().cloned().collect();
+        self.offer_categories(&names);
+        self.categories = Some(categories);
+    }
+
+    /// Shows `area`, fetching what it needs.
+    fn go(&mut self, area: Area) -> Option<Request> {
+        self.area = area;
+        match area {
+            Area::Transfers => None,
+            Area::Share => Some(Request::Categories),
+            Area::Catalog | Area::Settings => self.load_settings(),
+        }
     }
 
     /// Notes the terminal's size, which decides how many cells the chunk map asks for.
@@ -412,22 +538,71 @@ impl App {
         });
     }
 
-    /// Reports how a request went: `Err` holds the engine's explanation.
-    pub fn finished(&mut self, request: &Request, result: Result<Reply, String>) {
-        if let Request::Look(id, look) = request {
-            let result = result.map_err(|error| request.failure(&error));
-            self.inside.receive(*id, *look, result);
-            return;
+    /// Reports how a request went: `Err` holds the engine's explanation. Returns what to ask
+    /// next, if anything.
+    pub fn finished(
+        &mut self,
+        request: &Request,
+        result: Result<Reply, String>,
+    ) -> Option<Request> {
+        match request {
+            Request::Look(id, look) => {
+                let result = result.map_err(|error| request.failure(&error));
+                self.inside.receive(*id, *look, result);
+                return None;
+            }
+            Request::Settings => {
+                self.settings_pending = false;
+                if let Err(error) = &result {
+                    self.settings_error = Some(request.failure(error));
+                    self.settings_age = 0;
+                    // Without the engine's answer, keep the defaults rather than ask forever.
+                    self.prefs_loaded = true;
+                }
+            }
+            Request::ChangeSettings { changes, .. }
+                if changes.keys().any(|key| key.starts_with("ui.")) =>
+            {
+                self.ui_pending = self.ui_pending.saturating_sub(1);
+            }
+            Request::Share(_) => {
+                let error = result.as_ref().err().map(|e| request.failure(e));
+                match (&result, &error) {
+                    (Ok(Reply::Shared(transfer)), _) => self.shared(Ok(transfer)),
+                    (_, Some(error)) => self.shared(Err(error)),
+                    _ => self.shared(Err("The engine's answer was unexpected.")),
+                }
+            }
+            _ => {}
         }
+        let mut next = None;
         match result {
-            Ok(Reply::Categories(categories)) => self.categories = Some(categories),
+            Ok(Reply::Categories(categories)) => self.take_categories(categories),
+            Ok(Reply::Loaded(view, categories)) => {
+                self.take_settings(*view);
+                self.take_categories(categories);
+            }
             Ok(reply) => {
+                if let Reply::Settings(view) = &reply {
+                    self.take_settings((**view).clone());
+                }
+                if let Request::SetCategory { .. } | Request::RemoveCategory(_) = request {
+                    next = Some(Request::Categories);
+                }
                 if let Some(text) = request.success(&reply) {
                     self.notify(text, false);
                 }
             }
-            Err(error) => self.notify(request.failure(&error), true),
+            Err(_) if matches!(request, Request::Settings) => {}
+            Err(error) => {
+                self.notify(request.failure(&error), true);
+                // A refused change to what the user keeps: show what the engine has.
+                if matches!(request, Request::ChangeSettings { .. }) && self.ui_pending == 0 {
+                    next = self.load_settings();
+                }
+            }
         }
+        next
     }
 
     /// Handles a key press, returning what to ask for, if anything.
@@ -438,6 +613,9 @@ impl App {
         }
         if let Some(modal) = self.modal.take() {
             return self.modal_key(modal, key);
+        }
+        if self.screen() == Screen::Share && self.share.editing {
+            return self.share_key(key);
         }
         self.run(Command::for_key(self.screen(), key)?)
     }
@@ -513,6 +691,44 @@ impl App {
                 finding.text.clear();
                 finding.status = None;
             }),
+            Command::Views => {
+                let selected = self
+                    .current_view()
+                    .and_then(|name| self.views.iter().position(|v| v.name == name))
+                    .map_or(0, |n| n + 1);
+                self.modal = Some(Modal::Pick {
+                    kind: PickKind::View,
+                    selected,
+                });
+            }
+            Command::SaveView => {
+                let name = self.current_view().unwrap_or_default().to_owned();
+                self.modal = Some(Modal::Value(Box::new(ValueEdit::new(
+                    "Save this view".to_owned(),
+                    ValueTarget::ViewName,
+                    &name,
+                    "a name, such as Music",
+                ))));
+            }
+            Command::Columns => self.open_columns(),
+
+            Command::NewShare => {
+                self.share.editing = true;
+                self.share.form.error = None;
+            }
+            Command::ShowShare => self.show_share(),
+            Command::Copy if self.screen() == Screen::Share => {
+                let share = self.selected_share()?;
+                return Some(Request::Copy {
+                    text: share.link.clone(),
+                    what: format!("{}'s link", share.name),
+                });
+            }
+            Command::Change => return self.change_row(),
+            Command::AddEntry | Command::AddCategory => return self.add_entry(),
+            Command::RemoveEntry => return self.remove_row(),
+            Command::NextSection => self.move_section(1),
+            Command::PreviousSection => self.move_section(-1),
 
             Command::Palette => {
                 self.modal = Some(Modal::Palette {
@@ -520,14 +736,14 @@ impl App {
                     selected: 0,
                 });
             }
-            Command::GoTransfers => self.area = Area::Transfers,
-            Command::GoShare => self.area = Area::Share,
-            Command::GoCatalog => self.area = Area::Catalog,
-            Command::GoSettings => self.area = Area::Settings,
-            Command::NextArea => self.area = self.area.step(1),
-            Command::PreviousArea => self.area = self.area.step(-1),
-            Command::Theme => self.theme = self.theme.next(),
-            Command::Help => self.modal = Some(Modal::Help),
+            Command::GoTransfers => return self.go(Area::Transfers),
+            Command::GoShare => return self.go(Area::Share),
+            Command::GoCatalog => return self.go(Area::Catalog),
+            Command::GoSettings => return self.go(Area::Settings),
+            Command::NextArea => return self.go(self.area.step(1)),
+            Command::PreviousArea => return self.go(self.area.step(-1)),
+            Command::Theme => return self.next_theme(),
+            Command::Help => self.modal = Some(Modal::Help { scroll: 0 }),
             Command::Quit => self.quit = true,
 
             transfer_command => return self.run_on_selected(transfer_command),
@@ -585,7 +801,7 @@ impl App {
                     self.categories
                         .iter()
                         .flatten()
-                        .position(|c| c == current)
+                        .position(|(c, _)| c == current)
                         .map_or(0, |n| n + 1)
                 });
                 self.modal = Some(Modal::Pick {
@@ -593,6 +809,17 @@ impl App {
                     selected,
                 });
                 return Some(Request::Categories);
+            }
+            Command::Copy => {
+                return Some(Request::Copy {
+                    text: transfer.link.clone(),
+                    what: format!("{}'s link", transfer.name),
+                });
+            }
+            Command::Limits => {
+                let transfer = transfer.clone();
+                self.open_limits(&transfer);
+                return None;
             }
             Command::Open => {
                 let folder = transfer
@@ -615,10 +842,13 @@ impl App {
         Some(Request::Transfer(target, action))
     }
 
-    /// Moves the cursor in the list, or scrolls the detail's tab.
+    /// Moves the cursor in the list, the shares or the rows, or scrolls the detail's tab.
     fn move_by(&mut self, by: isize) {
-        if self.screen() != Screen::Detail {
-            return self.move_cursor(by);
+        match self.screen() {
+            Screen::Detail => {}
+            Screen::Share => return self.move_share(by),
+            Screen::Catalog | Screen::Settings => return self.move_row(by),
+            _ => return self.move_cursor(by),
         }
         // Decisions count from the newest, at the bottom, so down goes toward it.
         let by = if self.tab == Tab::Decisions { -by } else { by };
@@ -674,5 +904,7 @@ pub fn loaded<T>(fetched: &Fetched<T>) -> Option<&T> {
     fetched.as_ref()?.as_ref().ok()
 }
 
+#[cfg(test)]
+mod area_tests;
 #[cfg(test)]
 mod tests;

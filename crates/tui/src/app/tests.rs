@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tempest_engine::api::{AddRequest, RemovedInfo};
@@ -6,30 +7,57 @@ use super::*;
 use crate::finding::{SortKey, StatusFilter};
 use crate::model::tests::transfer;
 
-fn key(code: KeyCode) -> KeyEvent {
+pub(super) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-fn press(app: &mut App, code: KeyCode) -> Option<Request> {
+pub(super) fn press(app: &mut App, code: KeyCode) -> Option<Request> {
     app.key(key(code))
 }
 
 /// Presses each char of `keys` in turn, returning the last request.
-fn type_keys(app: &mut App, keys: &str) -> Option<Request> {
+pub(super) fn type_keys(app: &mut App, keys: &str) -> Option<Request> {
     keys.chars()
         .map(|c| press(app, KeyCode::Char(c)))
         .last()
         .flatten()
 }
 
-fn app_with(transfers: Vec<TransferInfo>) -> App {
+/// Categories named `names`, each saving to a folder of its name.
+pub(super) fn categories(names: &[&str]) -> BTreeMap<String, PathBuf> {
+    names
+        .iter()
+        .map(|name| (name.to_string(), PathBuf::from(format!("/srv/{name}"))))
+        .collect()
+}
+
+/// The engine's default settings.
+pub(super) fn settings() -> SettingsView {
+    SettingsView {
+        settings: tempest_engine::EngineConfig::default(),
+        changed: BTreeMap::new(),
+        restart_required: Vec::new(),
+        alternative_limits_active: false,
+    }
+}
+
+/// Answers the settings fetch the app starts with.
+pub(super) fn load(app: &mut App, view: SettingsView, names: &[&str]) {
+    // Answers the fetch under way, or a new one.
+    let _ = app.load_settings();
+    let reply = Reply::Loaded(Box::new(view), categories(names));
+    app.finished(&Request::Settings, Ok(reply));
+}
+
+pub(super) fn app_with(transfers: Vec<TransferInfo>) -> App {
     let mut app = App::new(Origin::Daemon, Theme::default());
     app.apply(ApiEvent::Snapshot(transfers));
+    load(&mut app, settings(), &[]);
     app
 }
 
 /// Three transfers: "alpha" downloading and tagged, "beta" stopped, "gamma" sharing.
-fn three() -> App {
+pub(super) fn three() -> App {
     let mut alpha = transfer(1, "alpha", 0);
     alpha.status = Status::Downloading;
     alpha.size = Some(300);
@@ -43,15 +71,15 @@ fn three() -> App {
     app_with(vec![alpha, beta, gamma])
 }
 
-fn selected_name(app: &App) -> Option<&str> {
+pub(super) fn selected_name(app: &App) -> Option<&str> {
     app.selected_transfer().map(|t| t.name.as_str())
 }
 
-fn visible_names(app: &App) -> Vec<&str> {
+pub(super) fn visible_names(app: &App) -> Vec<&str> {
     app.visible().iter().map(|t| t.name.as_str()).collect()
 }
 
-fn target(app: &App) -> Target {
+pub(super) fn target(app: &App) -> Target {
     let transfer = app.selected_transfer().unwrap();
     Target {
         id: transfer.id,
@@ -135,10 +163,7 @@ fn the_add_modal_sends_every_field() {
     );
     app.finished(
         &Request::Categories,
-        Ok(Reply::Categories(vec![
-            "films".to_owned(),
-            "music".to_owned(),
-        ])),
+        Ok(Reply::Categories(categories(&["films", "music"]))),
     );
     app.paste("tempest:abc?n=thing");
     press(&mut app, KeyCode::Tab);
@@ -278,10 +303,7 @@ fn the_category_picker_lists_the_engines_categories() {
     assert_eq!(app.pick_items(&PickKind::Category(alpha.clone())).len(), 1);
     app.finished(
         &Request::Categories,
-        Ok(Reply::Categories(vec![
-            "films".to_owned(),
-            "music".to_owned(),
-        ])),
+        Ok(Reply::Categories(categories(&["films", "music"]))),
     );
     press(&mut app, KeyCode::Char('j'));
     assert_eq!(
@@ -448,15 +470,22 @@ fn the_palette_runs_what_matches() {
 #[test]
 fn areas_switch_by_number_or_bracket_and_wrap() {
     let mut app = app_with(vec![]);
-    press(&mut app, KeyCode::Char('3'));
+    assert_eq!(press(&mut app, KeyCode::Char('3')), Some(Request::Settings));
     assert_eq!(app.area, Area::Catalog);
     press(&mut app, KeyCode::Char(']'));
     press(&mut app, KeyCode::Char(']'));
     assert_eq!(app.area, Area::Transfers);
-    press(&mut app, KeyCode::Char('['));
+    // One fetch of the settings at a time.
+    assert_eq!(press(&mut app, KeyCode::Char('[')), None);
     assert_eq!(app.area, Area::Settings);
     // Transfer keys do nothing outside Transfers.
-    assert_eq!(press(&mut app, KeyCode::Char('a')), None);
+    assert_eq!(press(&mut app, KeyCode::Char('x')), None);
+    assert_eq!(app.modal, None);
+    assert_eq!(
+        press(&mut app, KeyCode::Char('2')),
+        Some(Request::Categories)
+    );
+    assert_eq!(press(&mut app, KeyCode::Char(' ')), None);
     assert_eq!(app.modal, None);
 }
 
@@ -492,7 +521,9 @@ fn help_lists_the_areas_sections() {
         ["Move", "Transfer", "Queue", "Detail", "Find", "App"]
     );
     press(&mut app, KeyCode::Char('4'));
-    assert_eq!(titles(&app), ["App"]);
+    assert_eq!(titles(&app), ["Move", "Change", "App"]);
+    press(&mut app, KeyCode::Char('2'));
+    assert_eq!(titles(&app), ["Move", "Transfer", "Share", "App"]);
 }
 
 #[test]
@@ -590,12 +621,12 @@ fn tabs_cycle_both_ways_and_fetch_what_they_show() {
     );
     assert_eq!(app.tab, Tab::Files);
     // One fetch at a time: the next tick waits for the answer.
-    assert_eq!(app.tick(), None);
+    assert_eq!(app.tick(), []);
     app.finished(
         &Request::Look(id, Look::Files),
         Ok(Reply::Files(Vec::new())),
     );
-    assert_eq!(app.tick(), Some(Request::Look(id, Look::Files)));
+    assert_eq!(app.tick(), [Request::Look(id, Look::Files)]);
     assert_eq!(app.notice, None, "fetches make no notices");
 
     assert_eq!(

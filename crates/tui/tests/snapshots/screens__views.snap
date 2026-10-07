@@ -1,0 +1,20 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "draw(&app, 80, 16).backend()"
+---
+"  Transfers   Share   Catalog   Settings                  ↓9.8M  ↑1.6M  [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+"  Name                      Size Progress            ↓    ETA Status       Ratio"
+"▌ ensemble-2026.tar         4.2G ████████░░  81%  9.8M     3m Downloading   0.12"
+"  field-recordings          812M ██████████ 100%     –      – Sharing       2.40"
+"  corpus-v3.bundle          1.9G ███░░░░░░░  31%     –      – Stalled          –"
+"  debian-13-netinst-and╔ Views ═════════════════════════╗   – Queued           –"
+"  old-photos           ║ All transfers          current ║   – Stopped          –"
+"  notes.txt            ║ Music                  /#music ║   – Errored          –"
+"                       ╚════════════════════════════════╝                       "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" Downloading from 7 of 12 peers, 2 through relays. About 3 minutes left.        "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" j/k choose  enter show  x delete  esc cancel                                   "

@@ -73,9 +73,10 @@ async fn follow_until(app: &mut App, events: &mut EventStream, done: impl Fn(&Ap
 /// Presses `keys` and carries out what they ask, reporting it to the app as the TUI does.
 async fn press(app: &mut App, client: &ApiClient, keys: &[KeyCode]) {
     for code in keys {
-        if let Some(request) = app.key(KeyEvent::new(*code, KeyModifiers::NONE)) {
+        let mut next = app.key(KeyEvent::new(*code, KeyModifiers::NONE));
+        while let Some(request) = next {
             let result = carry_out(client, &request).await;
-            app.finished(&request, result);
+            next = app.finished(&request, result);
         }
     }
 }
@@ -229,6 +230,69 @@ async fn the_detail_fetches_files_peers_and_chunks_from_the_engine() {
     terminal.draw(|frame| ui::draw(frame, &app)).unwrap();
     let screen = terminal.backend().to_string();
     assert!(screen.contains("1 chunk, 100% stored"), "{screen}");
+
+    engine.shutdown().await;
+    serving.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_areas_share_change_settings_and_keep_the_theme() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, client, serving) = engine(dir.path()).await;
+    let mut app = App::new(Origin::Daemon, Theme::default());
+    let mut events = client.events(None).await.unwrap();
+    let request = app.load_settings().unwrap();
+    let result = carry_out(&client, &request).await;
+    app.finished(&request, result);
+
+    // Share a file from the Share area.
+    let file = dir.path().join("field-notes.txt");
+    std::fs::write(&file, "notes").unwrap();
+    press(&mut app, &client, &[KeyCode::Char('2'), KeyCode::Char('a')]).await;
+    app.paste(&file.display().to_string());
+    press(&mut app, &client, &[KeyCode::Enter]).await;
+    let notice = app.notice.clone().unwrap();
+    assert_eq!(
+        notice.text, "Shared field-notes.txt. Press y to copy its link.",
+        "{notice:?}"
+    );
+    follow_until(&mut app, &mut events, |app| app.selected_share().is_some()).await;
+    assert!(app.selected_share().unwrap().link.starts_with("tempest:"));
+
+    // A speed limit and a category from the Settings area.
+    press(&mut app, &client, &[KeyCode::Char('4'), KeyCode::Enter]).await;
+    press(&mut app, &client, &chars("2M")).await;
+    press(&mut app, &client, &[KeyCode::Enter]).await;
+    let settings = client.settings().await.unwrap();
+    assert_eq!(settings.settings.limits.download, Some(2_000_000));
+    assert_eq!(app.rows()[0].value, "2.0M/s");
+    press(&mut app, &client, &[KeyCode::Char('a')]).await;
+    press(&mut app, &client, &chars("films")).await;
+    press(&mut app, &client, &[KeyCode::Tab]).await;
+    let folder = dir.path().join("films");
+    app.paste(&folder.display().to_string());
+    press(&mut app, &client, &[KeyCode::Enter]).await;
+    assert!(app.categories.as_ref().unwrap().contains_key("films"));
+    assert_eq!(
+        client.categories().await.unwrap()["films"].save_folder,
+        folder
+    );
+
+    // `x` gives the limit the config file's value again.
+    press(&mut app, &client, &[KeyCode::Home, KeyCode::Char('x')]).await;
+    assert_eq!(
+        client.settings().await.unwrap().settings.limits.download,
+        None
+    );
+
+    // The theme is kept in the engine, so the next TUI starts with it.
+    press(&mut app, &client, &[KeyCode::Char('T')]).await;
+    assert_eq!(app.theme, Theme::AMBER);
+    let mut next = App::new(Origin::Daemon, Theme::default());
+    let request = next.load_settings().unwrap();
+    let result = carry_out(&client, &request).await;
+    next.finished(&request, result);
+    assert_eq!(next.theme, Theme::AMBER);
 
     engine.shutdown().await;
     serving.abort();

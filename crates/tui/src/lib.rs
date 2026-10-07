@@ -8,7 +8,8 @@
 //! - [`explain`]: transfer states in plain language.
 //! - [`columns`], [`format`] and [`theme`]: how the list fits, numbers read and colors look.
 //! - [`chunkmap`]: how a transfer's chunk map fits the terminal and shades its cells.
-//! - [`input`]: one line of text being typed.
+//! - [`input`] and [`form`]: text being typed, and forms of fields.
+//! - [`prefs`]: the theme, columns and views kept in the engine's settings.
 //!
 //! [`run`] connects them to a terminal and an engine.
 
@@ -18,9 +19,11 @@ pub mod columns;
 pub mod commands;
 pub mod explain;
 pub mod finding;
+pub mod form;
 pub mod format;
 pub mod input;
 pub mod model;
+pub mod prefs;
 pub mod theme;
 pub mod ui;
 
@@ -47,6 +50,9 @@ use crate::theme::Theme;
 /// How long to wait before reopening a broken event stream.
 const RECONNECT_AFTER: Duration = Duration::from_secs(1);
 
+/// How long to wait for the settings before drawing, so the saved theme shows from the start.
+const SETTINGS_WAIT: Duration = Duration::from_secs(2);
+
 /// What the main loop reacts to.
 enum Message {
     Key(KeyEvent),
@@ -67,12 +73,16 @@ pub async fn run(client: ApiClient, origin: Origin) -> io::Result<()> {
     let input = read_input(sender.clone(), stop_input.clone());
     let follower = tokio::spawn(follow(client.clone(), sender.clone()));
 
+    let mut app = App::new(origin, Theme::default());
+    app.local = is_local(client.url());
+    if let Some(request) = app.load_settings() {
+        let loaded = tokio::time::timeout(SETTINGS_WAIT, carry_out(&client, &request)).await;
+        let result = loaded.unwrap_or_else(|_| Err("the engine took too long".to_owned()));
+        app.finished(&request, result);
+    }
     let mut terminal = ratatui::try_init()?;
     // Pasted links arrive whole rather than as keys; not every terminal supports it.
     let _ = execute!(io::stdout(), EnableBracketedPaste);
-    let mut app = App::new(origin, Theme::default());
-    app.local = is_local(client.url());
-    tokio::spawn(send(client.clone(), Request::Categories, sender.clone()));
     let result = main_loop(&mut terminal, app, &client, sender, messages).await;
     let _ = execute!(io::stdout(), DisableBracketedPaste);
     ratatui::restore();
@@ -98,7 +108,7 @@ async fn main_loop(
         terminal.draw(|frame| ui::draw(frame, &app))?;
         tokio::select! {
             _ = ticks.tick() => {
-                if let Some(request) = app.tick() {
+                for request in app.tick() {
                     tokio::spawn(send(client.clone(), request, sender.clone()));
                 }
             }
@@ -123,17 +133,34 @@ fn handle(
     sender: &mpsc::UnboundedSender<Message>,
     message: Message,
 ) {
-    match message {
-        Message::Key(key) => {
-            if let Some(request) = app.key(key) {
-                tokio::spawn(send(client.clone(), request, sender.clone()));
-            }
+    let request = match message {
+        Message::Key(key) => app.key(key),
+        Message::Paste(text) => {
+            app.paste(&text);
+            None
         }
-        Message::Paste(text) => app.paste(&text),
-        Message::Redraw => {}
-        Message::Engine(event) => app.apply(event),
-        Message::Connection(connection) => app.model.connection = connection,
+        Message::Redraw => None,
+        Message::Engine(event) => {
+            app.apply(event);
+            None
+        }
+        Message::Connection(connection) => {
+            app.model.connection = connection;
+            None
+        }
         Message::Finished(request, result) => app.finished(&request, result),
+    };
+    match request {
+        // Written between frames, so the escape sequence doesn't land inside one.
+        Some(Request::Copy { text, what }) => {
+            let request = Request::Copy { text, what };
+            let result = copy(&request).map(|()| Reply::Done);
+            app.finished(&request, result);
+        }
+        Some(request) => {
+            tokio::spawn(send(client.clone(), request, sender.clone()));
+        }
+        None => {}
     }
 }
 
@@ -163,6 +190,9 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
                     .move_in_queue(id, QueuePlace::Step(step))
                     .await
                     .map(drop),
+                Action::Settings(settings) => {
+                    client.set_transfer_settings(id, &settings).await.map(drop)
+                }
             };
             result.map(|()| Reply::Done).map_err(|e| e.to_string())
         }
@@ -171,11 +201,46 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
             .await
             .map(|transfer| Reply::Added(transfer.name))
             .map_err(|e| e.to_string()),
+        Request::Share(add) => client
+            .add(add)
+            .await
+            .map(|transfer| Reply::Shared(Box::new(transfer)))
+            .map_err(|e| e.to_string()),
         Request::Categories => client
             .categories()
             .await
-            .map(|categories| Reply::Categories(categories.into_keys().collect()))
+            .map(|categories| Reply::Categories(folders(categories)))
             .map_err(|e| e.to_string()),
+        Request::Settings => {
+            let (settings, categories) = tokio::join!(client.settings(), client.categories());
+            match (settings, categories) {
+                (Ok(settings), Ok(categories)) => {
+                    Ok(Reply::Loaded(Box::new(settings), folders(categories)))
+                }
+                (Err(error), _) | (_, Err(error)) => Err(error.to_string()),
+            }
+        }
+        Request::ChangeSettings { changes, .. } => client
+            .change_settings(changes)
+            .await
+            .map(|view| Reply::Settings(Box::new(view)))
+            .map_err(|e| e.to_string()),
+        Request::ResetSetting { key, .. } => client
+            .reset_setting(key)
+            .await
+            .map(|view| Reply::Settings(Box::new(view)))
+            .map_err(|e| e.to_string()),
+        Request::SetCategory { name, folder, .. } => client
+            .set_category_folder(name, folder.clone())
+            .await
+            .map(|_| Reply::Done)
+            .map_err(|e| e.to_string()),
+        Request::RemoveCategory(name) => client
+            .remove_category(name)
+            .await
+            .map(|()| Reply::Done)
+            .map_err(|e| e.to_string()),
+        Request::Copy { .. } => copy(request).map(|()| Reply::Done),
         Request::Look(id, look) => {
             let reply = match *look {
                 Look::Files => client.files(*id).await.map(Reply::Files),
@@ -192,6 +257,50 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
                 .map(|()| Reply::Done)
         }
     }
+}
+
+/// Every category's save folder, by name.
+fn folders(
+    categories: std::collections::BTreeMap<String, tempest_engine::api::Category>,
+) -> std::collections::BTreeMap<String, PathBuf> {
+    categories
+        .into_iter()
+        .map(|(name, category)| (name, category.save_folder))
+        .collect()
+}
+
+/// Puts a [`Request::Copy`]'s text on the clipboard by asking the terminal (OSC 52), which
+/// works over SSH too. Terminals that don't support it ignore the request.
+fn copy(request: &Request) -> Result<(), String> {
+    use std::io::Write;
+
+    let Request::Copy { text, .. } = request else {
+        return Ok(());
+    };
+    let mut out = io::stdout().lock();
+    write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))
+        .and_then(|()| out.flush())
+        .map_err(|error| error.to_string())
+}
+
+/// `bytes` in standard base64, with padding.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, byte)| n | u32::from(*byte) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                text.push(char::from(ALPHABET[(n >> (18 - 6 * i) & 63) as usize]));
+            } else {
+                text.push('=');
+            }
+        }
+    }
+    text
 }
 
 /// Opens `folder` in the system's file manager.
@@ -292,6 +401,22 @@ fn read_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        let vectors = [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ];
+        for (text, encoded) in vectors {
+            assert_eq!(base64(text.as_bytes()), encoded, "{text}");
+        }
+    }
 
     #[test]
     fn loopback_apis_are_local() {

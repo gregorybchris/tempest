@@ -1,10 +1,12 @@
 //! What the app asks the runtime to do, and how it reports the outcome.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use serde_json::Value;
 use tempest_engine::api::{AddRequest, QueueStep};
 use tempest_engine::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
+use tempest_engine::{SettingsView, TransferInfo};
 use tempest_protocol::BundleId;
 
 use super::Look;
@@ -45,6 +47,8 @@ pub enum Action {
     Move(PathBuf),
     /// Move it in the queue.
     Queue(QueueStep),
+    /// Replace its own settings, by dotted key.
+    Settings(BTreeMap<String, Value>),
 }
 
 /// Something the app can't do itself: a request to the engine, or opening a folder.
@@ -54,8 +58,45 @@ pub enum Request {
     Transfer(Target, Action),
     /// Add a download from a link.
     Add(Box<AddRequest>),
+    /// Share a file or folder.
+    Share(Box<AddRequest>),
     /// Fetch the categories.
     Categories,
+    /// Fetch the settings and the categories.
+    Settings,
+    /// Change settings by dotted key.
+    ChangeSettings {
+        /// The new values.
+        changes: BTreeMap<String, Value>,
+        /// What they are, for the notice: "the download limit". Without it, success goes
+        /// unannounced.
+        about: Option<String>,
+    },
+    /// Give a setting the config file's value again.
+    ResetSetting {
+        /// The setting, by dotted key.
+        key: String,
+        /// What it is, for the notice.
+        about: String,
+    },
+    /// Add a category, or change its save folder.
+    SetCategory {
+        /// Its name.
+        name: String,
+        /// Its save folder.
+        folder: PathBuf,
+        /// Whether it is new.
+        new: bool,
+    },
+    /// Remove a category.
+    RemoveCategory(String),
+    /// Put text on the clipboard through the terminal (OSC 52).
+    Copy {
+        /// The text.
+        text: String,
+        /// What it is, for the notice: "field-recordings's link".
+        what: String,
+    },
     /// Open a folder on this machine.
     Open(PathBuf),
     /// Fetch something from inside a transfer.
@@ -69,8 +110,14 @@ pub enum Reply {
     Done,
     /// The name of the transfer just added.
     Added(String),
-    /// Every category's name.
-    Categories(Vec<String>),
+    /// The share just made.
+    Shared(Box<TransferInfo>),
+    /// Every category's save folder, by name.
+    Categories(BTreeMap<String, PathBuf>),
+    /// The settings, after a change.
+    Settings(Box<SettingsView>),
+    /// The settings, and every category's save folder.
+    Loaded(Box<SettingsView>, BTreeMap<String, PathBuf>),
     /// A transfer's files.
     Files(Vec<FileInfo>),
     /// A transfer's connections.
@@ -86,7 +133,26 @@ impl Request {
             (Self::Transfer(target, action), _) => action.success(&target.name),
             (Self::Add(_), Reply::Added(name)) => format!("Added {name}."),
             (Self::Add(_), _) => "Added the link.".to_owned(),
-            (Self::Categories | Self::Look(..), _) => return None,
+            (Self::Share(_), Reply::Shared(transfer)) => {
+                format!("Shared {}. Press y to copy its link.", transfer.name)
+            }
+            (Self::Share(_), _) => "Shared it.".to_owned(),
+            (Self::Categories | Self::Settings | Self::Look(..), _) => return None,
+            (Self::ChangeSettings { about, .. }, _) => format!("Saved {}.", about.as_ref()?),
+            (Self::ResetSetting { about, .. }, _) => {
+                format!("Gave {about} the config file's value again.")
+            }
+            (
+                Self::SetCategory {
+                    name, new: true, ..
+                },
+                _,
+            ) => format!("Added the category {name}."),
+            (Self::SetCategory { name, folder, .. }, _) => {
+                format!("{name} now saves to {}.", folder.display())
+            }
+            (Self::RemoveCategory(name), _) => format!("Removed the category {name}."),
+            (Self::Copy { what, .. }, _) => format!("Copied {what} to the clipboard."),
             (Self::Open(path), _) => format!("Opened {}.", path.display()),
         })
     }
@@ -98,7 +164,24 @@ impl Request {
                 format!("Couldn't {} {}: {error}", action.verb(), target.name)
             }
             Self::Add(_) => format!("Couldn't add the link: {error}"),
+            Self::Share(add) => {
+                let path = add.path.as_deref().unwrap_or_else(|| "it".as_ref());
+                format!("Couldn't share {}: {error}", path.display())
+            }
             Self::Categories => format!("Couldn't load the categories: {error}"),
+            Self::Settings => format!("Couldn't load the settings: {error}"),
+            Self::ChangeSettings { about, .. } => {
+                let about = about.as_deref().unwrap_or("the settings");
+                format!("Couldn't save {about}: {error}")
+            }
+            Self::ResetSetting { about, .. } => format!("Couldn't reset {about}: {error}"),
+            Self::SetCategory { name, .. } => {
+                format!("Couldn't save the category {name}: {error}")
+            }
+            Self::RemoveCategory(name) => {
+                format!("Couldn't remove the category {name}: {error}")
+            }
+            Self::Copy { what, .. } => format!("Couldn't copy {what}: {error}"),
             Self::Open(path) => format!("Couldn't open {}: {error}", path.display()),
             Self::Look(_, look) => {
                 let what = match look {
@@ -125,6 +208,7 @@ impl Action {
             Self::Category(_) => "set the category of",
             Self::Move(_) => "move",
             Self::Queue(_) => "reorder",
+            Self::Settings(_) => "set the limits of",
         }
     }
 
@@ -159,6 +243,7 @@ impl Action {
                 };
                 format!("Moved {name} {place} the queue.")
             }
+            Self::Settings(_) => format!("Saved {name}'s limits."),
         }
     }
 }

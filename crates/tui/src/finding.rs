@@ -71,6 +71,26 @@ impl StatusFilter {
         }
     }
 
+    /// Its name in a saved view: the status's own, such as `downloading`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Downloading => "downloading",
+            Self::Sharing => "sharing",
+            Self::Stalled => "stalled",
+            Self::Queued => "queued",
+            Self::Stopped => "stopped",
+            Self::Completed => "completed",
+            Self::Errored => "errored",
+            Self::Checking => "checking",
+            Self::Moving => "moving",
+        }
+    }
+
+    /// The status named `id` in a saved view.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|status| status.id() == id)
+    }
+
     fn rank(self) -> usize {
         Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
     }
@@ -134,6 +154,28 @@ impl SortKey {
             Self::Ratio => "ratio",
             Self::Added => "date added",
         }
+    }
+
+    /// Its name in a saved view, such as `time_left`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Queue => "queue",
+            Self::Name => "name",
+            Self::Size => "size",
+            Self::Progress => "progress",
+            Self::Status => "status",
+            Self::Down => "down",
+            Self::Up => "up",
+            Self::Peers => "peers",
+            Self::TimeLeft => "time_left",
+            Self::Ratio => "ratio",
+            Self::Added => "added",
+        }
+    }
+
+    /// The key named `id` in a saved view.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|key| key.id() == id)
     }
 
     /// Compares two transfers in this key's natural direction. Unknown values (a size before

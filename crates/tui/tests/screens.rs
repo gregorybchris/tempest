@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde_json::json;
 use tempest_engine::api::DecisionInfo;
 use tempest_engine::api::client::ApiEvent;
 use tempest_engine::inspect::{CellInfo, ChunkMapInfo, FileInfo, PeerInfo};
-use tempest_engine::{Kind, Status, TransferInfo};
+use tempest_engine::{EngineConfig, Kind, SettingsView, Status, TransferInfo};
 use tempest_protocol::Hash;
 use tempest_tui::app::{App, Look, Origin, Reply, Request};
 use tempest_tui::chunkmap;
@@ -37,7 +38,8 @@ fn transfer(seed: u8, name: &str, status: Status) -> TransferInfo {
         connections: 0,
         relayed: 0,
         peers: 0,
-        added: 0,
+        // A day apart, the first on 2026-10-07.
+        added: 1_791_331_200_000 - i64::from(seed) * 86_400_000,
         completed: None,
         queue_position: u32::from(seed),
         forced: false,
@@ -82,6 +84,7 @@ fn transfers() -> Vec<TransferInfo> {
             connections: 3,
             peers: 3,
             tags: ["live".to_owned(), "music".to_owned()].into(),
+            link: "tempest:0c4e2f7a9b1d3c5e7f90a2b4c6d8e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3?n=field-recordings&p=203.0.113.7:4773".to_owned(),
             ..transfer(1, "field-recordings", Status::Sharing)
         },
         TransferInfo {
@@ -141,7 +144,9 @@ fn press_code(app: &mut App, code: KeyCode) {
 }
 
 fn with_categories(app: &mut App) {
-    let categories = vec!["films".to_owned(), "music".to_owned()];
+    let categories = ["films", "music"]
+        .map(|name| (name.to_owned(), PathBuf::from(format!("/srv/{name}"))))
+        .into();
     app.finished(&Request::Categories, Ok(Reply::Categories(categories)));
 }
 
@@ -196,11 +201,181 @@ fn help_lists_the_keys_of_the_screen() {
     insta::assert_snapshot!(draw(&app, 80, 24).backend());
 }
 
+/// Settings changed from the defaults in most groups, two categories, and a change that
+/// awaits a restart.
+fn settings() -> SettingsView {
+    let mut config = EngineConfig::default();
+    let key = "ab".repeat(32);
+    let changes = [
+        ("limits.download", json!(2_000_000)),
+        ("limits.alternative.upload", json!(250_000)),
+        (
+            "limits.alternative.schedule",
+            json!({ "days": ["mon", "tue", "wed", "thu", "fri"], "from": "09:00", "to": "17:00" }),
+        ),
+        ("queue.max_active_downloads", json!(3)),
+        ("sharing.ratio", json!(2.0)),
+        ("sharing.time", json!("12h")),
+        ("save_folder", json!("/home/ada/Downloads")),
+        (
+            "trackers",
+            json!([
+                "https://tracker.example.org/announce",
+                "http://10.0.0.2:4777"
+            ]),
+        ),
+        (
+            "relays.known",
+            json!([format!("{key}@relay.example.org:4775")]),
+        ),
+    ];
+    for (key, value) in &changes {
+        config.set(key, value.clone()).unwrap();
+    }
+    SettingsView {
+        settings: config,
+        changed: changes
+            .iter()
+            .filter(|(key, _)| key.starts_with("limits.") || key.starts_with("queue."))
+            .map(|(key, value)| (key.to_string(), value.clone()))
+            .collect(),
+        restart_required: vec!["peers".to_owned()],
+        alternative_limits_active: true,
+    }
+}
+
+/// `app` with the settings and two categories loaded.
+fn with_settings(app: &mut App) {
+    let categories = ["films", "music"]
+        .map(|name| (name.to_owned(), PathBuf::from(format!("/srv/{name}"))))
+        .into();
+    // Answers the fetch under way, or a new one.
+    let _ = app.load_settings();
+    let reply = Reply::Loaded(Box::new(settings()), categories);
+    app.finished(&Request::Settings, Ok(reply));
+}
+
 #[test]
-fn other_areas_keep_the_navigation() {
+fn the_share_area_lists_shares_with_their_links() {
     let mut app = app();
+    with_settings(&mut app);
     press(&mut app, "2");
-    insta::assert_snapshot!(draw(&app, 80, 8).backend());
+    insta::assert_snapshot!("share", draw(&app, 80, 24).backend());
+
+    press(&mut app, "a");
+    app.paste("/home/ada/field-notes");
+    press_code(&mut app, KeyCode::Tab);
+    press(&mut app, "Field notes, 2026");
+    press_code(&mut app, KeyCode::Down);
+    press_code(&mut app, KeyCode::Down);
+    press_code(&mut app, KeyCode::Right);
+    insta::assert_snapshot!("share_editing", draw(&app, 80, 24).backend());
+
+    let request = app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(request, Some(Request::Share(_))), "{request:?}");
+    insta::assert_snapshot!("share_building", draw(&app, 80, 24).backend());
+
+    let shared = TransferInfo {
+        kind: Kind::Share,
+        size: Some(52_000),
+        progress: 1.0,
+        link: "tempest:5e1f0a9c2be1d04a5f8e6b7c9d0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2?n=Field%20notes%2C%202026&p=203.0.113.7:4773".to_owned(),
+        ..transfer(9, "Field notes, 2026", Status::Sharing)
+    };
+    app.apply(ApiEvent::Transfer(Box::new(shared.clone())));
+    app.finished(&request.unwrap(), Ok(Reply::Shared(Box::new(shared))));
+    insta::assert_snapshot!("shared", draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn the_catalog_area_lists_trackers_and_relays() {
+    let mut app = app();
+    press(&mut app, "3");
+    insta::assert_snapshot!("catalog_loading", draw(&app, 80, 12).backend());
+    with_settings(&mut app);
+    press(&mut app, "j");
+    insta::assert_snapshot!("catalog", draw(&app, 80, 24).backend());
+    press(&mut app, "a");
+    insta::assert_snapshot!("catalog_add_tracker", draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn the_settings_area_groups_every_setting() {
+    let mut app = app();
+    with_settings(&mut app);
+    press(&mut app, "4");
+    insta::assert_snapshot!("settings", draw(&app, 80, 30).backend());
+    press(&mut app, "G");
+    insta::assert_snapshot!("settings_end", draw(&app, 80, 30).backend());
+}
+
+#[test]
+fn settings_editors() {
+    let mut app = app();
+    with_settings(&mut app);
+    press(&mut app, "4");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("settings_value", draw(&app, 80, 16).backend());
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    press(&mut app, "fast");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("settings_value_refused", draw(&app, 80, 16).backend());
+    press_code(&mut app, KeyCode::Esc);
+
+    // The schedule is the second section's fourth row.
+    press_code(&mut app, KeyCode::Tab);
+    press(&mut app, "jjj");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("settings_schedule", draw(&app, 80, 16).backend());
+    press_code(&mut app, KeyCode::Esc);
+
+    // Categories: add one, or remove one.
+    press_code(&mut app, KeyCode::Tab);
+    press_code(&mut app, KeyCode::Tab);
+    press_code(&mut app, KeyCode::Tab);
+    press(&mut app, "a");
+    insta::assert_snapshot!("settings_new_category", draw(&app, 80, 16).backend());
+    press_code(&mut app, KeyCode::Esc);
+    press(&mut app, "jx");
+    insta::assert_snapshot!("settings_remove_category", draw(&app, 80, 16).backend());
+}
+
+#[test]
+fn custom_columns_and_saved_views() {
+    let mut app = app();
+    with_settings(&mut app);
+    press(&mut app, "|");
+    insta::assert_snapshot!("columns", draw(&app, 80, 24).backend());
+    // Hide ↑ and peers, show category, tags and the date added.
+    press(&mut app, "jj jj jj j j ");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("custom_columns", draw(&app, 120, 12).backend());
+
+    press(&mut app, "/#music");
+    press_code(&mut app, KeyCode::Enter);
+    press(&mut app, "V");
+    press(&mut app, "Music");
+    press_code(&mut app, KeyCode::Enter);
+    press_code(&mut app, KeyCode::Esc);
+    press(&mut app, "v");
+    insta::assert_snapshot!("views", draw(&app, 80, 16).backend());
+}
+
+#[test]
+fn a_transfers_own_limits() {
+    let mut app = app();
+    with_settings(&mut app);
+    press(&mut app, "L");
+    insta::assert_snapshot!("limits", draw(&app, 80, 16).backend());
+}
+
+#[test]
+fn help_scrolls_when_it_is_taller_than_the_screen() {
+    let mut app = app();
+    app.resize(80, 24);
+    press(&mut app, "?");
+    press(&mut app, "jjjjjjjjjjjjjjjjjjjj");
+    insta::assert_snapshot!("help_scrolled", draw(&app, 80, 24).backend());
 }
 
 #[test]

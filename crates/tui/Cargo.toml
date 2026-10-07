@@ -12,6 +12,7 @@ tempest-engine.workspace = true
 tempest-protocol.workspace = true
 
 ratatui.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 unicode-width.workspace = true
 

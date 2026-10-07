@@ -8,9 +8,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::fit;
-use crate::app::{AddField, AddForm, App, Modal, PickKind, Target, TextKind};
+use super::{fit, form};
+use crate::app::{AddField, AddForm, App, FormKind, Modal, PickKind, Target, TextKind, ValueEdit};
+use crate::columns::Column;
 use crate::commands::{self, Command};
+use crate::form::Form;
 use crate::input::Input;
 use crate::theme::Theme;
 
@@ -21,7 +23,7 @@ const PALETTE_ROWS: usize = 12;
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     match &app.modal {
         None | Some(Modal::Filter(_)) => {}
-        Some(Modal::Help) => draw_help(frame, app, area),
+        Some(Modal::Help { scroll }) => draw_help(frame, app, area, *scroll),
         Some(Modal::Palette { query, selected }) => {
             draw_palette(frame, app, area, query, *selected);
         }
@@ -45,12 +47,29 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             error.as_deref(),
         ),
         Some(Modal::Pick { kind, selected }) => draw_pick(frame, app, area, kind, *selected),
+        Some(Modal::Value(edit)) => draw_value(frame, &app.theme, area, edit),
+        Some(Modal::Form(form)) => draw_form(frame, &app.theme, area, &form.0, &form.1),
+        Some(Modal::Confirm {
+            title,
+            text,
+            detail,
+            ..
+        }) => draw_confirm(frame, &app.theme, area, title, text, detail),
+        Some(Modal::Columns { chosen, cursor }) => {
+            draw_columns(frame, &app.theme, area, chosen, *cursor);
+        }
     }
 }
 
 /// A box of `width` by `height` centered in `area`, cleared, with a titled border. Returns
 /// the inside.
-fn popup(frame: &mut Frame, theme: &Theme, area: Rect, size: (u16, u16), title: &str) -> Rect {
+pub(super) fn popup(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    size: (u16, u16),
+    title: &str,
+) -> Rect {
     let [popup] = Layout::vertical([Constraint::Length(size.1.min(area.height))])
         .flex(Flex::Center)
         .areas(area);
@@ -72,7 +91,7 @@ fn popup(frame: &mut Frame, theme: &Theme, area: Rect, size: (u16, u16), title: 
 }
 
 /// The style of a highlighted row.
-fn highlight(theme: &Theme) -> Style {
+pub(super) fn highlight(theme: &Theme) -> Style {
     Style::new()
         .bg(Theme::mix(theme.raise, theme.down, 0.2))
         .add_modifier(Modifier::BOLD)
@@ -80,7 +99,7 @@ fn highlight(theme: &Theme) -> Style {
 
 /// `input` drawn in `area` (one row), showing `placeholder` while empty, with the terminal's
 /// cursor in it when `focused`.
-fn draw_input(
+pub(super) fn draw_input(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
@@ -102,28 +121,28 @@ fn draw_input(
 }
 
 /// A line of one row: dim help, or an error.
-fn note_line<'a>(theme: &Theme, help: &'a str, error: Option<&'a str>) -> Line<'a> {
+pub(super) fn note_line<'a>(theme: &Theme, help: &'a str, error: Option<&'a str>) -> Line<'a> {
     match error {
         Some(error) => Line::styled(error, Style::new().fg(theme.bad)),
         None => Line::styled(help, Style::new().fg(theme.dim)),
     }
 }
 
-fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = &app.theme;
+/// The width of a column of help.
+const HELP_COLUMN: u16 = 36;
+
+/// The current screen's keys as blocks of lines, a section each.
+fn help_blocks(app: &App) -> Vec<Vec<Line<'static>>> {
     const KEYS: usize = 9;
-    const COLUMN: u16 = 36;
-    const FOOTNOTE: &str = "Arrows, home, end and the page keys move too.";
-    // Each section as a block of lines, packed into columns without splitting one.
-    let blocks: Vec<Vec<Line>> = app
-        .help_sections()
+    let theme = &app.theme;
+    let screen = app.screen();
+    app.help_sections()
         .into_iter()
         .map(|(section, commands)| {
             let mut lines = vec![Line::styled(
                 section.title(),
                 Style::new().fg(theme.dim).add_modifier(Modifier::BOLD),
             )];
-            let screen = app.screen();
             lines.extend(
                 commands
                     .into_iter()
@@ -137,34 +156,67 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
             );
             lines
         })
-        .collect();
-    // As few columns as fit the screen, then as even as whole sections allow.
+        .collect()
+}
+
+/// Help's columns for a screen of `area`, and how many rows of them show. As few columns as
+/// fit the screen, as even as whole sections allow; when even the most that fit side by side
+/// are taller than the screen, they scroll.
+fn help_columns(app: &App, area: Rect) -> (Vec<Vec<Line<'static>>>, usize) {
+    let blocks = help_blocks(app);
     let rows = usize::from(area.height.saturating_sub(4)).max(1);
-    let count = pack(&blocks, rows).len();
+    let most = usize::from(area.width.saturating_sub(3) / HELP_COLUMN).max(1);
     let total: usize = blocks.iter().map(Vec::len).sum::<usize>() + blocks.len() - 1;
-    let even = (total.div_ceil(count)..rows)
-        .find(|rows| pack(&blocks, *rows).len() <= count)
-        .unwrap_or(rows);
-    let columns = pack(&blocks, even);
-    let height = columns.iter().map(Vec::len).max().unwrap_or(0) as u16 + 4;
-    let width = COLUMN * columns.len() as u16 + 3;
+    let count = pack(&blocks, rows).len();
+    if count <= most {
+        let even = (total.div_ceil(count)..rows)
+            .find(|rows| pack(&blocks, *rows).len() <= count)
+            .unwrap_or(rows);
+        return (pack(&blocks, even), rows);
+    }
+    let tall = (rows..=total)
+        .find(|rows| pack(&blocks, *rows).len() <= most)
+        .unwrap_or(total);
+    (pack(&blocks, tall), rows)
+}
+
+/// How many rows help can scroll on a screen of `area`.
+pub(super) fn help_overflow(app: &App, area: Rect) -> usize {
+    let (columns, rows) = help_columns(app, area);
+    let tallest = columns.iter().map(Vec::len).max().unwrap_or(0);
+    tallest.saturating_sub(rows)
+}
+
+fn draw_help(frame: &mut Frame, app: &App, area: Rect, scroll: usize) {
+    let theme = &app.theme;
+    let (columns, rows) = help_columns(app, area);
+    let tallest = columns.iter().map(Vec::len).max().unwrap_or(0);
+    let scroll = scroll.min(tallest.saturating_sub(rows));
+    let footnote = if tallest > rows {
+        "j/k scroll. Arrows, home, end and the page keys move too."
+    } else {
+        "Arrows, home, end and the page keys move too."
+    };
+    let height = tallest.min(rows) as u16 + 4;
+    let width = HELP_COLUMN * columns.len() as u16 + 3;
     let title = format!("{} keys", app.screen_title());
     let inner = popup(frame, theme, area, (width, height), &title);
-    let [body, _, footnote] = Layout::vertical([
+    let [body, _, footnote_area] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
     .areas(inner);
-    let areas = Layout::horizontal(vec![Constraint::Length(COLUMN); columns.len()])
+    let areas = Layout::horizontal(vec![Constraint::Length(HELP_COLUMN); columns.len()])
         .horizontal_margin(1)
         .split(body);
     for (column, area) in columns.into_iter().zip(areas.iter()) {
-        frame.render_widget(Paragraph::new(column), *area);
+        let lines: Vec<Line> = column.into_iter().skip(scroll).collect();
+        frame.render_widget(Paragraph::new(lines), *area);
     }
     frame.render_widget(
-        Paragraph::new(Line::styled(FOOTNOTE, Style::new().fg(theme.dim))).centered(),
-        footnote,
+        Paragraph::new(Line::styled(footnote, Style::new().fg(theme.dim))).centered(),
+        footnote_area,
     );
 }
 
@@ -327,7 +379,7 @@ fn draw_add(frame: &mut Frame, app: &App, area: Rect, form: &AddForm) {
 }
 
 /// A value chosen with ← and →.
-fn draw_choice(frame: &mut Frame, theme: &Theme, area: Rect, text: &str, focused: bool) {
+pub(super) fn draw_choice(frame: &mut Frame, theme: &Theme, area: Rect, text: &str, focused: bool) {
     let arrows = if focused { theme.hot } else { theme.faint };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -421,6 +473,7 @@ fn draw_pick(frame: &mut Frame, app: &App, area: Rect, kind: &PickKind, selected
         (PickKind::Category(_), Some(categories)) if categories.is_empty() => {
             Some(" No categories yet.")
         }
+        (PickKind::View, _) if app.views.is_empty() => Some(" No saved views yet. V saves one."),
         _ => None,
     };
     let extra = u16::from(note.is_some());
@@ -459,4 +512,116 @@ fn draw_pick(frame: &mut Frame, app: &App, area: Rect, kind: &PickKind, selected
         lines.push(Line::styled(note, Style::new().fg(theme.dim)));
     }
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_value(frame: &mut Frame, theme: &Theme, area: Rect, edit: &ValueEdit) {
+    let width = 64.min(area.width.saturating_sub(4));
+    let inner = popup(frame, theme, area, (width, 5), &fit(&edit.title, 48));
+    let [field, _, note] = Layout::vertical([Constraint::Length(1); 3]).areas(inner);
+    let field = Rect {
+        x: field.x + 1,
+        width: field.width.saturating_sub(2),
+        ..field
+    };
+    draw_input(frame, theme, field, &edit.input, &edit.placeholder, true);
+    let note = Rect {
+        x: note.x + 1,
+        width: note.width.saturating_sub(1),
+        ..note
+    };
+    let line = note_line(theme, edit.help(), edit.error.as_deref());
+    frame.render_widget(Paragraph::new(line), note);
+}
+
+fn draw_form(frame: &mut Frame, theme: &Theme, area: Rect, kind: &FormKind, form: &Form) {
+    let width = 64.min(area.width.saturating_sub(4));
+    let height = form.fields.len() as u16 + 4;
+    let inner = popup(frame, theme, area, (width, height), &fit(&kind.title(), 48));
+    let [fields, _, note] = Layout::vertical([
+        Constraint::Length(form.fields.len() as u16),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    form::draw(frame, theme, fields, form, true);
+    let note = Rect {
+        x: note.x + 1,
+        width: note.width.saturating_sub(1),
+        ..note
+    };
+    let line = note_line(theme, kind.help(), form.error.as_deref());
+    frame.render_widget(Paragraph::new(line), note);
+}
+
+fn draw_confirm(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    title: &str,
+    text: &str,
+    detail: &str,
+) {
+    let width = 60.min(area.width.saturating_sub(4));
+    let inner = popup(frame, theme, area, (width, 7), title);
+    let room = usize::from(inner.width).saturating_sub(2);
+    let lines = vec![
+        Line::styled(format!(" {}", fit(text, room)), Style::new().fg(theme.fg)),
+        Line::raw(""),
+        Line::styled(
+            format!(" {}", fit(detail, room)),
+            Style::new().fg(theme.dim),
+        ),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                " enter",
+                Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" yes   ", Style::new().fg(theme.dim)),
+            Span::styled(
+                "esc",
+                Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" no", Style::new().fg(theme.dim)),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_columns(frame: &mut Frame, theme: &Theme, area: Rect, chosen: &[Column], cursor: usize) {
+    let rows = Column::OPTIONAL.len() as u16;
+    let width = 44.min(area.width.saturating_sub(4));
+    let inner = popup(frame, theme, area, (width, rows + 4), "Columns");
+    let [list, _, note] = Layout::vertical([
+        Constraint::Length(rows),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    let lines: Vec<Line> = Column::OPTIONAL
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            let on = chosen.contains(column);
+            let mark = if on { "[x]" } else { "[ ]" };
+            let mark_color = if on { theme.down } else { theme.dim };
+            let line = Line::from(vec![
+                Span::styled(format!(" {mark} "), Style::new().fg(mark_color)),
+                Span::styled(column.description(), Style::new().fg(theme.fg)),
+            ]);
+            if index == cursor {
+                line.style(highlight(theme))
+            } else {
+                line
+            }
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), list);
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            " Name, progress and status always show.",
+            Style::new().fg(theme.dim),
+        )),
+        note,
+    );
 }

@@ -36,6 +36,8 @@ tempest list             # shows its transfers; start, stop and remove control t
 tempest tui              # the terminal UI, on the daemon or an engine of its own
 ```
 
+In the TUI, `1`-`4` switch between Transfers, Share, Catalog and Settings, `:` finds any command, and `?` lists the keys of the screen you are on.
+
 While a daemon runs, `share` and `get` hand their transfers to it. Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. Each peer asks its router to forward its port with PCP, NAT-PMP or UPnP-IGD; `--no-port-mapping` turns that off. `tempest <command> --help` lists each command's options. The engine's API is described in [`specs/api.md`](specs/api.md).
 
 ## Repository

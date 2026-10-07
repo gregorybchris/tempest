@@ -94,6 +94,60 @@ pub fn count(count: usize, noun: &str) -> String {
     }
 }
 
+/// A moment in milliseconds since the Unix epoch as its date in UTC: `2026-10-07`.
+pub fn date(millis: i64) -> String {
+    // Howard Hinnant's days-to-civil algorithm, on days since 1970-01-01.
+    let days = millis.div_euclid(86_400_000) + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// A speed limit as settings show it: `2.0M/s`, or `none`.
+pub fn limit(bytes_per_second: Option<u64>) -> String {
+    bytes_per_second.map_or_else(|| "none".to_owned(), |rate| format!("{}/s", bytes(rate)))
+}
+
+/// A speed limit as typed: a number of bytes per second with an optional unit (`K`, `M`, `G`,
+/// `T`, in thousands as the TUI shows them, with or without `B` and `/s`), or `none` or nothing
+/// for no limit.
+pub fn parse_limit(text: &str) -> Result<Option<u64>, String> {
+    let text = text.trim();
+    if text.is_empty() || text.eq_ignore_ascii_case("none") {
+        return Ok(None);
+    }
+    let invalid = || format!("{text:?} is not a speed such as 500K or 2.5M");
+    let lower = text.to_ascii_lowercase();
+    let unit_part = lower
+        .trim_end_matches("/s")
+        .trim_end_matches('b')
+        .trim_end();
+    let (number, scale) = match unit_part.chars().last() {
+        Some('k') => (&unit_part[..unit_part.len() - 1], 1e3),
+        Some('m') => (&unit_part[..unit_part.len() - 1], 1e6),
+        Some('g') => (&unit_part[..unit_part.len() - 1], 1e9),
+        Some('t') => (&unit_part[..unit_part.len() - 1], 1e12),
+        _ => (unit_part, 1.0),
+    };
+    let number: f64 = number.trim().parse().map_err(|_| invalid())?;
+    let rate = (number * scale).round();
+    if !rate.is_finite() || rate < 1.0 || rate > u64::MAX as f64 {
+        return Err("A limit is at least 1 byte per second; type none for no limit.".to_owned());
+    }
+    Ok(Some(rate as u64))
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -157,7 +211,39 @@ mod tests {
         assert_eq!(percent(-1.0), "0%");
     }
 
+    #[test]
+    fn dates_are_utc_days() {
+        assert_eq!(date(0), "1970-01-01");
+        assert_eq!(date(1_791_331_200_000), "2026-10-07");
+        assert_eq!(date(951_782_400_000), "2000-02-29");
+        assert_eq!(date(-1), "1969-12-31");
+    }
+
+    #[test]
+    fn limits_are_typed_with_units() {
+        assert_eq!(parse_limit(""), Ok(None));
+        assert_eq!(parse_limit(" None "), Ok(None));
+        assert_eq!(parse_limit("500"), Ok(Some(500)));
+        assert_eq!(parse_limit("500K"), Ok(Some(500_000)));
+        assert_eq!(parse_limit("2.5m"), Ok(Some(2_500_000)));
+        assert_eq!(parse_limit("1.5 MB/s"), Ok(Some(1_500_000)));
+        assert_eq!(parse_limit("1G"), Ok(Some(1_000_000_000)));
+        for bad in ["fast", "0", "-1M", "0.1", "2X", "M"] {
+            assert!(parse_limit(bad).is_err(), "{bad}");
+        }
+        assert_eq!(limit(None), "none");
+        assert_eq!(limit(Some(2_000_000)), "2.0M/s");
+    }
+
     proptest! {
+        /// A limit reads back as what it shows, to the precision shown.
+        #[test]
+        fn shown_limits_read_back(rate in 1u64..1_000_000_000_000) {
+            let shown = bytes(rate);
+            let read = parse_limit(&shown).unwrap().unwrap();
+            prop_assert_eq!(bytes(read), shown);
+        }
+
         #[test]
         fn byte_counts_fit_five_characters_below_a_petabyte(n in 0u64..999_000_000_000_000) {
             prop_assert!(bytes(n).chars().count() <= 5, "{}", bytes(n));

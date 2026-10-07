@@ -3,16 +3,20 @@
 //! The screen follows the shared client layout (`specs/interfaces.md`): the areas and rates on
 //! top, the area's content, and a bar of the keys that work at the bottom. In Transfers, the
 //! content is the list with the selected transfer's state or detail below it, or one of its
-//! full-screen views (D-137).
+//! full-screen views (D-137). Share has its form, shares and link; Catalog and Settings have
+//! sections of rows (D-196).
 
 mod chunks;
 mod detail;
+mod form;
 mod modal;
 mod rates;
+mod rows;
+mod share;
 mod transfers;
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Flex, Layout, Position, Rect};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -48,7 +52,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
         Screen::Chunks => chunks::draw(frame, app, body),
         Screen::Rates => rates::draw(frame, app, body),
-        Screen::Other => draw_empty_area(frame, theme, app.area, body),
+        Screen::Share => share::draw(frame, app, body),
+        Screen::Catalog | Screen::Settings => rows::draw(frame, app, body),
     }
     draw_footer(frame, app, footer);
     modal::draw(frame, app, area);
@@ -201,14 +206,24 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans).right_aligned()), area);
 }
 
-fn draw_empty_area(frame: &mut Frame, theme: &Theme, which: Area, area: Rect) {
-    let [middle] = Layout::vertical([Constraint::Length(1)])
-        .flex(Flex::Center)
-        .areas(area);
-    let text = format!("{} is not built yet.", which.title());
+/// How many rows the help overlay can scroll: 0 when it fits the screen.
+pub fn help_overflow(app: &App) -> usize {
+    let (width, height) = app.size;
+    modal::help_overflow(app, Rect::new(0, 0, width, height))
+}
+
+/// `title` on the rule across `area`, near its left end.
+fn rule_title(frame: &mut Frame, theme: &Theme, area: Rect, title: &str) {
+    let text = format!(" {title} ");
+    let width = (text.width() as u16).min(area.width.saturating_sub(2));
+    let area = Rect {
+        x: area.x + 1,
+        width,
+        ..area
+    };
     frame.render_widget(
-        Paragraph::new(Line::styled(text, Style::new().fg(theme.dim))).centered(),
-        middle,
+        Paragraph::new(Span::styled(text, Style::new().fg(theme.dim))),
+        area,
     );
 }
 

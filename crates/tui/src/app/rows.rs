@@ -1,0 +1,1020 @@
+//! The Catalog and Settings areas: the engine's settings as sections of rows, and what `enter`,
+//! `a` and `x` do to the row under the cursor (D-196).
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+use tempest_engine::SettingsView;
+use tempest_engine::config::SharingAction;
+use tempest_engine::schedule::{Schedule, TimeOfDay, Weekday};
+
+use super::modal::{FormKind, Modal, ValueEdit, ValueTarget};
+use super::request::Request;
+use super::{App, Area, View};
+use crate::columns::Column;
+use crate::form::{DAYS, Field, Form};
+use crate::format;
+use crate::prefs;
+
+/// What kind of value a row's prompt takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueKind {
+    /// A speed, such as `2M`, or none.
+    Limit,
+    /// A whole number of transfers, or none.
+    Count,
+    /// A ratio above 0, or none.
+    Ratio,
+    /// A duration such as `12h`, or none.
+    Duration,
+    /// An absolute path, or nothing for the default.
+    Folder,
+}
+
+impl ValueKind {
+    /// The setting's value for `text`, or why it isn't one.
+    pub fn parse(self, text: &str) -> Result<Value, String> {
+        let text = text.trim();
+        let none = text.is_empty() || text.eq_ignore_ascii_case("none");
+        match self {
+            Self::Limit => format::parse_limit(text).map(|limit| json!(limit)),
+            Self::Count if none => Ok(Value::Null),
+            Self::Count => match text.parse::<u32>() {
+                Ok(count) if count > 0 => Ok(json!(count)),
+                _ => Err("Type a whole number from 1, or none for no limit.".to_owned()),
+            },
+            Self::Ratio if none => Ok(Value::Null),
+            Self::Ratio => match text.parse::<f64>() {
+                Ok(ratio) if ratio.is_finite() && ratio > 0.0 => Ok(json!(ratio)),
+                _ => Err("Type a ratio above 0, such as 2 or 1.5, or none.".to_owned()),
+            },
+            Self::Duration if none => Ok(Value::Null),
+            Self::Duration => Ok(json!(text)),
+            Self::Folder if text.is_empty() => Ok(Value::Null),
+            Self::Folder if Path::new(text).is_absolute() => Ok(json!(text)),
+            Self::Folder => Err("Type an absolute path, or nothing for the default.".to_owned()),
+        }
+    }
+
+    /// A line on what to type.
+    pub fn help(self) -> &'static str {
+        match self {
+            Self::Limit => "A speed such as 500K or 2.5M, or none.",
+            Self::Count => "A number of transfers, or none for no limit.",
+            Self::Ratio => "Bytes sent per byte received, such as 2, or none.",
+            Self::Duration => "A time such as 30m, 12h or 7d, or none.",
+            Self::Folder => "An absolute path on the engine's machine.",
+        }
+    }
+}
+
+/// What changing a row does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Edit {
+    /// Nothing: it only shows something.
+    None,
+    /// Asks for a new value of its setting.
+    Value(ValueKind),
+    /// Switches its setting on or off.
+    Toggle,
+    /// Steps its setting through these values.
+    Cycle(&'static [&'static str]),
+    /// Opens the alternative limits' schedule.
+    Schedule,
+    /// Steps through the themes.
+    Theme,
+    /// Opens the column picker.
+    Columns,
+    /// Asks for the category's save folder; `x` removes it.
+    Category(String),
+    /// Asks for a new category.
+    NewCategory,
+    /// Asks for a new URL; `x` removes it.
+    Tracker(String),
+    /// Asks for a tracker's URL.
+    NewTracker,
+    /// Asks for a new identity; `x` removes it.
+    Relay(String),
+    /// Asks for a relay's identity.
+    NewRelay,
+    /// Shows the transfers with the tag.
+    Tag(String),
+}
+
+/// A line of a section: a label, a value, and what changing it does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// What it is.
+    pub label: String,
+    /// Its value as shown.
+    pub value: String,
+    /// The setting it shows, by dotted key, if it shows one.
+    pub key: Option<&'static str>,
+    /// What changing it does.
+    pub edit: Edit,
+    /// A sentence on what it means, shown while the cursor is on it.
+    pub help: String,
+}
+
+impl Row {
+    fn new(label: impl Into<String>, value: impl Into<String>, edit: Edit) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            key: None,
+            edit,
+            help: String::new(),
+        }
+    }
+
+    fn setting(
+        label: &str,
+        key: &'static str,
+        value: impl Into<String>,
+        edit: Edit,
+        help: &str,
+    ) -> Self {
+        Self {
+            key: Some(key),
+            help: help.to_owned(),
+            ..Self::new(label, value, edit)
+        }
+    }
+
+    fn help(mut self, help: impl Into<String>) -> Self {
+        self.help = help.into();
+        self
+    }
+}
+
+/// A titled group of rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Section {
+    /// Its title.
+    pub title: &'static str,
+    /// A sentence under the title, if it needs one.
+    pub note: Option<String>,
+    /// Its rows.
+    pub rows: Vec<Row>,
+}
+
+/// What sharing does at its limit, as the setting's values.
+const ACTIONS: &[&str] = &["stop", "remove"];
+
+/// A schedule's days and times: "Mon–Fri 09:00–17:00".
+pub fn describe_schedule(schedule: &Schedule) -> String {
+    format!(
+        "{} {}–{}",
+        describe_days(&schedule.days),
+        schedule.from,
+        schedule.to
+    )
+}
+
+/// Days as runs: "Every day", "Mon–Fri", "Mon, Wed–Fri".
+fn describe_days(days: &BTreeSet<Weekday>) -> String {
+    if days.len() == 7 {
+        return "Every day".to_owned();
+    }
+    let on: Vec<usize> = (0..7)
+        .filter(|i| days.contains(&Weekday::ALL[*i]))
+        .collect();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for day in on {
+        match runs.last_mut() {
+            Some((_, end)) if *end + 1 == day => *end = day,
+            _ => runs.push((day, day)),
+        }
+    }
+    let runs: Vec<String> = runs
+        .into_iter()
+        .map(|(start, end)| match end - start {
+            0 => DAYS[start].to_owned(),
+            1 => format!("{}, {}", DAYS[start], DAYS[end]),
+            _ => format!("{}–{}", DAYS[start], DAYS[end]),
+        })
+        .collect();
+    runs.join(", ")
+}
+
+fn yes_no(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+/// `text` with its first letter in upper case.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// A count limit as shown: `3`, or `no limit`.
+fn count(limit: Option<u32>) -> String {
+    limit.map_or_else(|| "no limit".to_owned(), |n| n.to_string())
+}
+
+/// The Settings area's sections.
+pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
+    let settings = &view.settings;
+    let limits = &settings.limits;
+    let alternative = &limits.alternative;
+    let sharing = serde_json::to_value(settings.sharing).expect("settings serialize");
+    let shown = |value: &Value| match value {
+        Value::Null => "none".to_owned(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    let mut sections = vec![
+        Section {
+            title: "Speed limits",
+            note: view
+                .alternative_limits_active
+                .then(|| "The alternative limits apply now, in place of these.".to_owned()),
+            rows: vec![
+                Row::setting(
+                    "Download",
+                    "limits.download",
+                    format::limit(limits.download),
+                    Edit::Value(ValueKind::Limit),
+                    "The most every transfer together receives per second.",
+                ),
+                Row::setting(
+                    "Upload",
+                    "limits.upload",
+                    format::limit(limits.upload),
+                    Edit::Value(ValueKind::Limit),
+                    "The most every transfer together sends per second.",
+                ),
+            ],
+        },
+        Section {
+            title: "Alternative limits",
+            note: Some("These replace the limits above while on, or while scheduled.".to_owned()),
+            rows: vec![
+                Row::setting(
+                    "Download",
+                    "limits.alternative.download",
+                    format::limit(alternative.download),
+                    Edit::Value(ValueKind::Limit),
+                    "The download limit while the alternative limits apply.",
+                ),
+                Row::setting(
+                    "Upload",
+                    "limits.alternative.upload",
+                    format::limit(alternative.upload),
+                    Edit::Value(ValueKind::Limit),
+                    "The upload limit while the alternative limits apply.",
+                ),
+                Row::setting(
+                    "Switched on",
+                    "limits.alternative.enabled",
+                    yes_no(alternative.enabled),
+                    Edit::Toggle,
+                    "On, they apply whatever the schedule says.",
+                ),
+                Row::setting(
+                    "Schedule",
+                    "limits.alternative.schedule",
+                    alternative
+                        .schedule
+                        .as_ref()
+                        .map_or_else(|| "none".to_owned(), describe_schedule),
+                    Edit::Schedule,
+                    "When they apply on their own, in the engine's local time.",
+                ),
+            ],
+        },
+        Section {
+            title: "Queue",
+            note: None,
+            rows: vec![
+                Row::setting(
+                    "Active downloads",
+                    "queue.max_active_downloads",
+                    count(settings.queue.max_active_downloads),
+                    Edit::Value(ValueKind::Count),
+                    "How many downloads run at once; the rest wait as queued.",
+                ),
+                Row::setting(
+                    "Active uploads",
+                    "queue.max_active_uploads",
+                    count(settings.queue.max_active_uploads),
+                    Edit::Value(ValueKind::Count),
+                    "How many complete transfers share at once; the rest wait as queued.",
+                ),
+            ],
+        },
+        Section {
+            title: "Sharing limits",
+            note: Some(
+                "When a complete transfer stops sharing. L sets a transfer's own.".to_owned(),
+            ),
+            rows: vec![
+                Row::setting(
+                    "Ratio",
+                    "sharing.ratio",
+                    shown(&sharing["ratio"]),
+                    Edit::Value(ValueKind::Ratio),
+                    "Stop sharing once this many bytes are sent per byte received.",
+                ),
+                Row::setting(
+                    "Time",
+                    "sharing.time",
+                    shown(&sharing["time"]),
+                    Edit::Value(ValueKind::Duration),
+                    "Stop sharing after this long complete.",
+                ),
+                Row::setting(
+                    "At the limit",
+                    "sharing.action",
+                    match settings.sharing.action {
+                        SharingAction::Stop => "stop it",
+                        SharingAction::Remove => "remove it, keeping its files",
+                    },
+                    Edit::Cycle(ACTIONS),
+                    "What happens to a transfer that reaches a limit.",
+                ),
+            ],
+        },
+    ];
+
+    let mut categories = vec![Row::setting(
+        "Default folder",
+        "save_folder",
+        settings.save_folder.as_ref().map_or_else(
+            || "Downloads, in the home folder".to_owned(),
+            |folder| folder.display().to_string(),
+        ),
+        Edit::Value(ValueKind::Folder),
+        "Where downloads go unless their category or the add says otherwise.",
+    )];
+    match &app.categories {
+        None => categories.push(Row::new("Loading…", "", Edit::None)),
+        Some(all) => categories.extend(all.iter().map(|(name, folder)| {
+            Row::new(
+                name.clone(),
+                folder.display().to_string(),
+                Edit::Category(name.clone()),
+            )
+            .help("Downloads added in this category go to its folder. x removes it.")
+        })),
+    }
+    categories.push(
+        Row::new("+ Add a category", "", Edit::NewCategory)
+            .help("A name and the folder its downloads go to."),
+    );
+    sections.push(Section {
+        title: "Categories",
+        note: None,
+        rows: categories,
+    });
+
+    let mut tags: BTreeMap<&str, usize> = BTreeMap::new();
+    for transfer in app.model.transfers() {
+        for tag in &transfer.tags {
+            *tags.entry(tag.as_str()).or_default() += 1;
+        }
+    }
+    let tag_rows = match tags.is_empty() {
+        true => vec![Row::new(
+            "No tags yet. Press t on a transfer to tag it.",
+            "",
+            Edit::None,
+        )],
+        false => tags
+            .into_iter()
+            .map(|(tag, count)| {
+                Row::new(
+                    format!("#{tag}"),
+                    format::count(count, "transfer"),
+                    Edit::Tag(tag.to_owned()),
+                )
+                .help("enter shows its transfers.")
+            })
+            .collect(),
+    };
+    sections.push(Section {
+        title: "Tags",
+        note: None,
+        rows: tag_rows,
+    });
+
+    let columns: Vec<&str> = app.columns.iter().map(|c| c.title()).collect();
+    sections.push(Section {
+        title: "Appearance",
+        note: None,
+        rows: vec![
+            Row::setting(
+                "Theme",
+                prefs::THEME,
+                app.theme.name,
+                Edit::Theme,
+                "The palette. T changes it anywhere.",
+            ),
+            Row::setting(
+                "Columns",
+                prefs::COLUMNS,
+                if columns.is_empty() {
+                    "only name, progress and status".to_owned()
+                } else {
+                    columns.join(" ")
+                },
+                Edit::Columns,
+                "The transfers list's optional columns. | changes them from the list.",
+            ),
+        ],
+    });
+    sections
+}
+
+/// The Catalog area's sections.
+pub fn catalog_sections(view: &SettingsView) -> Vec<Section> {
+    let settings = &view.settings;
+    let mut trackers: Vec<Row> = settings
+        .trackers
+        .iter()
+        .map(|url| {
+            Row::new(url.clone(), "", Edit::Tracker(url.clone()))
+                .help("enter changes the URL; x removes it.")
+        })
+        .collect();
+    trackers.push(
+        Row::new("+ Add a tracker", "", Edit::NewTracker)
+            .help("An http:// or https:// URL. Every transfer announces to it."),
+    );
+    let mut relays = vec![Row::setting(
+        "Use relays trackers suggest",
+        "relays.from_trackers",
+        yes_no(settings.relays.from_trackers),
+        Edit::Toggle,
+        "Also pick a home relay from those the trackers recommend.",
+    )];
+    relays.extend(relay_identities(view).into_iter().map(|relay| {
+        Row::new(relay.clone(), "", Edit::Relay(relay)).help("enter changes it; x removes it.")
+    }));
+    relays.push(
+        Row::new("+ Add a relay", "", Edit::NewRelay)
+            .help("A relay's key and address, as <key>@host:port."),
+    );
+    vec![
+        Section {
+            title: "Trackers",
+            note: Some(
+                "Every transfer announces to these, as well as to the trackers its link names."
+                    .to_owned(),
+            ),
+            rows: trackers,
+        },
+        Section {
+            title: "Relays",
+            note: Some(
+                "The fastest becomes the home relay, which lends this peer an address when \
+                 others can't reach it directly."
+                    .to_owned(),
+            ),
+            rows: relays,
+        },
+        Section {
+            title: "Catalogs",
+            note: Some(
+                "Browsing and searching what trackers list arrives in a later release \
+                 (roadmap M9)."
+                    .to_owned(),
+            ),
+            rows: Vec::new(),
+        },
+    ]
+}
+
+/// The known relays as `<key>@host:port`.
+fn relay_identities(view: &SettingsView) -> Vec<String> {
+    let relays = serde_json::to_value(&view.settings.relays).expect("settings serialize");
+    relays["known"]
+        .as_array()
+        .map(|known| {
+            known
+                .iter()
+                .filter_map(|relay| relay.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The schedule form, filled in from `schedule`, or for a weekday's working hours.
+fn schedule_form(schedule: Option<&Schedule>) -> Form {
+    let on = |day: usize| schedule.map_or(day < 5, |s| s.days.contains(&Weekday::ALL[day]));
+    let time = |time: Option<TimeOfDay>| time.map(|t| t.to_string()).unwrap_or_default();
+    Form::new(vec![
+        Field::days("Days", std::array::from_fn(on)),
+        Field::text("From", &time(schedule.map(|s| s.from)), "09:00"),
+        Field::text("To", &time(schedule.map(|s| s.to)), "17:00"),
+    ])
+}
+
+/// The schedule `form` asks for, as the setting's value: `null` when both times are empty.
+pub(super) fn schedule_value(form: &Form) -> Result<Value, String> {
+    let (from, to) = (form.text("From"), form.text("To"));
+    if from.is_empty() && to.is_empty() {
+        return Ok(Value::Null);
+    }
+    let from: TimeOfDay = from.parse().map_err(|_| "From is a time such as 09:00.")?;
+    let to: TimeOfDay = to.parse().map_err(|_| "To is a time such as 17:00.")?;
+    let days: Vec<Weekday> = (0..7)
+        .filter(|day| form.days("Days")[*day])
+        .map(|day| Weekday::ALL[day])
+        .collect();
+    if days.is_empty() {
+        return Err("Pick at least one day.".to_owned());
+    }
+    Ok(json!({ "days": days, "from": from, "to": to }))
+}
+
+/// A speed limit as a prompt starts with it: exact, in the largest unit that keeps it whole.
+pub(super) fn limit_input(limit: Option<u64>) -> String {
+    match limit {
+        None => String::new(),
+        Some(rate) if rate % 1_000_000_000 == 0 => format!("{}G", rate / 1_000_000_000),
+        Some(rate) if rate % 1_000_000 == 0 => format!("{}M", rate / 1_000_000),
+        Some(rate) if rate % 1000 == 0 => format!("{}K", rate / 1000),
+        Some(rate) => rate.to_string(),
+    }
+}
+
+impl App {
+    /// The sections of the area shown, if it lists rows and the settings have loaded.
+    pub fn sections(&self) -> Vec<Section> {
+        let Some(view) = &self.settings else {
+            return Vec::new();
+        };
+        match self.area {
+            Area::Catalog => catalog_sections(view),
+            Area::Settings => settings_sections(self, view),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The rows of the area shown, in order.
+    pub fn rows(&self) -> Vec<Row> {
+        self.sections().into_iter().flat_map(|s| s.rows).collect()
+    }
+
+    /// Where the cursor is among the area's rows.
+    pub fn row_cursor(&self) -> usize {
+        let count = self.rows().len();
+        let cursor = match self.area {
+            Area::Catalog => self.catalog_row,
+            _ => self.settings_row,
+        };
+        cursor.min(count.saturating_sub(1))
+    }
+
+    fn set_row_cursor(&mut self, row: usize) {
+        match self.area {
+            Area::Catalog => self.catalog_row = row,
+            _ => self.settings_row = row,
+        }
+    }
+
+    /// Moves the cursor among the rows by `by`.
+    pub(super) fn move_row(&mut self, by: isize) {
+        let last = self.rows().len().saturating_sub(1);
+        let row = self.row_cursor().saturating_add_signed(by).min(last);
+        self.set_row_cursor(row);
+    }
+
+    /// Moves the cursor to the first row of the next (or previous) section.
+    pub(super) fn move_section(&mut self, by: isize) {
+        let sections = self.sections();
+        let mut starts = Vec::new();
+        let mut row = 0;
+        for section in &sections {
+            if !section.rows.is_empty() {
+                starts.push(row);
+            }
+            row += section.rows.len();
+        }
+        let Some(current) = starts.iter().rposition(|start| *start <= self.row_cursor()) else {
+            return;
+        };
+        let count = starts.len() as isize;
+        let next = (current as isize + by).rem_euclid(count) as usize;
+        self.set_row_cursor(starts[next]);
+    }
+
+    /// The row under the cursor.
+    pub fn current_row(&self) -> Option<Row> {
+        self.rows().into_iter().nth(self.row_cursor())
+    }
+
+    /// Changes the row under the cursor.
+    pub(super) fn change_row(&mut self) -> Option<Request> {
+        let row = self.current_row()?;
+        let view = self.settings.clone()?;
+        let settings = &view.settings;
+        let about = format!("the {}", row.label.to_lowercase());
+        let about = match row.key {
+            Some(key) if key.starts_with("limits.alternative.") => {
+                format!("the alternative {}", row.label.to_lowercase())
+            }
+            Some(key) if key.starts_with("limits.") => {
+                format!("the {} limit", row.label.to_lowercase())
+            }
+            Some(key) if key.starts_with("sharing.") => {
+                format!("the sharing {}", row.label.to_lowercase())
+            }
+            _ => about,
+        };
+        let value_edit = |target: ValueTarget, text: String, placeholder: &str| {
+            let title = match &target {
+                ValueTarget::Setting { about, .. } => capitalized(about),
+                ValueTarget::CategoryFolder(name) => format!("Folder of {name}"),
+                _ => row.label.clone(),
+            };
+            Modal::Value(Box::new(ValueEdit::new(title, target, &text, placeholder)))
+        };
+        match row.edit {
+            Edit::None => return None,
+            Edit::Value(kind) => {
+                let key = row.key?;
+                let text = match key {
+                    "limits.download" => limit_input(settings.limits.download),
+                    "limits.upload" => limit_input(settings.limits.upload),
+                    "limits.alternative.download" => {
+                        limit_input(settings.limits.alternative.download)
+                    }
+                    "limits.alternative.upload" => limit_input(settings.limits.alternative.upload),
+                    "save_folder" => settings
+                        .save_folder
+                        .as_ref()
+                        .map(|f| f.display().to_string())
+                        .unwrap_or_default(),
+                    _ if row.value == "none" || row.value == "no limit" => String::new(),
+                    _ => row.value.clone(),
+                };
+                let target = ValueTarget::Setting { key, kind, about };
+                self.modal = Some(value_edit(target, text, "none"));
+            }
+            Edit::Toggle => {
+                let key = row.key?;
+                let on = row.value == "on";
+                return Some(self.change_settings([(key, json!(!on))], Some(about)));
+            }
+            Edit::Cycle(values) => {
+                let key = row.key?;
+                let current = serde_json::to_value(settings.sharing.action).ok();
+                let index = values
+                    .iter()
+                    .position(|v| current.as_ref().and_then(Value::as_str) == Some(v))
+                    .unwrap_or(0);
+                let next = values[(index + 1) % values.len()];
+                return Some(self.change_settings([(key, json!(next))], Some(about)));
+            }
+            Edit::Schedule => {
+                let schedule = settings.limits.alternative.schedule.as_ref();
+                self.modal = Some(Modal::Form(Box::new((
+                    FormKind::Schedule,
+                    schedule_form(schedule),
+                ))));
+            }
+            Edit::Theme => return self.next_theme(),
+            Edit::Columns => self.open_columns(),
+            Edit::Category(name) => {
+                let folder = self
+                    .categories
+                    .as_ref()
+                    .and_then(|c| c.get(&name))
+                    .map(|f| f.display().to_string())
+                    .unwrap_or_default();
+                self.modal = Some(value_edit(
+                    ValueTarget::CategoryFolder(name),
+                    folder,
+                    "/path/to/folder",
+                ));
+            }
+            Edit::NewCategory => {
+                let form = Form::new(vec![
+                    Field::text("Name", "", "films, music…"),
+                    Field::text("Folder", "", "/path/to/folder"),
+                ]);
+                self.modal = Some(Modal::Form(Box::new((FormKind::NewCategory, form))));
+            }
+            Edit::Tracker(url) => {
+                self.modal = Some(value_edit(
+                    ValueTarget::Tracker(Some(url.clone())),
+                    url,
+                    "https://…",
+                ));
+            }
+            Edit::NewTracker => {
+                self.modal = Some(value_edit(
+                    ValueTarget::Tracker(None),
+                    String::new(),
+                    "https://…",
+                ));
+            }
+            Edit::Relay(relay) => {
+                self.modal = Some(value_edit(
+                    ValueTarget::Relay(Some(relay.clone())),
+                    relay,
+                    "<key>@host:port",
+                ));
+            }
+            Edit::NewRelay => {
+                self.modal = Some(value_edit(
+                    ValueTarget::Relay(None),
+                    String::new(),
+                    "<key>@host:port",
+                ));
+            }
+            Edit::Tag(tag) => {
+                self.area = Area::Transfers;
+                self.view = View::List;
+                self.change_finding(|finding| {
+                    finding.text = format!("#{tag}");
+                    finding.status = None;
+                });
+            }
+        }
+        None
+    }
+
+    /// `a`: adds to the area's lists. In Catalog it adds to the section under the cursor.
+    pub(super) fn add_entry(&mut self) -> Option<Request> {
+        self.settings.as_ref()?;
+        let relays = self.area == Area::Catalog
+            && self.current_row().is_some_and(|row| {
+                matches!(row.edit, Edit::Relay(_) | Edit::NewRelay)
+                    || row.key == Some("relays.from_trackers")
+            });
+        let target = match self.area {
+            Area::Settings => {
+                let form = Form::new(vec![
+                    Field::text("Name", "", "films, music…"),
+                    Field::text("Folder", "", "/path/to/folder"),
+                ]);
+                self.modal = Some(Modal::Form(Box::new((FormKind::NewCategory, form))));
+                return None;
+            }
+            _ if relays => ValueTarget::Relay(None),
+            _ => ValueTarget::Tracker(None),
+        };
+        let (title, placeholder) = match target {
+            ValueTarget::Relay(_) => ("+ Add a relay", "<key>@host:port"),
+            _ => ("+ Add a tracker", "https://…"),
+        };
+        self.modal = Some(Modal::Value(Box::new(ValueEdit::new(
+            title.to_owned(),
+            target,
+            "",
+            placeholder,
+        ))));
+        None
+    }
+
+    /// `x`: removes the row's entry, or gives its setting the config file's value again.
+    pub(super) fn remove_row(&mut self) -> Option<Request> {
+        let row = self.current_row()?;
+        let view = self.settings.clone()?;
+        match row.edit {
+            Edit::Category(name) => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Remove category".to_owned(),
+                    text: format!("Remove the category {name}?"),
+                    detail: "Its transfers stay, with no category; no files move.".to_owned(),
+                    request: Box::new(Request::RemoveCategory(name)),
+                });
+                None
+            }
+            Edit::Tracker(url) => {
+                let trackers: Vec<&String> = view
+                    .settings
+                    .trackers
+                    .iter()
+                    .filter(|t| **t != url)
+                    .collect();
+                let about = Some(format!("the trackers, without {url}"));
+                Some(self.change_settings([("trackers", json!(trackers))], about))
+            }
+            Edit::Relay(relay) => {
+                let relays: Vec<String> = relay_identities(&view)
+                    .into_iter()
+                    .filter(|r| *r != relay)
+                    .collect();
+                let about = Some("the relays".to_owned());
+                Some(self.change_settings([("relays.known", json!(relays))], about))
+            }
+            _ => match row.key {
+                Some(key) if view.changed.contains_key(key) => Some(Request::ResetSetting {
+                    key: key.to_owned(),
+                    about: row.label.to_lowercase(),
+                }),
+                Some(_) => {
+                    let text = format!("{} already has the config file's value.", row.label);
+                    self.notify(text, false);
+                    None
+                }
+                None => {
+                    self.notify("There is nothing to remove here.", false);
+                    None
+                }
+            },
+        }
+    }
+
+    /// The request a value prompt makes once `text` is typed, or why it can't.
+    pub(super) fn value_request(
+        &mut self,
+        target: &ValueTarget,
+        text: &str,
+    ) -> Result<Request, String> {
+        let text = text.trim();
+        let view = self.settings.clone();
+        let settings = view.as_ref().map(|v| &v.settings);
+        match target {
+            ValueTarget::Setting { key, kind, about } => {
+                let value = kind.parse(text)?;
+                Ok(self.change_settings([(*key, value)], Some(about.clone())))
+            }
+            ValueTarget::Tracker(old) => {
+                let lower = text.to_ascii_lowercase();
+                if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+                    return Err("A tracker's URL starts with http:// or https://.".to_owned());
+                }
+                let mut trackers = settings.map(|s| s.trackers.clone()).unwrap_or_default();
+                match old
+                    .as_ref()
+                    .and_then(|old| trackers.iter().position(|t| t == old))
+                {
+                    Some(index) => trackers[index] = text.to_owned(),
+                    None if trackers.iter().any(|t| t == text) => {
+                        return Err("That tracker is already listed.".to_owned());
+                    }
+                    None => trackers.push(text.to_owned()),
+                }
+                Ok(self.change_settings(
+                    [("trackers", json!(trackers))],
+                    Some("the trackers".to_owned()),
+                ))
+            }
+            ValueTarget::Relay(old) => {
+                if !text.contains('@') {
+                    return Err("A relay is its key and address, as <key>@host:port.".to_owned());
+                }
+                let mut relays = view.as_ref().map(relay_identities).unwrap_or_default();
+                match old
+                    .as_ref()
+                    .and_then(|old| relays.iter().position(|r| r == old))
+                {
+                    Some(index) => relays[index] = text.to_owned(),
+                    None => relays.push(text.to_owned()),
+                }
+                Ok(self.change_settings(
+                    [("relays.known", json!(relays))],
+                    Some("the relays".to_owned()),
+                ))
+            }
+            ValueTarget::CategoryFolder(name) => {
+                if !Path::new(text).is_absolute() {
+                    return Err("Type an absolute path.".to_owned());
+                }
+                Ok(Request::SetCategory {
+                    name: name.clone(),
+                    folder: PathBuf::from(text),
+                    new: false,
+                })
+            }
+            ValueTarget::ViewName => self.save_view(text),
+        }
+    }
+
+    /// The request a form modal makes, or why it can't.
+    pub(super) fn form_request(&mut self, kind: &FormKind, form: &Form) -> Result<Request, String> {
+        match kind {
+            FormKind::Schedule => {
+                let value = schedule_value(form)?;
+                let about = Some("the schedule".to_owned());
+                Ok(self.change_settings([("limits.alternative.schedule", value)], about))
+            }
+            FormKind::NewCategory => {
+                let name = form.text("Name");
+                let folder = form.text("Folder");
+                if name.is_empty() {
+                    return Err("Name the category.".to_owned());
+                }
+                if self
+                    .categories
+                    .as_ref()
+                    .is_some_and(|c| c.contains_key(&name))
+                {
+                    return Err(format!("There is already a category named {name}."));
+                }
+                if !Path::new(&folder).is_absolute() {
+                    return Err("Its folder is an absolute path.".to_owned());
+                }
+                Ok(Request::SetCategory {
+                    name,
+                    folder: PathBuf::from(folder),
+                    new: true,
+                })
+            }
+            FormKind::Limits(target) => self.limits_request(target, form),
+        }
+    }
+
+    /// Changes settings, noting a change to what the user keeps (D-195) so a fetch already
+    /// under way doesn't undo it.
+    pub(super) fn change_settings<const N: usize>(
+        &mut self,
+        changes: [(&str, Value); N],
+        about: Option<String>,
+    ) -> Request {
+        let changes: BTreeMap<String, Value> = changes
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v))
+            .collect();
+        if changes.keys().any(|key| key.starts_with("ui.")) {
+            self.ui_pending += 1;
+        }
+        Request::ChangeSettings { changes, about }
+    }
+
+    /// Opens the column picker on the columns shown.
+    pub(super) fn open_columns(&mut self) {
+        self.modal = Some(Modal::Columns {
+            chosen: self.columns.clone(),
+            cursor: 0,
+        });
+    }
+
+    /// Shows the next theme and keeps it.
+    pub(super) fn next_theme(&mut self) -> Option<Request> {
+        self.theme = self.theme.next();
+        let name = self.theme.name;
+        Some(self.change_settings([(prefs::THEME, json!(name))], None))
+    }
+
+    /// Shows `columns` and keeps them.
+    pub(super) fn set_columns(&mut self, columns: Vec<Column>) -> Request {
+        let value = prefs::columns_value(&columns);
+        self.columns = Column::OPTIONAL
+            .into_iter()
+            .filter(|column| columns.contains(column))
+            .collect();
+        self.change_settings([(prefs::COLUMNS, value)], Some("the columns".to_owned()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn values_are_read_by_kind() {
+        assert_eq!(ValueKind::Limit.parse("2M"), Ok(json!(2_000_000)));
+        assert_eq!(ValueKind::Limit.parse("none"), Ok(Value::Null));
+        assert_eq!(ValueKind::Count.parse("3"), Ok(json!(3)));
+        assert_eq!(ValueKind::Count.parse(""), Ok(Value::Null));
+        assert!(ValueKind::Count.parse("0").is_err());
+        assert!(ValueKind::Count.parse("two").is_err());
+        assert_eq!(ValueKind::Ratio.parse("1.5"), Ok(json!(1.5)));
+        assert!(ValueKind::Ratio.parse("-1").is_err());
+        assert_eq!(ValueKind::Duration.parse("12h"), Ok(json!("12h")));
+        assert_eq!(ValueKind::Duration.parse("None"), Ok(Value::Null));
+        assert_eq!(ValueKind::Folder.parse("/srv"), Ok(json!("/srv")));
+        assert_eq!(ValueKind::Folder.parse(""), Ok(Value::Null));
+        assert!(ValueKind::Folder.parse("srv").is_err());
+    }
+
+    #[test]
+    fn schedules_are_described_by_runs_of_days() {
+        let days = |list: &[usize]| list.iter().map(|d| Weekday::ALL[*d]).collect();
+        assert_eq!(describe_days(&days(&[0, 1, 2, 3, 4, 5, 6])), "Every day");
+        assert_eq!(describe_days(&days(&[0, 1, 2, 3, 4])), "Mon–Fri");
+        assert_eq!(describe_days(&days(&[5, 6])), "Sat, Sun");
+        assert_eq!(describe_days(&days(&[0, 2, 3, 4])), "Mon, Wed–Fri");
+        assert_eq!(limit_input(Some(2_000_000)), "2M");
+        assert_eq!(limit_input(Some(1_500_000)), "1500K");
+        assert_eq!(limit_input(Some(1_234)), "1234");
+        assert_eq!(limit_input(None), "");
+    }
+
+    #[test]
+    fn the_schedule_form_reads_back_as_a_setting() {
+        let mut form = schedule_form(None);
+        assert_eq!(schedule_value(&form), Ok(Value::Null));
+        form.fields[1] = Field::text("From", "22:00", "");
+        form.fields[2] = Field::text("To", "7:30", "");
+        assert_eq!(
+            schedule_value(&form),
+            Ok(
+                json!({ "days": ["mon", "tue", "wed", "thu", "fri"], "from": "22:00", "to": "07:30" })
+            )
+        );
+        form.fields[0] = Field::days("Days", [false; 7]);
+        assert!(schedule_value(&form).is_err());
+        form.fields[2] = Field::text("To", "25:00", "");
+        assert!(schedule_value(&form).is_err());
+    }
+}

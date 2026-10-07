@@ -3728,6 +3728,7 @@ dependencies = [
  "insta",
  "proptest",
  "ratatui",
+ "serde_json",
  "tempest-engine",
  "tempest-protocol",
  "tempfile",

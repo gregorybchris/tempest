@@ -1,0 +1,20 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "draw(&app, 80, 16).backend()"
+---
+"  Transfers   Share   Catalog   Settings                  ↓9.8M  ↑1.6M  [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+" Changes to peers apply when the engine restarts.                               "
+"   Upload                            none                                       "
+"                                                                                "
+" Alterna╔ Alternative limits schedule ═════════════════════════════════╗        "
+" These r║          Days   Mon   Tue   Wed   Thu   Fri   Sat   Sun      ║        "
+"   Downl║          From  09:00                                         ║        "
+"   Uploa║            To  17:00                                         ║        "
+"   Switc║                                                              ║        "
+"▌  Sched║ Times as 22:00. Clear both times to turn it off.             ║        "
+"────────╚══════════════════════════════════════════════════════════════╝────────"
+" When they apply on their own, in the engine's local time.                      "
+" • Changed here, over the config file. x gives it the file's value again.       "
+"────────────────────────────────────────────────────────────────────────────────"
+" ←/→ day  space on/off  tab next  enter save  esc cancel                        "

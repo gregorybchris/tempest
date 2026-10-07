@@ -29,6 +29,8 @@ pub enum Command {
     Recheck,
     MoveStorage,
     Open,
+    Copy,
+    Limits,
 
     QueueUp,
     QueueDown,
@@ -47,6 +49,19 @@ pub enum Command {
     Sort,
     Reverse,
     ClearFilters,
+    Views,
+    SaveView,
+    Columns,
+
+    NewShare,
+    ShowShare,
+
+    Change,
+    AddEntry,
+    AddCategory,
+    RemoveEntry,
+    NextSection,
+    PreviousSection,
 
     Palette,
     GoTransfers,
@@ -71,8 +86,12 @@ pub enum Section {
     Queue,
     /// A transfer's detail, chunk map and rates chart.
     View,
-    /// Filtering and sorting.
+    /// Filtering, sorting, saved views and columns.
     Find,
+    /// The Share area's form and shares.
+    Share,
+    /// Changing what the Catalog and Settings areas list.
+    Change,
     /// Areas, theme, help: what works everywhere.
     App,
 }
@@ -86,6 +105,8 @@ impl Section {
             Self::Queue => "Queue",
             Self::View => "Detail",
             Self::Find => "Find",
+            Self::Share => "Share",
+            Self::Change => "Change",
             Self::App => "App",
         }
     }
@@ -93,7 +114,7 @@ impl Section {
 
 impl Command {
     /// Every command, in the order help and the palette list them.
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 54] = [
         Self::Down,
         Self::Up,
         Self::First,
@@ -110,6 +131,8 @@ impl Command {
         Self::Recheck,
         Self::MoveStorage,
         Self::Open,
+        Self::Copy,
+        Self::Limits,
         Self::QueueUp,
         Self::QueueDown,
         Self::QueueTop,
@@ -125,6 +148,17 @@ impl Command {
         Self::Sort,
         Self::Reverse,
         Self::ClearFilters,
+        Self::Views,
+        Self::SaveView,
+        Self::Columns,
+        Self::NewShare,
+        Self::ShowShare,
+        Self::Change,
+        Self::AddEntry,
+        Self::AddCategory,
+        Self::RemoveEntry,
+        Self::NextSection,
+        Self::PreviousSection,
         Self::Palette,
         Self::GoTransfers,
         Self::GoShare,
@@ -140,18 +174,25 @@ impl Command {
     /// Whether it works on `screen`.
     pub fn works_in(self, screen: Screen) -> bool {
         let deeper = matches!(screen, Screen::Detail | Screen::Chunks | Screen::Rates);
+        let rows = matches!(screen, Screen::Catalog | Screen::Settings);
         match self {
             Self::Detail => screen == Screen::List,
             Self::NextTab | Self::PreviousTab => screen == Screen::Detail,
             Self::Chunks => matches!(screen, Screen::Detail | Screen::Rates),
             Self::Rates => matches!(screen, Screen::Detail | Screen::Chunks),
             Self::Back => deeper,
+            Self::Copy => matches!(screen, Screen::List | Screen::Detail | Screen::Share),
+            Self::AddEntry => screen == Screen::Catalog,
+            Self::AddCategory => screen == Screen::Settings,
             _ => match self.section() {
-                Section::Move | Section::Transfer | Section::Queue => {
+                Section::Move => !matches!(screen, Screen::Chunks | Screen::Rates),
+                Section::Transfer | Section::Queue => {
                     matches!(screen, Screen::List | Screen::Detail)
                 }
                 Section::Find => screen == Screen::List,
                 Section::View => deeper,
+                Section::Share => screen == Screen::Share,
+                Section::Change => rows,
                 Section::App => true,
             },
         }
@@ -179,6 +220,8 @@ impl Command {
             Self::Recheck => &[Char('R')],
             Self::MoveStorage => &[Char('m')],
             Self::Open => &[Char('o')],
+            Self::Copy => &[Char('y')],
+            Self::Limits => &[Char('L')],
             Self::QueueUp => &[Char('K')],
             Self::QueueDown => &[Char('J')],
             Self::QueueTop => &[Char('<')],
@@ -194,6 +237,16 @@ impl Command {
             Self::Sort => &[Char('s')],
             Self::Reverse => &[Char('S')],
             Self::ClearFilters => &[Esc],
+            Self::Views => &[Char('v')],
+            Self::SaveView => &[Char('V')],
+            Self::Columns => &[Char('|')],
+            Self::NewShare => &[Char('a')],
+            Self::ShowShare => &[Enter],
+            Self::Change => &[Enter, Char(' ')],
+            Self::AddEntry | Self::AddCategory => &[Char('a')],
+            Self::RemoveEntry => &[Char('x'), Delete],
+            Self::NextSection => &[Tab],
+            Self::PreviousSection => &[BackTab],
             Self::Palette => &[Char(':')],
             Self::GoTransfers => &[Char('1')],
             Self::GoShare => &[Char('2')],
@@ -226,6 +279,8 @@ impl Command {
             Self::Recheck => "Recheck its data",
             Self::MoveStorage => "Move its files",
             Self::Open => "Open its folder",
+            Self::Copy => "Copy its link",
+            Self::Limits => "Speed and sharing limits",
             Self::QueueUp => "Up the queue",
             Self::QueueDown => "Down the queue",
             Self::QueueTop => "Top of the queue",
@@ -241,6 +296,17 @@ impl Command {
             Self::Sort => "Sort by…",
             Self::Reverse => "Reverse the order",
             Self::ClearFilters => "Clear the filters",
+            Self::Views => "Saved views",
+            Self::SaveView => "Save this view",
+            Self::Columns => "Choose columns",
+            Self::NewShare => "Share a file or folder",
+            Self::ShowShare => "Show it in Transfers",
+            Self::Change => "Change",
+            Self::AddEntry => "Add a tracker or relay",
+            Self::AddCategory => "Add a category",
+            Self::RemoveEntry => "Remove, or reset to the file",
+            Self::NextSection => "Next section",
+            Self::PreviousSection => "Previous section",
             Self::Palette => "Commands",
             Self::GoTransfers => "Go to Transfers",
             Self::GoShare => "Go to Share",
@@ -259,6 +325,15 @@ impl Command {
         Some(match self {
             Self::Down if screen == Screen::Detail => ("j/k", "scroll"),
             Self::Down => ("j/k", "move"),
+            Self::Copy => ("y", "copy link"),
+            Self::Views => ("v", "views"),
+            Self::NewShare => ("a", "share a path"),
+            Self::ShowShare => ("enter", "show"),
+            Self::Change => ("enter", "change"),
+            Self::AddEntry => ("a", "add"),
+            Self::AddCategory => ("a", "add category"),
+            Self::RemoveEntry => ("x", "remove/reset"),
+            Self::NextSection => ("tab", "sections"),
             Self::Detail => ("enter", "detail"),
             Self::NextTab => ("h/l", "tabs"),
             Self::Chunks => ("c", "chunks"),
@@ -293,6 +368,7 @@ impl Command {
             Self::QueueUp => pair("K/J", "Up/down the queue"),
             Self::QueueTop => pair("</>", "Top/bottom of the queue"),
             Self::GoTransfers => pair("1-4", "Go to an area"),
+            Self::NextSection => pair("tab ⇧tab", "Next/previous section"),
             Self::NextArea => pair("]/[", "Next/previous area"),
             Self::Up
             | Self::Last
@@ -303,7 +379,8 @@ impl Command {
             | Self::GoShare
             | Self::GoCatalog
             | Self::GoSettings
-            | Self::PreviousArea => None,
+            | Self::PreviousArea
+            | Self::PreviousSection => None,
             _ => Some((self.key_label(screen), self.label())),
         }
     }
@@ -323,7 +400,9 @@ impl Command {
             | Self::Category
             | Self::Recheck
             | Self::MoveStorage
-            | Self::Open => Section::Transfer,
+            | Self::Open
+            | Self::Copy
+            | Self::Limits => Section::Transfer,
             Self::QueueUp | Self::QueueDown | Self::QueueTop | Self::QueueBottom => Section::Queue,
             Self::Detail
             | Self::NextTab
@@ -331,9 +410,21 @@ impl Command {
             | Self::Chunks
             | Self::Rates
             | Self::Back => Section::View,
-            Self::Filter | Self::StatusFilter | Self::Sort | Self::Reverse | Self::ClearFilters => {
-                Section::Find
-            }
+            Self::Filter
+            | Self::StatusFilter
+            | Self::Sort
+            | Self::Reverse
+            | Self::ClearFilters
+            | Self::Views
+            | Self::SaveView
+            | Self::Columns => Section::Find,
+            Self::NewShare | Self::ShowShare => Section::Share,
+            Self::Change
+            | Self::AddEntry
+            | Self::AddCategory
+            | Self::RemoveEntry
+            | Self::NextSection
+            | Self::PreviousSection => Section::Change,
             _ => Section::App,
         }
     }
@@ -472,10 +563,26 @@ mod tests {
             Command::for_key(Screen::List, key('x')),
             Some(Command::Remove)
         );
-        assert_eq!(Command::for_key(Screen::Other, key('x')), None);
+        assert_eq!(Command::for_key(Screen::Share, key('x')), None);
         assert_eq!(
-            Command::for_key(Screen::Other, key('T')),
+            Command::for_key(Screen::Settings, key('x')),
+            Some(Command::RemoveEntry)
+        );
+        assert_eq!(
+            Command::for_key(Screen::Share, key('T')),
             Some(Command::Theme)
+        );
+        assert_eq!(
+            Command::for_key(Screen::Share, key('a')),
+            Some(Command::NewShare)
+        );
+        assert_eq!(
+            Command::for_key(Screen::Catalog, key('a')),
+            Some(Command::AddEntry)
+        );
+        assert_eq!(
+            Command::for_key(Screen::Settings, key(' ')),
+            Some(Command::Change)
         );
         let shifted = KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT);
         assert_eq!(
@@ -508,7 +615,7 @@ mod tests {
 
     #[test]
     fn the_palette_ranks_closer_matches_first() {
-        assert_eq!(palette_matches(Screen::List, "").len(), 29);
+        assert_eq!(palette_matches(Screen::List, "").len(), 34);
         assert_eq!(palette_matches(Screen::List, "rem")[0], Command::Remove);
         assert_eq!(palette_matches(Screen::List, "tags")[0], Command::Tags);
         assert_eq!(palette_matches(Screen::List, "queue")[0], Command::QueueUp);
@@ -517,7 +624,11 @@ mod tests {
             [Command::StatusFilter]
         );
         assert!(palette_matches(Screen::List, "zzz").is_empty());
-        assert_eq!(palette_matches(Screen::Other, "rem"), []);
+        assert_eq!(palette_matches(Screen::Share, "rem"), []);
+        assert_eq!(
+            palette_matches(Screen::Settings, "rem")[0],
+            Command::RemoveEntry
+        );
         assert_eq!(palette_matches(Screen::Detail, "chunk")[0], Command::Chunks);
         assert_eq!(match_score("set cat", "Set the category"), Some(3 + 10));
     }

@@ -136,7 +136,17 @@ ratatui, with a k9s/lazygit-style keyboard model (D-090):
 - `/` to filter, `:` for commands, `?` for help
 - a persistent hint bar showing available keys
 
-Keys, hints, help and the palette come from one binding table (D-191). Filters and sorting behave as D-192 describes. The detail, chunk map and rates chart, and what `g` means in each, follow D-194.
+Keys, hints, help and the palette come from one binding table (D-191), the source of truth for what each key does; `?` shows the current screen's. Filters and sorting behave as D-192 describes. The detail, chunk map and rates chart, and what `g` means in each, follow D-194. The Share, Catalog and Settings areas follow D-196, custom columns and saved views D-197, and the theme, columns and views are kept in the engine's settings (D-195).
+
+The key map in outline:
+
+| Where | Keys |
+| --- | --- |
+| Everywhere | `1`-`4` or `[` `]` areas, `:` commands, `T` theme, `?` help, `q` quit; `esc` closes what is open or goes back one level |
+| Transfers list | `j`/`k` move, `enter` detail; `a` add a link, `space` start/stop, `F` force start, `x` remove, `r` rename, `t` tags, `C` category, `m` move, `R` recheck, `o` open folder, `y` copy link, `L` limits; `K`/`J` and `<`/`>` queue; `/` filter, `f` status, `s` sort, `S` reverse, `v`/`V` views, `|` columns |
+| Detail | `tab` or `h`/`l` tabs, `j`/`k` scroll, `c` chunk map, `g` rates chart; the transfer and queue keys still apply |
+| Share | `a` fills in the form and `enter` shares; `j`/`k` choose a share, `y` copy its link, `enter` show it in Transfers |
+| Catalog, Settings | `j`/`k` move, `tab` next section, `enter` change, `a` add, `x` remove or reset |
 
 The TUI is minimal but powerful, giving quick access to every essential feature.
 

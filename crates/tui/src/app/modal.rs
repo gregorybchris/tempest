@@ -7,16 +7,23 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tempest_engine::api::AddRequest;
 
 use super::request::{Action, Request, Target, parse_tags};
+use super::rows::ValueKind;
 use super::{App, Hint};
+use crate::columns::Column;
 use crate::commands::{self, Command};
-use crate::finding::{SortKey, StatusFilter};
+use crate::finding::{Finding, SortKey, StatusFilter};
+use crate::form::{self, Form};
 use crate::input::Input;
+use crate::prefs;
 
-/// What is open over the list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What is open over the screen.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Modal {
-    /// Every key of the current area.
-    Help,
+    /// Every key of the current screen.
+    Help {
+        /// How many rows it is scrolled down, when it is taller than the screen.
+        scroll: usize,
+    },
     /// The `:` command palette.
     Palette {
         /// What is typed.
@@ -53,6 +60,120 @@ pub enum Modal {
         /// The highlighted item.
         selected: usize,
     },
+    /// A value typed for a setting, a tracker, a relay, a category's folder or a view's name.
+    Value(Box<ValueEdit>),
+    /// A form: a transfer's limits, a new category or the schedule.
+    Form(Box<(FormKind, Form)>),
+    /// Confirming a request.
+    Confirm {
+        /// The modal's title.
+        title: String,
+        /// The question.
+        text: String,
+        /// What saying yes does, in a sentence.
+        detail: String,
+        /// What saying yes asks.
+        request: Box<Request>,
+    },
+    /// Choosing the list's optional columns.
+    Columns {
+        /// The columns switched on.
+        chosen: Vec<Column>,
+        /// The highlighted one, in [`Column::OPTIONAL`].
+        cursor: usize,
+    },
+}
+
+/// What a [`Modal::Value`] sets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValueTarget {
+    /// A setting, by dotted key.
+    Setting {
+        /// The setting.
+        key: &'static str,
+        /// What it takes.
+        kind: ValueKind,
+        /// What it is, for the notice.
+        about: String,
+    },
+    /// A tracker's URL, replacing this one or added.
+    Tracker(Option<String>),
+    /// A relay's identity, replacing this one or added.
+    Relay(Option<String>),
+    /// The save folder of this category.
+    CategoryFolder(String),
+    /// The name to save the list's view under.
+    ViewName,
+}
+
+/// A value being typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueEdit {
+    /// The modal's title.
+    pub title: String,
+    /// What the value sets.
+    pub target: ValueTarget,
+    /// The text.
+    pub input: Input,
+    /// What shows while it is empty.
+    pub placeholder: String,
+    /// Why the value was refused, if it was.
+    pub error: Option<String>,
+}
+
+impl ValueEdit {
+    /// A prompt titled `title` for `target`, starting with `text`.
+    pub fn new(title: String, target: ValueTarget, text: &str, placeholder: &str) -> Self {
+        Self {
+            title,
+            target,
+            input: Input::new(text),
+            placeholder: placeholder.to_owned(),
+            error: None,
+        }
+    }
+
+    /// A line on what to type.
+    pub fn help(&self) -> &'static str {
+        match &self.target {
+            ValueTarget::Setting { kind, .. } => kind.help(),
+            ValueTarget::Tracker(_) => "An http:// or https:// URL.",
+            ValueTarget::Relay(_) => "The relay's key and address: <key>@host:port.",
+            ValueTarget::CategoryFolder(_) => "Where its downloads go: an absolute path.",
+            ValueTarget::ViewName => "Its filters and order are saved under this name.",
+        }
+    }
+}
+
+/// What a [`Modal::Form`] is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormKind {
+    /// A transfer's own speed and sharing limits.
+    Limits(Target),
+    /// A new category.
+    NewCategory,
+    /// When the alternative limits apply.
+    Schedule,
+}
+
+impl FormKind {
+    /// The modal's title.
+    pub fn title(&self) -> String {
+        match self {
+            Self::Limits(target) => format!("Limits of {}", target.name),
+            Self::NewCategory => "New category".to_owned(),
+            Self::Schedule => "Alternative limits schedule".to_owned(),
+        }
+    }
+
+    /// A line on how to fill it in.
+    pub fn help(&self) -> &'static str {
+        match self {
+            Self::Limits(_) => "Speeds such as 2M. Empty: the engine's. none: no limit.",
+            Self::NewCategory => "Downloads added in it go to its folder.",
+            Self::Schedule => "Times as 22:00. Clear both times to turn it off.",
+        }
+    }
 }
 
 /// What a [`Modal::Text`] asks for.
@@ -95,6 +216,8 @@ pub enum PickKind {
     Status,
     /// What to sort by.
     Sort,
+    /// A saved view.
+    View,
 }
 
 impl PickKind {
@@ -104,6 +227,7 @@ impl PickKind {
             Self::Category(_) => "Category",
             Self::Status => "Show",
             Self::Sort => "Sort by",
+            Self::View => "Views",
         }
     }
 }
@@ -233,7 +357,7 @@ impl App {
             Outcome::Close
         } else {
             match modal {
-                Modal::Help => Outcome::Close,
+                Modal::Help { scroll } => self.help_key(scroll, key),
                 Modal::Palette { query, selected } => self.palette_key(query, selected, key),
                 Modal::Filter(input) => self.filter_key(input, key),
                 Modal::Add(form) => self.add_key(*form, key),
@@ -248,6 +372,11 @@ impl App {
                     error,
                 } => text_key(kind, target, input, error, key),
                 Modal::Pick { kind, selected } => self.pick_key(kind, selected, key),
+                Modal::Value(edit) => self.value_key(*edit, key),
+                Modal::Form(form) => self.form_key(*form, key),
+                Modal::Confirm { request, .. } if is(key, KeyCode::Enter) => Outcome::Ask(*request),
+                Modal::Confirm { .. } => Outcome::Close,
+                Modal::Columns { chosen, cursor } => self.columns_key(chosen, cursor, key),
             }
         };
         match outcome {
@@ -280,8 +409,95 @@ impl App {
                 AddField::Category | AddField::Stopped => {}
             },
             Some(Modal::Text { input, .. }) => input.insert(text),
+            Some(Modal::Value(edit)) => edit.input.insert(text),
+            Some(Modal::Form(form)) => form.1.paste(text),
+            None if self.share.editing && self.area == super::Area::Share => {
+                self.share.form.paste(text);
+            }
             _ => {}
         }
+    }
+
+    fn help_key(&mut self, scroll: usize, key: KeyEvent) -> Outcome {
+        let limit = crate::ui::help_overflow(self);
+        let scroll = match key.code {
+            KeyCode::Char('j') | KeyCode::Down => scroll + 1,
+            KeyCode::Char('k') | KeyCode::Up => scroll.saturating_sub(1),
+            KeyCode::PageDown | KeyCode::Char(' ') => scroll + 10,
+            KeyCode::PageUp => scroll.saturating_sub(10),
+            _ => return Outcome::Close,
+        };
+        Outcome::Open(Modal::Help {
+            scroll: scroll.min(limit),
+        })
+    }
+
+    fn value_key(&mut self, mut edit: ValueEdit, key: KeyEvent) -> Outcome {
+        if !is(key, KeyCode::Enter) {
+            edit.input.key(key);
+            return Outcome::Open(Modal::Value(Box::new(edit)));
+        }
+        match self.value_request(&edit.target, &edit.input.text()) {
+            Ok(request) => Outcome::Ask(request),
+            Err(error) => {
+                edit.error = Some(error);
+                Outcome::Open(Modal::Value(Box::new(edit)))
+            }
+        }
+    }
+
+    fn form_key(&mut self, (kind, mut form): (FormKind, Form), key: KeyEvent) -> Outcome {
+        if form.key(key) == form::Outcome::Edited {
+            return Outcome::Open(Modal::Form(Box::new((kind, form))));
+        }
+        match self.form_request(&kind, &form) {
+            Ok(request) => Outcome::Ask(request),
+            Err(error) => {
+                form.error = Some(error);
+                Outcome::Open(Modal::Form(Box::new((kind, form))))
+            }
+        }
+    }
+
+    fn columns_key(&mut self, mut chosen: Vec<Column>, cursor: usize, key: KeyEvent) -> Outcome {
+        let last = Column::OPTIONAL.len() - 1;
+        let cursor = match key.code {
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => (cursor + 1).min(last),
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => cursor.saturating_sub(1),
+            KeyCode::Char(' ') | KeyCode::Char('x') => {
+                let column = Column::OPTIONAL[cursor];
+                match chosen.iter().position(|c| *c == column) {
+                    Some(index) => {
+                        chosen.remove(index);
+                    }
+                    None => chosen.push(column),
+                }
+                cursor
+            }
+            KeyCode::Enter => return Outcome::Ask(self.set_columns(chosen)),
+            _ => cursor,
+        };
+        Outcome::Open(Modal::Columns { chosen, cursor })
+    }
+
+    /// The view of the list saved as `name`.
+    pub(super) fn save_view(&mut self, name: &str) -> Result<Request, String> {
+        if name.trim().is_empty() {
+            return Err("Name the view.".to_owned());
+        }
+        let view = prefs::saved(name, &self.finding);
+        self.views = prefs::with_view(&self.views, view);
+        let value = prefs::views_value(&self.views);
+        let about = Some(format!("the view {}", name.trim()));
+        Ok(self.change_settings([(prefs::VIEWS, value)], about))
+    }
+
+    /// The name of the saved view the list shows, if it shows one.
+    pub fn current_view(&self) -> Option<&str> {
+        self.views
+            .iter()
+            .find(|view| prefs::finding(view) == self.finding)
+            .map(|view| view.name.as_str())
     }
 
     fn palette_key(&mut self, mut query: Input, selected: usize, key: KeyEvent) -> Outcome {
@@ -368,7 +584,12 @@ impl App {
     /// The category `by` places from `current` among none and every category, wrapping.
     fn step_category(&self, current: Option<&str>, by: isize) -> Option<String> {
         let mut options: Vec<Option<&str>> = vec![None];
-        options.extend(self.categories.iter().flatten().map(|c| Some(c.as_str())));
+        options.extend(
+            self.categories
+                .iter()
+                .flatten()
+                .map(|(c, _)| Some(c.as_str())),
+        );
         let index = options.iter().position(|o| *o == current).unwrap_or(0) as isize;
         let index = (index + by).rem_euclid(options.len() as isize) as usize;
         options[index].map(str::to_owned)
@@ -383,6 +604,9 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => 0,
             KeyCode::Char('G') | KeyCode::End => last,
             KeyCode::Enter => return self.pick(kind, selected),
+            KeyCode::Char('x') | KeyCode::Delete if kind == PickKind::View && selected > 0 => {
+                return self.delete_view(selected - 1);
+            }
             _ => selected,
         };
         Outcome::Open(Modal::Pick { kind, selected })
@@ -394,7 +618,7 @@ impl App {
             PickKind::Category(target) => {
                 let category = match index {
                     0 => None,
-                    n => match self.categories.as_ref().and_then(|c| c.get(n - 1)) {
+                    n => match self.categories.as_ref().and_then(|c| c.keys().nth(n - 1)) {
                         Some(category) => Some(category.clone()),
                         None => return Outcome::Close,
                     },
@@ -408,6 +632,17 @@ impl App {
                 self.change_finding(|finding| finding.status = status);
                 Outcome::Close
             }
+            PickKind::View => {
+                let finding = match index {
+                    0 => Finding::default(),
+                    n => match self.views.get(n - 1) {
+                        Some(view) => prefs::finding(view),
+                        None => return Outcome::Close,
+                    },
+                };
+                self.change_finding(|current| *current = finding);
+                Outcome::Close
+            }
             PickKind::Sort => {
                 let key = SortKey::ALL.get(index).copied().unwrap_or(SortKey::Queue);
                 self.change_finding(|finding| {
@@ -419,6 +654,16 @@ impl App {
                 Outcome::Close
             }
         }
+    }
+
+    fn delete_view(&mut self, index: usize) -> Outcome {
+        if index >= self.views.len() {
+            return Outcome::Close;
+        }
+        let view = self.views.remove(index);
+        let value = prefs::views_value(&self.views);
+        let about = Some(format!("the views, without {}", view.name));
+        Outcome::Ask(self.change_settings([(prefs::VIEWS, value)], about))
     }
 
     /// The items a pick offers.
@@ -438,8 +683,32 @@ impl App {
                     self.categories
                         .iter()
                         .flatten()
-                        .map(|c| item(c, current == Some(c.as_str()))),
+                        .map(|(c, _)| item(c, current == Some(c.as_str()))),
                 );
+                items
+            }
+            PickKind::View => {
+                let current = self.current_view();
+                let describe = |finding: &Finding| match finding.describe() {
+                    text if text.is_empty() => "everything".to_owned(),
+                    text => text,
+                };
+                let mut items = vec![PickItem {
+                    label: "All transfers".to_owned(),
+                    note: if self.finding == Finding::default() {
+                        "current".to_owned()
+                    } else {
+                        "queue order".to_owned()
+                    },
+                }];
+                items.extend(self.views.iter().map(|view| PickItem {
+                    label: view.name.clone(),
+                    note: if current == Some(view.name.as_str()) {
+                        "current".to_owned()
+                    } else {
+                        describe(&prefs::finding(view))
+                    },
+                }));
                 items
             }
             PickKind::Status => {
@@ -476,9 +745,28 @@ impl App {
     }
 
     /// The modal's keys for the hint bar, the last always shown.
-    pub(super) fn modal_hints(modal: &Modal) -> Vec<Hint> {
+    pub(super) fn modal_hints(&self, modal: &Modal) -> Vec<Hint> {
+        let scrolls = crate::ui::help_overflow(self) > 0;
+        let form_hints = |form: &Form, enter: &'static str| {
+            let mut hints: Vec<Hint> = form
+                .hints()
+                .iter()
+                .map(|(keys, action)| Hint { keys, action })
+                .collect();
+            hints.push(Hint {
+                keys: "enter",
+                action: enter,
+            });
+            hints.push(Hint {
+                keys: "esc",
+                action: "cancel",
+            });
+            hints
+        };
         let hints: &[(&'static str, &'static str)] = match modal {
-            Modal::Help => &[("esc", "close")],
+            Modal::Help { .. } if scrolls => &[("j/k", "scroll"), ("esc", "close")],
+            Modal::Help { .. } => &[("esc", "close")],
+            Modal::Form(form) => return form_hints(&form.1, "save"),
             Modal::Palette { .. } => &[("↑/↓", "choose"), ("enter", "run"), ("esc", "close")],
             Modal::Filter(_) => &[("enter", "keep"), ("esc", "clear")],
             Modal::Add(form) => match form.focus {
@@ -495,8 +783,24 @@ impl App {
                 ("enter", "remove"),
                 ("esc", "cancel"),
             ],
-            Modal::Text { .. } => &[("enter", "save"), ("esc", "cancel")],
+            Modal::Text { .. } | Modal::Value(_) => &[("enter", "save"), ("esc", "cancel")],
+            Modal::Pick {
+                kind: PickKind::View,
+                ..
+            } => &[
+                ("j/k", "choose"),
+                ("enter", "show"),
+                ("x", "delete"),
+                ("esc", "cancel"),
+            ],
             Modal::Pick { .. } => &[("j/k", "choose"), ("enter", "pick"), ("esc", "cancel")],
+            Modal::Confirm { .. } => &[("enter", "yes"), ("esc", "no")],
+            Modal::Columns { .. } => &[
+                ("j/k", "choose"),
+                ("space", "show/hide"),
+                ("enter", "save"),
+                ("esc", "cancel"),
+            ],
         };
         hints
             .iter()

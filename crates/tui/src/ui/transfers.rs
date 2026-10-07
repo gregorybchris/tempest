@@ -53,7 +53,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
-    let shown = columns::fitting(area.width.saturating_sub(MARKER + SPACING));
+    let shown = columns::fitting(area.width.saturating_sub(MARKER + SPACING), &app.columns);
     let name_width = name_width(&shown, area.width);
 
     let sorted = sorted_column(app.finding.sort.key);
@@ -143,7 +143,8 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
 /// The column showing what the list is sorted by, if one does.
 fn sorted_column(key: SortKey) -> Option<Column> {
     Some(match key {
-        SortKey::Queue | SortKey::Added => return None,
+        SortKey::Queue => return None,
+        SortKey::Added => Column::Added,
         SortKey::Name => Column::Name,
         SortKey::Size => Column::Size,
         SortKey::Progress => Column::Progress,
@@ -189,6 +190,20 @@ fn cell<'a>(theme: &Theme, transfer: &TransferInfo, column: Column, name_width: 
                 .map_or_else(dash, |ratio| format!("{ratio:.2}")),
             theme.dim,
         ),
+        Column::Category => (
+            fit(transfer.category.as_deref().unwrap_or("–"), 10),
+            theme.dim,
+        ),
+        Column::Tags => {
+            let tags: Vec<&str> = transfer.tags.iter().map(String::as_str).collect();
+            let text = if tags.is_empty() {
+                dash()
+            } else {
+                tags.join(", ")
+            };
+            (fit(&text, 12), theme.dim)
+        }
+        Column::Added => (format::date(transfer.added), theme.dim),
     };
     let line = Line::styled(text, Style::new().fg(color));
     Cell::from(if column.numeric() {

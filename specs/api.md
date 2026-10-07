@@ -14,7 +14,7 @@ The settings are under `api` in the config file.
 
 - Every route is under `/v1`. A later, incompatible version gets a new prefix.
 - Request bodies are JSON and must be sent as `application/json`; anything else gets 415. Browsers can't send such requests to another origin without asking first, and the API never says yes.
-- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `unsupported_media_type` (415), `internal` (500) and `unavailable` (503, the engine is shutting down).
+- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `unsupported_media_type` (415), `internal` (500) and `unavailable` (503, the engine is shutting down).
 - A transfer's ID is its bundle ID in hex.
 
 ## Routes
@@ -29,12 +29,14 @@ The settings are under `api` in the config file.
 | `POST /v1/transfers/{id}/start` | | The transfer, started through the queue |
 | `POST /v1/transfers/{id}/force-start` | | The transfer, started regardless of the queue |
 | `POST /v1/transfers/{id}/stop` | | The transfer |
+| `POST /v1/transfers/{id}/recheck` | | The transfer, whose data is hashed again from scratch ("checking"); it then resumes, fetching what failed |
+| `POST /v1/transfers/{id}/move` | `{"save_folder": "..."}`, absolute | The transfer, whose files move there ("moving"); a failed move leaves them in place and shows the error |
 | `PUT /v1/transfers/{id}/name` | `{"name": "..."}`, or `null` for the bundle's own | The transfer |
 | `PUT /v1/transfers/{id}/tags` | `{"tags": [...]}` | The transfer |
 | `PUT /v1/transfers/{id}/category` | `{"category": "..."}`, or `null` | The transfer |
-| `PUT /v1/transfers/{id}/settings` | Session settings by dotted key, replacing the transfer's own | The transfer |
+| `PUT /v1/transfers/{id}/settings` | The transfer's own settings by dotted key, replacing what it had: session settings, `limits.download` and `limits.upload`, and `sharing.*` | The transfer |
 | `POST /v1/transfers/{id}/queue` | `{"to": "top" \| "up" \| "down" \| "bottom" \| <place>}` | Every transfer, in the new order |
-| `GET /v1/settings` | | The settings in effect, which were changed through the API, and which groups await a restart |
+| `GET /v1/settings` | | The settings in effect, which were changed through the API, which groups await a restart, and whether the alternative speed limits apply now |
 | `PATCH /v1/settings` | Settings by dotted key, as in the config file | As `GET`; all the changes apply, or none |
 | `DELETE /v1/settings/{key}` | | As `GET`, with the config file's value back |
 | `GET /v1/categories` | | Each category's save folder, by name |
@@ -44,7 +46,7 @@ The settings are under `api` in the config file.
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link and dates.
 
-Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue limits and trackers apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file.
+Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications and trackers apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
 
 ## Events
 

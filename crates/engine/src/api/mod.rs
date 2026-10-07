@@ -97,6 +97,14 @@ pub struct CategoryRequest {
     pub category: Option<String>,
 }
 
+/// `POST /v1/transfers/{id}/move`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveRequest {
+    /// The absolute path of the folder to move the files into.
+    pub save_folder: PathBuf,
+}
+
 /// `POST /v1/transfers/{id}/queue`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -168,6 +176,8 @@ pub fn router(engine: Engine, access: Access) -> Router {
         .route(&transfer("/start"), post(start))
         .route(&transfer("/force-start"), post(force_start))
         .route(&transfer("/stop"), post(stop))
+        .route(&transfer("/recheck"), post(recheck))
+        .route(&transfer("/move"), post(move_storage))
         .route(&transfer("/name"), put(rename))
         .route(&transfer("/tags"), put(set_tags))
         .route(&transfer("/category"), put(set_category))
@@ -294,6 +304,20 @@ async fn force_start(State(engine): State<Engine>, Path(id): Path<String>) -> Re
 
 async fn stop(State(engine): State<Engine>, Path(id): Path<String>) -> Result {
     ok(&engine.stop(bundle_id(&id)?).await?)
+}
+
+async fn recheck(State(engine): State<Engine>, Path(id): Path<String>) -> Result {
+    ok(&engine.recheck(bundle_id(&id)?).await?)
+}
+
+async fn move_storage(
+    State(engine): State<Engine>,
+    Path(id): Path<String>,
+    Json(request): Json<MoveRequest>,
+) -> Result {
+    ok(&engine
+        .move_storage(bundle_id(&id)?, &request.save_folder)
+        .await?)
 }
 
 async fn rename(

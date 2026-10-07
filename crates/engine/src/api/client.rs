@@ -18,8 +18,8 @@ use tempest_protocol::BundleId;
 
 use super::server::{Discovery, TOKEN_FILE};
 use super::{
-    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, NameRequest, PREFIX, QueuePlace,
-    QueueRequest, TagsRequest,
+    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
+    QueuePlace, QueueRequest, TagsRequest,
 };
 use crate::{SettingsView, TransferInfo};
 
@@ -210,6 +210,22 @@ impl ApiClient {
     /// Stops a transfer.
     pub async fn stop(&self, id: BundleId) -> Result<TransferInfo, ClientError> {
         self.post(&format!("/transfers/{id}/stop")).await
+    }
+
+    /// Checks a transfer's data on disk again from scratch.
+    pub async fn recheck(&self, id: BundleId) -> Result<TransferInfo, ClientError> {
+        self.post(&format!("/transfers/{id}/recheck")).await
+    }
+
+    /// Moves a transfer's files into `save_folder`.
+    pub async fn move_storage(
+        &self,
+        id: BundleId,
+        save_folder: PathBuf,
+    ) -> Result<TransferInfo, ClientError> {
+        let path = format!("/transfers/{id}/move");
+        self.send(Method::POST, &path, Some(&MoveRequest { save_folder }))
+            .await
     }
 
     /// Removes a transfer, deleting its files too if `delete_files` is set.

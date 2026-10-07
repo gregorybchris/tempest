@@ -49,6 +49,8 @@ pub(crate) enum Phase {
     Running,
     /// Its session has been asked to stop.
     Stopping,
+    /// Its files are being moved.
+    Moving,
 }
 
 /// What the status of a transfer depends on.
@@ -98,6 +100,7 @@ impl Status {
         }
         match input.phase {
             Phase::Opening => Self::Checking,
+            Phase::Moving => Self::Moving,
             Phase::Running if input.complete => Self::Sharing,
             Phase::Running if input.idle >= STALL_AFTER => Self::Stalled {
                 reason: stall_reason(&input),
@@ -247,5 +250,10 @@ mod tests {
             ..running()
         };
         assert_eq!(Status::of(opening), Status::Checking);
+        let moving = StatusInput {
+            phase: Phase::Moving,
+            ..running()
+        };
+        assert_eq!(Status::of(moving), Status::Moving);
     }
 }

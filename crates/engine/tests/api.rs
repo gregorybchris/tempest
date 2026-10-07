@@ -250,6 +250,50 @@ async fn every_route_works_and_fails_in_one_shape() {
         StatusCode::BAD_REQUEST,
         "invalid_request",
     );
+    let (_, limited) = send(
+        &app,
+        put.clone(),
+        &control("settings"),
+        Some(json!({ "limits.download": 1000, "sharing.action": "remove" })),
+    )
+    .await;
+    assert_eq!(limited["settings"]["limits.download"], 1000);
+
+    // Rechecking needs data; moving needs an absolute folder.
+    assert_error(
+        send(&app, post.clone(), &control("recheck"), None).await,
+        StatusCode::CONFLICT,
+        "no_data",
+    );
+    let (status, rechecked) = send(
+        &app,
+        post.clone(),
+        &format!("/v1/transfers/{share_id}/recheck"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rechecked}");
+    let moved_to = root.path().join("moved");
+    let (status, moved) = send(
+        &app,
+        post.clone(),
+        &control("move"),
+        Some(json!({ "save_folder": moved_to })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["save_folder"], json!(moved_to));
+    assert_error(
+        send(
+            &app,
+            post.clone(),
+            &control("move"),
+            Some(json!({ "save_folder": "relative" })),
+        )
+        .await,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
 
     // Categories.
     let isos = root.path().join("isos");

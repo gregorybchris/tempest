@@ -45,6 +45,8 @@ impl From<EngineError> for ApiError {
             E::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             E::AlreadyAdded(_) => (StatusCode::CONFLICT, "already_added"),
             E::Removing(_) => (StatusCode::CONFLICT, "removing"),
+            E::Moving(_) => (StatusCode::CONFLICT, "moving"),
+            E::NoData(_) => (StatusCode::CONFLICT, "no_data"),
             E::UnknownCategory(_) => (StatusCode::BAD_REQUEST, "unknown_category"),
             E::Config(_)
             | E::InvalidLink(_)

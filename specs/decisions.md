@@ -2844,3 +2844,41 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `tempest share` and `tempest get` hand their transfer to a daemon that answers. `share` prints the link and returns; `get` follows the download until it completes, fails or makes no progress for `--timeout`, and Ctrl-C leaves it to the daemon. `--standalone`, or any option only a process of its own can honor (`--port`, `--bind`, `--identity`, `--no-lan`, `--lan-port`, and for `share` `--created` and `--tracker`), runs them standalone as in D-175.
 
 **Rationale:** A held engine makes `start` and `stop` mean the same thing with or without a daemon, and the note keeps anyone from expecting progress that nothing will make. Handing transfers to a running daemon avoids two processes competing for the peer port, while explicit options keep scripts and tests that want a process of their own working unchanged.
+
+---
+
+## D-183: Speed limits
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-118 asks for global and per-transfer speed limits, plus alternative limits that can be toggled or scheduled. Nothing says where limits are enforced, what they count, or how the toggle and the schedule combine.
+
+**Options for enforcement:** QUIC's flow control windows; pacing the UDP socket; token buckets on Data payloads in the driver (chosen). **For downloads:** throttle before sending a request, by its expected size; throttle after the Data arrives, before storing it and telling the session (chosen). **For the toggle and the schedule:** the schedule flips the toggle at its edges, as qBittorrent does; either one turns the alternative limits on (chosen).
+
+**Decision:**
+
+- Limits count Data payload bytes. The node has one download and one upload limit over every bundle, and each bundle has its own; a transfer waits for both. Uploads wait before sending Data; downloads wait after receiving it, holding the request's slot, so the session's adaptive pipeline shrinks to what the limit allows.
+- Each limit is a token bucket that saves up a quarter second's worth and may go into debt, so a frame of any size passes and the rate over time stays within the limit plus one burst and one frame. Limits change while transfers run.
+- The config's `limits.download` and `limits.upload` cover every transfer together; a transfer's own `limits.download` and `limits.upload` cover it alone, none by default. Rates are bytes per second, `null` for none.
+- `limits.alternative` holds replacement limits, `enabled` to switch them on, and an optional weekly `schedule` (days, `from` and `to` in local time; a window ending earlier than it starts runs past midnight). They apply while switched on or while the schedule's window is open. The engine checks every half second.
+
+**Rationale:** Throttling Data payloads in the driver is exact, works the same on every platform, and leaves the protocol and the sans-IO core untouched. Holding a received response throttles the sender too, through the pipeline, without guessing sizes. "Either turns them on" is one rule a user can predict from the settings alone, with no hidden state.
+
+---
+
+## D-184: Sharing limits, recheck, move storage and notifications
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-118 asks for sharing limits (stop or remove at a ratio or after a sharing time), recheck, move storage and notifications on completion and on error, at the engine level for M5. Their details are open.
+
+**Options for sharing time:** time since completion; time spent sharing while complete, over every run (chosen). **For recheck granularity:** chunk by chunk; file by file (chosen, see below). **For a move's failure:** fail the request; answer at once and show the failure on the transfer (chosen). **For moving a share:** move its base folder; move its entries into the new folder, which becomes their base (chosen). **For notifications:** desktop notifications; a configured command (chosen).
+
+**Decision:**
+
+- `sharing.ratio`, `sharing.time` and `sharing.action` (`stop` or `remove`, keeping files) are defaults in the config, and a transfer can override each. A complete running transfer that reaches either limit stops, showing "completed", or is removed. Time spent sharing is kept in the state database.
+- Recheck forgets the transfer's saved checkpoint, stops it if running, and opens its storage as a fresh download would, hashing every file ("checking"). The chunks found are saved, and it runs again if the queue says so, fetching the rest. A file whose root doesn't match is fetched again whole: the manifest gives only each file's root (D-013), so a damaged chunk can't be told from its neighbours without proofs from peers. A share rechecked this way can repair itself from the swarm.
+- Move storage stops the transfer, moves a download's bundle folder, or a share's top-level entries, into the new folder ("moving"), and runs it again. Each item is renamed; across file systems it is copied with its modification time, and originals are deleted only once everything is in place. Nothing is moved onto something that exists. On failure everything is put back and the transfer shows an error saying where the files are. A download without its manifest just changes folder.
+- `notifications.command` is a program and its arguments, run without a shell when a transfer completes during a run or newly fails. `TEMPEST_EVENT`, `TEMPEST_ID`, `TEMPEST_NAME`, `TEMPEST_KIND`, `TEMPEST_SAVE_FOLDER`, `TEMPEST_LINK`, and when known `TEMPEST_SIZE`, `TEMPEST_CONTENT_DIR` and `TEMPEST_ERROR` describe the transfer.
+
+**Rationale:** Counting time spent sharing measures what the user gave, not how long the engine was off. Per-file recheck is all the manifest allows, and still fetches only damaged files. Answering a move at once keeps API requests short, and an error on the transfer is where a UI looks. Moving entries rather than the base keeps a single-file share from dragging its parent folder along. A command covers desktop notifications, chat hooks and scripts alike, and needs no platform code in the engine.

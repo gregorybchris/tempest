@@ -8,12 +8,17 @@
 //! - a supervisor per running bundle, which owns its [`BundleHandle`] and its tracker
 //!   announcers, forwards its decision events, takes checkpoints when asked, stops it, and
 //!   reports how it ended;
-//! - deleting a removed transfer's files.
+//! - deleting a removed transfer's files;
+//! - moving a transfer's files to another folder ("moving").
 //!
 //! Every half second the task reads each running bundle's status, records what changed (the
-//! manifest's arrival, completion, progress, rates), emits snapshots of transfers that changed,
-//! and asks downloads for a checkpoint of their verified chunks every half minute.
+//! manifest's arrival, completion, progress, rates, time spent sharing), emits snapshots of
+//! transfers that changed, asks downloads for a checkpoint of their verified chunks every half
+//! minute, applies the speed limits in effect, and stops transfers that reached a sharing
+//! limit. Transfers that complete or fail run the notification command.
 
+mod notify;
+mod relocate;
 mod supervisor;
 mod task;
 
@@ -112,6 +117,12 @@ pub enum EngineError {
     /// The setting can't be changed while the engine runs.
     #[error("{0} can only be set in the config file")]
     Fixed(String),
+    /// The transfer's files are being moved.
+    #[error("transfer {0} is being moved")]
+    Moving(BundleId),
+    /// The transfer has no data on disk to check yet.
+    #[error("transfer {0} has no data yet: its manifest hasn't arrived")]
+    NoData(BundleId),
     /// The engine has shut down.
     #[error("the engine has shut down")]
     Stopped,
@@ -128,6 +139,8 @@ pub struct SettingsView {
     /// The groups of settings changed since the engine started that apply only once it
     /// restarts.
     pub restart_required: Vec<String>,
+    /// Whether the alternative speed limits apply now, switched on or by their schedule.
+    pub alternative_limits_active: bool,
 }
 
 /// How to add a transfer from a link.
@@ -175,6 +188,8 @@ enum Command {
     AddShare(Box<NewShare>, Reply<TransferInfo>),
     Start(BundleId, bool, Reply<TransferInfo>),
     Stop(BundleId, Reply<TransferInfo>),
+    Recheck(BundleId, Reply<TransferInfo>),
+    MoveStorage(BundleId, PathBuf, Reply<TransferInfo>),
     Remove(BundleId, bool, Reply<()>),
     Rename(BundleId, Option<String>, Reply<TransferInfo>),
     SetTags(BundleId, BTreeSet<String>, Reply<TransferInfo>),
@@ -400,6 +415,26 @@ impl Engine {
         self.call(|reply| Command::Stop(id, reply)).await
     }
 
+    /// Checks a transfer's data on disk again from scratch, as "checking", records the chunks
+    /// found, and resumes it if it was running. Missing or damaged chunks are downloaded again.
+    pub async fn recheck(&self, id: BundleId) -> Result<TransferInfo, EngineError> {
+        self.call(|reply| Command::Recheck(id, reply)).await
+    }
+
+    /// Moves a transfer's files into `folder`, as "moving", stopping it first if it runs and
+    /// resuming it after. A download's bundle folder moves into `folder`; a share's entries
+    /// move to `folder` as their new base. If the move fails, the files stay where they were
+    /// and the transfer shows the error.
+    pub async fn move_storage(
+        &self,
+        id: BundleId,
+        folder: &Path,
+    ) -> Result<TransferInfo, EngineError> {
+        let folder = folder.to_owned();
+        self.call(|reply| Command::MoveStorage(id, folder, reply))
+            .await
+    }
+
     /// Removes a transfer once it has stopped, deleting its files too if `delete_files` is set:
     /// the bundle's entries, and a download's bundle folder once empty.
     pub async fn remove(&self, id: BundleId, delete_files: bool) -> Result<(), EngineError> {
@@ -436,8 +471,10 @@ impl Engine {
             .await
     }
 
-    /// Replaces a transfer's own session settings, by dotted key, applied over the config's.
-    /// They take effect the next time it starts.
+    /// Replaces a transfer's own settings, by dotted key, applied over the config's: session
+    /// settings, which take effect the next time it starts, and `limits.download`,
+    /// `limits.upload` and `sharing.*`, which take effect at once (see
+    /// [`EngineConfig::transfer`]).
     pub async fn set_transfer_settings(
         &self,
         id: BundleId,
@@ -610,5 +647,11 @@ enum Internal {
         id: BundleId,
         generation: u64,
         result: Result<Summary, DriverError>,
+    },
+    /// A transfer's files were moved, or put back after failing to move.
+    Moved {
+        id: BundleId,
+        generation: u64,
+        result: std::io::Result<()>,
     },
 }

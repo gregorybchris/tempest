@@ -19,6 +19,8 @@ tempest-tracker = { path = "crates/tracker", version = "0.1.0" }
 tempest-engine = { path = "crates/engine", version = "0.1.0" }
 
 anyhow = "1"
+# Local time for the alternative speed limits' schedule.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive", "env"] }
 # Bundled so no system DuckDB is needed (D-075); json gives JSON columns and functions.
 duckdb = { version = "1.10506", features = ["bundled", "json"] }

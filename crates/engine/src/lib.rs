@@ -8,6 +8,7 @@
 //! - [`events`]: status snapshots and decision events as a numbered, resumable stream.
 //! - [`manifest`]: building a bundle from a file or folder.
 //! - [`api`]: the HTTP API over an [`Engine`] (D-080), and a client for it.
+//! - [`schedule`]: the weekly schedule for alternative speed limits.
 
 pub mod api;
 pub mod config;
@@ -15,10 +16,11 @@ mod engine;
 pub mod events;
 pub mod manifest;
 mod queue;
+pub mod schedule;
 mod status;
 pub mod store;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -61,6 +63,8 @@ pub struct TransferInfo {
     pub downloaded: u64,
     /// Payload bytes sent, over every run.
     pub uploaded: u64,
+    /// How long it has shared while complete, over every run, in seconds.
+    pub seeding_time: u64,
     /// Bytes per second received, recently.
     pub download_rate: u64,
     /// Bytes per second sent, recently.
@@ -87,6 +91,8 @@ pub struct TransferInfo {
     pub content_dir: Option<PathBuf>,
     /// A `tempest:` link to the bundle.
     pub link: String,
+    /// Its own settings, by dotted key, over the engine's.
+    pub settings: BTreeMap<String, serde_json::Value>,
 }
 
 impl TransferInfo {
@@ -105,13 +111,18 @@ impl TransferInfo {
             }
             _ => None,
         };
-        let base = match self.downloaded {
-            0 => self.size.unwrap_or(0),
-            downloaded => downloaded,
-        };
-        self.ratio = (base > 0).then(|| self.uploaded as f64 / base as f64);
+        self.ratio = ratio(self.uploaded, self.downloaded, self.size);
         self
     }
+}
+
+/// Bytes sent per byte received, or per byte of the bundle for a transfer that received none.
+pub(crate) fn ratio(uploaded: u64, downloaded: u64, size: Option<u64>) -> Option<f64> {
+    let base = match downloaded {
+        0 => size.unwrap_or(0),
+        downloaded => downloaded,
+    };
+    (base > 0).then(|| uploaded as f64 / base as f64)
 }
 
 fn display<S: Serializer>(value: &impl Display, serializer: S) -> Result<S::Ok, S::Error> {

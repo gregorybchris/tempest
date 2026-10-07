@@ -14,7 +14,8 @@ use tempest_protocol::wire::{Decode, Encode};
 use tempest_protocol::{BundleId, Hash};
 
 /// The migrations, in order. Migration `i` takes the schema from version `i` to `i + 1`.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
 CREATE TABLE transfers (
     id BLOB PRIMARY KEY NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('download', 'share')),
@@ -60,7 +61,11 @@ CREATE TABLE settings (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
 ) STRICT;
-"];
+",
+    "
+ALTER TABLE transfers ADD COLUMN seeding_time INTEGER NOT NULL DEFAULT 0;
+",
+];
 
 /// Why the state store failed.
 #[derive(Debug, thiserror::Error)]
@@ -92,7 +97,8 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn as_str(self) -> &'static str {
+    /// Its name: `download` or `share`.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Download => "download",
             Self::Share => "share",
@@ -155,6 +161,8 @@ pub struct TransferRow {
     pub have: u64,
     /// The bundle's chunk count, once the manifest is known; 0 before.
     pub chunks: u64,
+    /// How long it has shared while complete, over every run, in milliseconds.
+    pub seeding_time: u64,
 }
 
 impl TransferRow {
@@ -226,7 +234,7 @@ impl Store {
         let mut statement = self.conn.prepare(
             "SELECT id, kind, link, manifest, name, save_folder, content_dir, wanted, forced, done,
                     error, added, completed, queue_position, category, settings, uploaded,
-                    downloaded, have, chunks
+                    downloaded, have, chunks, seeding_time
              FROM transfers ORDER BY queue_position",
         )?;
         let rows = statement.query_map([], |row| {
@@ -258,6 +266,7 @@ impl Store {
                     downloaded: row.get::<_, i64>(17)?.max(0) as u64,
                     have: row.get::<_, i64>(18)?.max(0) as u64,
                     chunks: row.get::<_, i64>(19)?.max(0) as u64,
+                    seeding_time: row.get::<_, i64>(20)?.max(0) as u64,
                 },
             ))
         })?;
@@ -464,9 +473,9 @@ fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError
     tx.execute(
         "INSERT INTO transfers (id, kind, link, manifest, name, save_folder, content_dir, wanted,
              forced, done, error, added, completed, queue_position, category, settings, uploaded,
-             downloaded, have, chunks)
+             downloaded, have, chunks, seeding_time)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20)
+             ?18, ?19, ?20, ?21)
          ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, link = excluded.link,
              manifest = excluded.manifest, name = excluded.name,
              save_folder = excluded.save_folder, content_dir = excluded.content_dir,
@@ -474,7 +483,8 @@ fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError
              error = excluded.error, added = excluded.added, completed = excluded.completed,
              queue_position = excluded.queue_position, category = excluded.category,
              settings = excluded.settings, uploaded = excluded.uploaded,
-             downloaded = excluded.downloaded, have = excluded.have, chunks = excluded.chunks",
+             downloaded = excluded.downloaded, have = excluded.have, chunks = excluded.chunks,
+             seeding_time = excluded.seeding_time",
         params![
             t.id.as_bytes(),
             t.kind.as_str(),
@@ -496,6 +506,7 @@ fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError
             to_i64(t.downloaded),
             to_i64(t.have),
             to_i64(t.chunks),
+            to_i64(t.seeding_time),
         ],
     )?;
     tx.execute("DELETE FROM tags WHERE transfer = ?1", [t.id.as_bytes()])?;
@@ -536,6 +547,7 @@ mod tests {
             downloaded: 0,
             have: 0,
             chunks: 0,
+            seeding_time: 0,
         }
     }
 
@@ -559,6 +571,7 @@ mod tests {
             downloaded: 20,
             have: 3,
             chunks: 3,
+            seeding_time: 7,
             ..row(2, 0)
         };
         store.save_transfers([&first, &second]).unwrap();
@@ -649,5 +662,25 @@ mod tests {
             .unwrap();
         drop(conn);
         assert!(matches!(Store::open(&path), Err(StoreError::TooNew { .. })));
+    }
+
+    #[test]
+    fn a_first_version_database_is_upgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO transfers VALUES (?1, 'download', 'link', NULL, NULL, '/downloads',
+                 NULL, 1, 0, 0, NULL, 0, NULL, 0, NULL, '{}', 0, 0, 0, 0)",
+            [[9u8; 32].as_slice()],
+        )
+        .unwrap();
+        drop(conn);
+        let store = Store::open(&path).unwrap();
+        let transfers = store.transfers().unwrap();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].seeding_time, 0);
     }
 }

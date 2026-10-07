@@ -2604,6 +2604,7 @@ name = "tempest-engine"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "futures-util",
  "getrandom 0.3.4",
  "proptest",
@@ -2619,6 +2620,7 @@ dependencies = [
  "tempest-core",
  "tempest-net",
  "tempest-protocol",
+ "tempest-tracker",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

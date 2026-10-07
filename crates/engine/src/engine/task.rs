@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use serde_json::Value;
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Lan, Node,
-    Storage, StorageConfig, Summary, TrackerClient,
+    SpeedLimits, Storage, StorageConfig, Summary, TrackerClient,
 };
 use tempest_protocol::message::PeerRecord;
 use tempest_protocol::wire::{Decode, Encode};
@@ -16,16 +16,19 @@ use tempest_protocol::{Address, BundleId, ChunkLayout, Link, Manifest, PeerId};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior};
 
+use super::notify::{self, Notice};
+use super::relocate::{self, Item};
 use super::supervisor::Supervisor;
 use super::{
     AddOptions, CHECKPOINT_INTERVAL, Command, EVENT_BUFFER, EngineError, GOODBYE_TIMEOUT, Internal,
     NewShare, Reply, SettingsView, TICK,
 };
 use crate::TransferInfo;
-use crate::config::EngineConfig;
+use crate::config::{EngineConfig, SharingAction, SharingLimits};
 use crate::events::{EngineEvent, EventLog};
 use crate::manifest::unix_millis;
 use crate::queue::{Candidate, QueueMove, reorder, schedule};
+use crate::schedule::LocalTime;
 use crate::status::{Phase, Status, StatusInput};
 use crate::store::{Kind, Store, TransferRow};
 
@@ -62,14 +65,27 @@ struct Transfer {
     live: Live,
     /// The last snapshot emitted.
     shown: Option<TransferInfo>,
+    /// Its data is to be checked from scratch once it stops.
+    recheck: bool,
+    /// Its files are to move to this folder once it stops.
+    move_to: Option<PathBuf>,
 }
 
 /// Whether a transfer is running.
 enum Live {
     Idle,
-    Opening { generation: u64 },
+    /// Its storage is opening; with `recheck`, hashing every file, whether or not it is to run.
+    Opening {
+        generation: u64,
+        recheck: bool,
+    },
     Running(Run),
     Stopping(Run),
+    /// Its files are moving into a folder.
+    Moving {
+        generation: u64,
+        to: PathBuf,
+    },
 }
 
 /// A running bundle, as the engine task sees it.
@@ -90,6 +106,12 @@ struct Run {
     download_rate: u64,
     upload_rate: u64,
     last_checkpoint: Instant,
+    /// When the time spent sharing was last counted.
+    last_tick: Instant,
+    /// The bundle's own speed limits.
+    limits: SpeedLimits,
+    /// When it stops sharing.
+    sharing: SharingLimits,
 }
 
 /// A removed transfer whose bundle is still stopping.
@@ -217,6 +239,8 @@ impl EngineTask {
                     link,
                     live: Live::Idle,
                     shown: None,
+                    recheck: false,
+                    move_to: None,
                 },
             );
         }
@@ -316,6 +340,14 @@ impl EngineTask {
                     .await;
                 let _ = reply.send(result);
             }
+            Command::Recheck(id, reply) => {
+                let result = self.recheck(id).await;
+                let _ = reply.send(result);
+            }
+            Command::MoveStorage(id, folder, reply) => {
+                let result = self.move_storage(id, folder).await;
+                let _ = reply.send(result);
+            }
             Command::Remove(id, delete_files, reply) => self.remove(id, delete_files, reply),
             Command::Rename(id, name, reply) => {
                 let name = name
@@ -356,7 +388,7 @@ impl EngineTask {
                 let _ = reply.send(result);
             }
             Command::SetSettings(id, settings, reply) => {
-                let result = match self.config.transfer_session(&settings) {
+                let result = match self.config.transfer(&settings) {
                     Ok(_) => {
                         self.change(id, |t| {
                             t.row.settings = settings;
@@ -422,6 +454,7 @@ impl EngineTask {
             restart_required: (self.config.restart_required(&self.running).iter())
                 .map(|group| (*group).to_owned())
                 .collect(),
+            alternative_limits_active: self.config.limits.alternative_active(LocalTime::now()),
         }
     }
 
@@ -460,7 +493,9 @@ impl EngineTask {
         self.save_folder = config.save_folder()?;
         self.config = config;
         self.changes = changes;
-        // New queue limits apply now, new trackers to shares' links.
+        // New queue and speed limits apply now, new trackers to shares' links.
+        self.apply_speed_limits();
+        self.refresh_runs();
         self.reschedule().await;
         self.emit_changes();
         Ok(())
@@ -479,6 +514,7 @@ impl EngineTask {
             .ok_or(EngineError::NotFound(id))?;
         edit(t)?;
         self.store.save_transfer(&t.row)?;
+        self.refresh_runs();
         self.reschedule().await;
         self.emit_changes();
         Ok(self.info(&id).expect("the transfer exists"))
@@ -547,6 +583,7 @@ impl EngineTask {
             downloaded: 0,
             have: 0,
             chunks: 0,
+            seeding_time: 0,
         };
         self.store.save_transfer(&row)?;
         if let Some(record) = link_record(&link) {
@@ -589,6 +626,7 @@ impl EngineTask {
             downloaded: 0,
             have: chunks,
             chunks,
+            seeding_time: 0,
         };
         let mut link = Link::new(id);
         link.name = Some(manifest.name().to_owned());
@@ -612,6 +650,8 @@ impl EngineTask {
                 link,
                 live: Live::Idle,
                 shown: None,
+                recheck: false,
+                move_to: None,
             },
         );
         self.reschedule().await;
@@ -629,6 +669,14 @@ impl EngineTask {
     }
 
     fn remove(&mut self, id: BundleId, delete_files: bool, reply: Reply<()>) {
+        if let Some(Transfer {
+            live: Live::Moving { .. },
+            ..
+        }) = self.transfers.get(&id)
+        {
+            let _ = reply.send(Err(EngineError::Moving(id)));
+            return;
+        }
         let Some(t) = self.transfers.remove(&id) else {
             let _ = reply.send(Err(EngineError::NotFound(id)));
             return;
@@ -658,7 +706,7 @@ impl EngineTask {
                 self.burials.insert(id, burial);
             }
             // A storage still opening is dropped when it reports back.
-            Live::Idle | Live::Opening { .. } => bury(files, reply),
+            Live::Idle | Live::Opening { .. } | Live::Moving { .. } => bury(files, reply),
         }
     }
 
@@ -700,7 +748,7 @@ impl EngineTask {
         let row = &t.row;
         let run = match &t.live {
             Live::Running(run) | Live::Stopping(run) => Some(run),
-            Live::Idle | Live::Opening { .. } => None,
+            Live::Idle | Live::Opening { .. } | Live::Moving { .. } => None,
         };
         let net = run.map(|run| run.status.borrow().clone());
         let (phase, idle) = match &t.live {
@@ -708,6 +756,7 @@ impl EngineTask {
             Live::Opening { .. } => (Phase::Opening, Duration::ZERO),
             Live::Running(run) => (Phase::Running, run.last_progress.elapsed()),
             Live::Stopping(_) => (Phase::Stopping, Duration::ZERO),
+            Live::Moving { .. } => (Phase::Moving, Duration::ZERO),
         };
         let status = Status::of(StatusInput {
             phase,
@@ -745,6 +794,7 @@ impl EngineTask {
                 ratio: None,
                 downloaded: row.downloaded,
                 uploaded: row.uploaded,
+                seeding_time: row.seeding_time / 1000,
                 download_rate: run.map_or(0, |run| run.download_rate),
                 upload_rate: run.map_or(0, |run| run.upload_rate),
                 connections: net.as_ref().map_or(0, |s| s.connections),
@@ -758,21 +808,28 @@ impl EngineTask {
                 save_folder: row.save_folder.clone(),
                 content_dir: row.content_dir.clone(),
                 link,
+                settings: row.settings.clone(),
             }
             .with_derived(),
         )
     }
 
-    /// Emits a snapshot of every transfer that changed since its last one.
+    /// Emits a snapshot of every transfer that changed since its last one, and runs the
+    /// notification command for those that just completed or failed.
     fn emit_changes(&mut self) {
         let ids: Vec<_> = self.transfers.keys().copied().collect();
         for id in ids {
             let info = self.info(&id).expect("listed above");
             let t = self.transfers.get_mut(&id).expect("listed above");
-            if t.shown.as_ref() != Some(&info) {
-                t.shown = Some(info.clone());
-                self.events.push(EngineEvent::Transfer(Box::new(info)));
+            if t.shown.as_ref() == Some(&info) {
+                continue;
             }
+            let notice = t.shown.as_ref().and_then(|shown| notice(shown, &info));
+            t.shown = Some(info.clone());
+            if let Some(notice) = notice {
+                notify::run(&self.config.notifications.command, notice, &info);
+            }
+            self.events.push(EngineEvent::Transfer(Box::new(info)));
         }
     }
 
@@ -781,24 +838,13 @@ impl EngineTask {
         if self.shutting_down.is_some() || self.hold {
             return;
         }
-        let candidates: Vec<_> = self
-            .transfers
-            .values()
-            .filter(|t| t.row.wanted && !t.row.done && t.row.error.is_none())
-            .map(|t| Candidate {
-                id: t.row.id,
-                position: t.row.queue_position,
-                complete: t.row.is_complete(),
-                forced: t.row.forced,
-            })
-            .collect();
-        let running = schedule(&candidates, self.config.queue);
+        let running = self.scheduled();
         let ids: Vec<_> = self.transfers.keys().copied().collect();
         for id in ids {
             let live = &self.transfers[&id].live;
             match (running.contains(&id), live) {
-                (true, Live::Idle) => self.launch(id).await,
-                (false, Live::Running(_) | Live::Opening { .. }) => self.halt(id),
+                (true, Live::Idle) => self.launch(id, false).await,
+                (false, Live::Running(_) | Live::Opening { recheck: false, .. }) => self.halt(id),
                 _ => {}
             }
         }
@@ -810,12 +856,15 @@ impl EngineTask {
     }
 
     /// Starts a transfer: opens its storage if the manifest is known, or starts fetching it.
-    async fn launch(&mut self, id: BundleId) {
+    /// With `recheck`, every file is hashed, ignoring the saved checkpoint, and the transfer
+    /// runs afterwards only if the queue says it should.
+    async fn launch(&mut self, id: BundleId, recheck: bool) {
         let generation = self.generation();
         let t = self.transfers.get_mut(&id).expect("launching a transfer");
+        t.recheck = false;
         let Some(manifest) = t.manifest.clone() else {
-            let session = match self.config.transfer_session(&t.row.settings) {
-                Ok(session) => session,
+            let session = match self.config.transfer(&t.row.settings) {
+                Ok(transfer) => transfer.session,
                 Err(error) => return self.fail(id, error.to_string()),
             };
             let mut peers = self.store.peers(&id).unwrap_or_default();
@@ -835,26 +884,38 @@ impl EngineTask {
             .content_dir
             .clone()
             .expect("a transfer with a manifest has a content folder");
-        let checkpoint = self
-            .store
-            .checkpoint(&id)
-            .ok()
-            .flatten()
-            .and_then(|bytes| Checkpoint::from_bytes(&bytes).ok());
+        let checkpoint = match recheck {
+            true => None,
+            false => self
+                .store
+                .checkpoint(&id)
+                .ok()
+                .flatten()
+                .and_then(|bytes| Checkpoint::from_bytes(&bytes).ok()),
+        };
         let kind = t.row.kind;
-        t.live = Live::Opening { generation };
+        t.live = Live::Opening {
+            generation,
+            recheck,
+        };
         let internal = self.internal.clone();
         tokio::spawn(async move {
             let config = StorageConfig::default();
             let result = match (kind, checkpoint) {
                 (Kind::Share, Some(c)) => Storage::resume_shared(dir, manifest, config, c).await,
-                (Kind::Share, None) => Storage::open_shared(dir, manifest, config).await,
+                // A recheck finds what is intact even in a damaged share, which then downloads
+                // the rest.
+                (Kind::Share, None) if !recheck => {
+                    Storage::open_shared(dir, manifest, config).await
+                }
                 (Kind::Download, Some(c)) => Storage::resume_download(dir, manifest, config, c)
                     .await
                     .map(|(storage, _)| storage),
-                (Kind::Download, None) => Storage::create_download(dir, manifest, config)
-                    .await
-                    .map(|(storage, _)| storage),
+                (Kind::Share | Kind::Download, None) => {
+                    Storage::create_download(dir, manifest, config)
+                        .await
+                        .map(|(storage, _)| storage)
+                }
             };
             let _ = internal
                 .send(Internal::Opened {
@@ -866,28 +927,58 @@ impl EngineTask {
         });
     }
 
-    /// Runs a transfer whose storage just opened.
+    /// Whether the queue would run a transfer now.
+    fn should_run(&self, id: BundleId) -> bool {
+        self.shutting_down.is_none() && !self.hold && self.scheduled().contains(&id)
+    }
+
+    /// The transfers the queue says should run.
+    fn scheduled(&self) -> std::collections::HashSet<BundleId> {
+        let candidates: Vec<_> = self
+            .transfers
+            .values()
+            .filter(|t| t.row.wanted && !t.row.done && t.row.error.is_none())
+            .map(|t| Candidate {
+                id: t.row.id,
+                position: t.row.queue_position,
+                complete: t.row.is_complete(),
+                forced: t.row.forced,
+            })
+            .collect();
+        schedule(&candidates, self.config.queue)
+            .into_iter()
+            .collect()
+    }
+
+    /// Runs a transfer whose storage just opened, or, after a recheck the queue doesn't want
+    /// running, records what storage found and closes it.
     async fn opened(&mut self, id: BundleId, generation: u64, storage: Storage) {
         let Some(t) = self.transfers.get_mut(&id) else {
             return;
         };
-        if !matches!(t.live, Live::Opening { generation: g } if g == generation) {
+        if !matches!(t.live, Live::Opening { generation: g, .. } if g == generation) {
             return;
         }
         t.live = Live::Idle;
         // What storage found may differ from the record, if files changed while stopped.
-        if let Ok(have) = storage.have().await {
-            t.row.have = have.chunk_count();
+        if let Ok(checkpoint) = storage.checkpoint().await {
+            t.row.have = checkpoint.chunks_stored();
             if t.row.have < t.row.chunks {
                 t.row.completed = None;
                 t.row.done = false;
             } else {
                 t.row.completed.get_or_insert_with(now_millis);
             }
+            let _ = self.store.save_checkpoint(&id, &checkpoint.to_bytes());
             let _ = self.store.save_transfer(&t.row);
         }
-        let session = match self.config.transfer_session(&t.row.settings) {
-            Ok(session) => session,
+        if !self.should_run(id) {
+            let _ = storage.close().await;
+            return;
+        }
+        let t = self.transfers.get_mut(&id).expect("checked above");
+        let session = match self.config.transfer(&t.row.settings) {
+            Ok(transfer) => transfer.session,
             Err(error) => return self.fail(id, error.to_string()),
         };
         match self.node.share_with(storage, Some(session)).await {
@@ -924,6 +1015,15 @@ impl EngineTask {
         if let Some(lan) = &self.lan {
             lan.watch(&handle).await;
         }
+        let limits = handle.limits().clone();
+        let sharing = match self.config.transfer(&t.row.settings) {
+            Ok(transfer) => {
+                limits.download.set_rate(transfer.limits.download);
+                limits.upload.set_rate(transfer.limits.upload);
+                transfer.sharing
+            }
+            Err(_) => SharingLimits::default(),
+        };
         let (stop, stop_receiver) = watch::channel(false);
         let (checkpoint, checkpoint_receiver) = mpsc::channel(1);
         let now = Instant::now();
@@ -940,6 +1040,9 @@ impl EngineTask {
             download_rate: 0,
             upload_rate: 0,
             last_checkpoint: now,
+            last_tick: now,
+            limits,
+            sharing,
         });
         let supervisor = Supervisor {
             id,
@@ -949,6 +1052,157 @@ impl EngineTask {
             internal: self.internal.clone(),
         };
         tokio::spawn(supervisor.run(stop_receiver, checkpoint_receiver));
+    }
+
+    /// Checks a transfer's data from scratch: now if it is idle, or once it has stopped.
+    async fn recheck(&mut self, id: BundleId) -> Result<TransferInfo, EngineError> {
+        let t = self
+            .transfers
+            .get_mut(&id)
+            .ok_or(EngineError::NotFound(id))?;
+        if matches!(t.live, Live::Moving { .. }) || t.move_to.is_some() {
+            return Err(EngineError::Moving(id));
+        }
+        if t.manifest.is_none() {
+            return Err(EngineError::NoData(id));
+        }
+        self.store.clear_checkpoint(&id)?;
+        t.recheck = true;
+        // A failure that sent the user here may be fixed by what the check finds.
+        t.row.error = None;
+        match t.live {
+            Live::Running(_) | Live::Opening { .. } => self.halt(id),
+            Live::Stopping(_) | Live::Idle | Live::Moving { .. } => {}
+        }
+        self.after_stop(id).await;
+        self.emit_changes();
+        Ok(self.info(&id).expect("the transfer exists"))
+    }
+
+    /// Moves a transfer's files to `folder`: now if it is idle, or once it has stopped.
+    async fn move_storage(
+        &mut self,
+        id: BundleId,
+        folder: PathBuf,
+    ) -> Result<TransferInfo, EngineError> {
+        let folder = checked_path(&folder)?;
+        let t = self
+            .transfers
+            .get_mut(&id)
+            .ok_or(EngineError::NotFound(id))?;
+        if matches!(t.live, Live::Moving { .. }) || t.move_to.is_some() {
+            return Err(EngineError::Moving(id));
+        }
+        t.move_to = Some(folder);
+        if matches!(t.live, Live::Running(_) | Live::Opening { .. }) {
+            self.halt(id);
+        }
+        self.after_stop(id).await;
+        self.reschedule().await;
+        self.emit_changes();
+        Ok(self.info(&id).expect("the transfer exists"))
+    }
+
+    /// Starts moving an idle transfer's files to `folder`.
+    fn start_move(&mut self, id: BundleId, folder: PathBuf) {
+        let generation = self.generation();
+        let t = self.transfers.get_mut(&id).expect("moving a transfer");
+        let (Some(manifest), Some(dir)) = (&t.manifest, &t.row.content_dir) else {
+            return;
+        };
+        let items: Vec<Item> = match t.row.kind {
+            Kind::Download => vec![Item {
+                from: dir.clone(),
+                to: folder.join(manifest.name()),
+            }],
+            // A share's entries move one by one: its base folder may hold other things.
+            Kind::Share => manifest
+                .entries()
+                .iter()
+                .filter_map(|entry| entry.path.split('/').next())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|top| Item {
+                    from: dir.join(top),
+                    to: folder.join(top),
+                })
+                .collect(),
+        };
+        if items.iter().all(|item| item.from == item.to) {
+            return;
+        }
+        t.live = Live::Moving {
+            generation,
+            to: folder,
+        };
+        let internal = self.internal.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = relocate::move_all(&items);
+            let _ = internal.blocking_send(Internal::Moved {
+                id,
+                generation,
+                result,
+            });
+        });
+    }
+
+    /// Records where a transfer's files ended up, and lets it run again.
+    async fn moved(&mut self, id: BundleId, generation: u64, result: std::io::Result<()>) {
+        let Some(t) = self.transfers.get_mut(&id) else {
+            return;
+        };
+        let folder = match std::mem::replace(&mut t.live, Live::Idle) {
+            Live::Moving { generation: g, to } if g == generation => to,
+            other => {
+                t.live = other;
+                return;
+            }
+        };
+        let manifest = t.manifest.clone().expect("a moved transfer has a manifest");
+        let new_dir = match t.row.kind {
+            Kind::Download => folder.join(manifest.name()),
+            Kind::Share => folder.clone(),
+        };
+        match result {
+            Ok(()) => {
+                t.row.save_folder = folder;
+                t.row.content_dir = Some(new_dir);
+            }
+            Err(error) => {
+                let old_dir = t.row.content_dir.as_deref().unwrap_or(Path::new(""));
+                t.row.error = Some(format!(
+                    "Couldn't move the files to {}: {error}. They are still in {}.",
+                    folder.display(),
+                    old_dir.display()
+                ));
+            }
+        }
+        let _ = self.store.save_transfer(&t.row);
+        self.after_stop(id).await;
+        self.reschedule().await;
+    }
+
+    /// Applies each running transfer's own speed and sharing limits, after settings change.
+    fn refresh_runs(&mut self) {
+        for t in self.transfers.values_mut() {
+            let (Live::Running(run) | Live::Stopping(run)) = &mut t.live else {
+                continue;
+            };
+            if let Ok(transfer) = self.config.transfer(&t.row.settings) {
+                run.limits.download.set_rate(transfer.limits.download);
+                run.limits.upload.set_rate(transfer.limits.upload);
+                run.sharing = transfer.sharing;
+            }
+        }
+    }
+
+    /// Applies the speed limits over every transfer in effect now: the usual ones, or the
+    /// alternative ones while switched on or scheduled.
+    fn apply_speed_limits(&self) {
+        let limits = self.config.limits.in_effect(LocalTime::now());
+        let node = self.node.limits();
+        node.download.set_rate(limits.download);
+        node.upload.set_rate(limits.upload);
     }
 
     /// Records that a transfer failed to start.
@@ -973,7 +1227,7 @@ impl EngineTask {
                 Live::Stopping(run)
             }
             Live::Opening { .. } | Live::Idle => Live::Idle,
-            stopping @ Live::Stopping(_) => stopping,
+            unchanged @ (Live::Stopping(_) | Live::Moving { .. }) => unchanged,
         };
     }
 
@@ -987,7 +1241,7 @@ impl EngineTask {
                 Ok(storage) => self.opened(id, generation, storage).await,
                 Err(error) => {
                     let current = self.transfers.get(&id).is_some_and(
-                        |t| matches!(t.live, Live::Opening { generation: g } if g == generation),
+                        |t| matches!(t.live, Live::Opening { generation: g, .. } if g == generation),
                     );
                     if current {
                         self.fail(id, error.to_string());
@@ -1020,7 +1274,8 @@ impl EngineTask {
                     Live::Running(run) | Live::Stopping(run) => run.generation == generation,
                     _ => false,
                 };
-                if current {
+                // A recheck has cleared the checkpoint, and will take its own.
+                if current && !t.recheck {
                     t.row.have = checkpoint.chunks_stored();
                     let _ = self.store.save_checkpoint(&id, &checkpoint.to_bytes());
                     let _ = self.store.save_transfer(&t.row);
@@ -1031,6 +1286,11 @@ impl EngineTask {
                 generation,
                 result,
             } => self.finished(id, generation, result).await,
+            Internal::Moved {
+                id,
+                generation,
+                result,
+            } => self.moved(id, generation, result).await,
         }
         self.emit_changes();
     }
@@ -1068,7 +1328,7 @@ impl EngineTask {
             Ok(summary) => {
                 t.row.uploaded = run.base_uploaded + summary.uploaded;
                 t.row.downloaded = run.base_downloaded + summary.downloaded;
-                if let Some(checkpoint) = summary.checkpoint {
+                if let Some(checkpoint) = summary.checkpoint.filter(|_| !t.recheck) {
                     t.row.have = checkpoint.chunks_stored();
                     let _ = self.store.save_checkpoint(&id, &checkpoint.to_bytes());
                 }
@@ -1081,14 +1341,40 @@ impl EngineTask {
             Err(error) => t.row.error = Some(error.to_string()),
         }
         let _ = self.store.save_transfer(&t.row);
+        self.after_stop(id).await;
         self.reschedule().await;
     }
 
+    /// Starts what waited for a transfer to stop: a move, then a recheck.
+    async fn after_stop(&mut self, id: BundleId) {
+        let Some(t) = self.transfers.get_mut(&id) else {
+            return;
+        };
+        if !matches!(t.live, Live::Idle) {
+            return;
+        }
+        if let Some(folder) = t.move_to.take() {
+            match t.manifest {
+                Some(_) => return self.start_move(id, folder),
+                // Nothing is on disk yet: the download starts again in the new folder.
+                None => {
+                    t.row.save_folder = folder;
+                    let _ = self.store.save_transfer(&t.row);
+                }
+            }
+        }
+        if t.recheck {
+            self.launch(id, true).await;
+        }
+    }
+
     /// Reads every running bundle's status, records what changed, takes checkpoints when due,
-    /// and emits snapshots.
+    /// stops transfers at their sharing limits, applies the speed limits in effect, and emits
+    /// snapshots.
     async fn tick(&mut self) {
         let now = Instant::now();
         let mut queue_changed = false;
+        let mut at_limit = Vec::new();
         for t in self.transfers.values_mut() {
             let Live::Running(run) = &mut t.live else {
                 continue;
@@ -1122,18 +1408,69 @@ impl EngineTask {
                     (run.upload_rate + rate(status.uploaded.saturating_sub(uploaded))) / 2;
                 run.sample = (now, status.downloaded, status.uploaded);
             }
-            if !status.complete
-                && t.manifest.is_some()
-                && now.duration_since(run.last_checkpoint) >= CHECKPOINT_INTERVAL
-            {
+
+            if status.complete {
+                let shared = now.duration_since(run.last_tick).as_millis() as u64;
+                t.row.seeding_time += shared;
+                let size = t.manifest.as_ref().map(|m| m.total_size());
+                let ratio = crate::ratio(t.row.uploaded, t.row.downloaded, size);
+                let seeding = Duration::from_millis(t.row.seeding_time);
+                if run.sharing.reached(ratio, seeding) {
+                    at_limit.push((t.row.id, run.sharing.action));
+                }
+            }
+            run.last_tick = now;
+            if now.duration_since(run.last_checkpoint) >= CHECKPOINT_INTERVAL {
                 run.last_checkpoint = now;
-                let _ = run.checkpoint.try_send(());
+                match status.complete {
+                    // What a complete bundle holds doesn't change; its time sharing does.
+                    true => {
+                        let _ = self.store.save_transfer(&t.row);
+                    }
+                    false if t.manifest.is_some() => {
+                        let _ = run.checkpoint.try_send(());
+                    }
+                    false => {}
+                }
             }
         }
+        for (id, action) in at_limit {
+            self.sharing_limit_reached(id, action);
+            queue_changed = true;
+        }
+        self.apply_speed_limits();
         if queue_changed {
             self.reschedule().await;
         }
         self.emit_changes();
+    }
+
+    /// Stops or removes a transfer that reached a sharing limit.
+    fn sharing_limit_reached(&mut self, id: BundleId, action: SharingAction) {
+        match action {
+            SharingAction::Stop => {
+                let t = self.transfers.get_mut(&id).expect("a running transfer");
+                // Stopped by a rule, not by the user: completed (D-180).
+                t.row.done = true;
+                let _ = self.store.save_transfer(&t.row);
+            }
+            SharingAction::Remove => {
+                let (reply, _) = oneshot::channel();
+                self.remove(id, false, reply);
+            }
+        }
+    }
+}
+
+/// What to notify about a transfer that went from `before` to `after`, if anything.
+fn notice(before: &TransferInfo, after: &TransferInfo) -> Option<Notice> {
+    let errored = |info: &TransferInfo| matches!(info.status, Status::Errored { .. });
+    if errored(after) && !errored(before) {
+        Some(Notice::Errored)
+    } else if after.completed.is_some() && before.completed.is_none() {
+        Some(Notice::Completed)
+    } else {
+        None
     }
 }
 

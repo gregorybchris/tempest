@@ -5,11 +5,14 @@ use std::collections::BTreeMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use tempest_core::Config;
 use tempest_core::config::Settings;
+
+use crate::schedule::{LocalTime, Schedule};
 
 /// The engine's settings, as read from its config file.
 ///
@@ -38,6 +41,167 @@ pub struct EngineConfig {
     pub queue: QueueSettings,
     /// Trackers to announce every transfer to, besides those its link names.
     pub trackers: Vec<String>,
+    /// Speed limits over every transfer together.
+    pub limits: SpeedLimitSettings,
+    /// When a complete transfer stops sharing. A transfer can override them.
+    pub sharing: SharingLimits,
+    /// What to run when a transfer completes or fails.
+    pub notifications: NotificationSettings,
+}
+
+/// Speed limits over every transfer together, in bytes per second, `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SpeedLimitSettings {
+    /// Data received.
+    pub download: Option<u64>,
+    /// Data sent.
+    pub upload: Option<u64>,
+    /// Limits that replace these while switched on or while their schedule says so.
+    pub alternative: AlternativeLimits,
+}
+
+/// Alternative speed limits, such as lower ones for working hours.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AlternativeLimits {
+    /// Data received, in bytes per second, `null` for none.
+    pub download: Option<u64>,
+    /// Data sent, in bytes per second, `null` for none.
+    pub upload: Option<u64>,
+    /// Switches them on, whatever the schedule says.
+    pub enabled: bool,
+    /// When they apply on their own, in local time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<Schedule>,
+}
+
+/// Download and upload limits in bytes per second, `null` for none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RateLimits {
+    /// Data received.
+    pub download: Option<u64>,
+    /// Data sent.
+    pub upload: Option<u64>,
+}
+
+impl SpeedLimitSettings {
+    /// Whether the alternative limits apply at `at`.
+    pub fn alternative_active(&self, at: LocalTime) -> bool {
+        let alternative = &self.alternative;
+        alternative.enabled
+            || alternative
+                .schedule
+                .as_ref()
+                .is_some_and(|s| s.contains(at))
+    }
+
+    /// The limits in effect at `at`.
+    pub fn in_effect(&self, at: LocalTime) -> RateLimits {
+        match self.alternative_active(at) {
+            true => RateLimits {
+                download: self.alternative.download,
+                upload: self.alternative.upload,
+            },
+            false => RateLimits {
+                download: self.download,
+                upload: self.upload,
+            },
+        }
+    }
+}
+
+/// When a complete transfer stops sharing: at a ratio, after a time sharing, or whichever comes
+/// first. With neither it shares until stopped, or until its session stops on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SharingLimits {
+    /// Bytes sent per byte received (or per byte of the bundle, if it received none).
+    pub ratio: Option<f64>,
+    /// Time spent sharing while complete, such as `"12h"`.
+    #[serde(with = "optional_duration")]
+    pub time: Option<Duration>,
+    /// What happens at the limit.
+    pub action: SharingAction,
+}
+
+/// What happens to a transfer that reaches a sharing limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharingAction {
+    /// It stops and shows as completed.
+    #[default]
+    Stop,
+    /// It is removed, keeping its files.
+    Remove,
+}
+
+impl SharingLimits {
+    /// Whether a transfer that has sent `ratio` and shared for `time` has reached a limit.
+    pub fn reached(&self, ratio: Option<f64>, time: Duration) -> bool {
+        let by_ratio = matches!((self.ratio, ratio), (Some(limit), Some(ratio)) if ratio >= limit);
+        let by_time = self.time.is_some_and(|limit| time >= limit);
+        by_ratio || by_time
+    }
+}
+
+/// A command run when a transfer completes or fails.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotificationSettings {
+    /// The program and its arguments, run without a shell; empty for none. Variables named
+    /// `TEMPEST_*` describe the transfer.
+    pub command: Vec<String>,
+}
+
+/// A transfer's settings: the config's, with its own over them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferConfig {
+    /// Session settings.
+    pub session: Config,
+    /// Its own speed limits, within the limits over every transfer.
+    pub limits: RateLimits,
+    /// When it stops sharing.
+    pub sharing: SharingLimits,
+}
+
+/// The settings a transfer can override besides session settings, under these prefixes.
+const TRANSFER_PREFIXES: [&str; 2] = ["limits.", "sharing."];
+
+/// What a transfer can override besides session settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransferOverrides {
+    limits: RateLimits,
+    sharing: SharingLimits,
+}
+
+/// `Option<Duration>` as a duration string or `null`.
+mod optional_duration {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(
+        duration: &Option<Duration>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match duration {
+            Some(duration) => {
+                serializer.serialize_str(&tempest_core::config::format_duration(*duration))
+            }
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Duration>, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map(|text| {
+                tempest_core::config::parse_duration(&text).map_err(serde::de::Error::custom)
+            })
+            .transpose()
+    }
 }
 
 /// Where peers reach this one.
@@ -216,24 +380,7 @@ impl EngineConfig {
                     .overrides
                     .insert(session_key.to_owned(), value);
             }
-            _ => {
-                let mut tree = serde_json::to_value(&changed).expect("every config serializes");
-                let no_such = || invalid(key, "there is no such setting");
-                let (parents, last) = match key.rsplit_once('.') {
-                    Some((parents, last)) => (Some(parents), last),
-                    None => (None, key),
-                };
-                let mut object = tree.as_object_mut().expect("a config is an object");
-                for part in parents.into_iter().flat_map(|p| p.split('.')) {
-                    object = object
-                        .get_mut(part)
-                        .and_then(Value::as_object_mut)
-                        .ok_or_else(no_such)?;
-                }
-                // Unset optional settings are left out of the tree; unknown ones fail to parse.
-                object.insert(last.to_owned(), value);
-                changed = serde_json::from_value(tree).map_err(|e| invalid(key, e.to_string()))?;
-            }
+            _ => changed = set_in(&changed, key, value)?,
         }
         changed.validate()?;
         *self = changed;
@@ -312,6 +459,33 @@ impl EngineConfig {
                 return Err(invalid(key, "must be at least 1, or null for no limit"));
             }
         }
+        check_rates(
+            "limits",
+            RateLimits {
+                download: self.limits.download,
+                upload: self.limits.upload,
+            },
+        )?;
+        let alternative = &self.limits.alternative;
+        check_rates(
+            "limits.alternative",
+            RateLimits {
+                download: alternative.download,
+                upload: alternative.upload,
+            },
+        )?;
+        check_sharing("sharing", &self.sharing)?;
+        if self
+            .notifications
+            .command
+            .first()
+            .is_some_and(String::is_empty)
+        {
+            return Err(invalid(
+                "notifications.command",
+                "the first item must name a program",
+            ));
+        }
         if let Some(url) = self.trackers.iter().find(|url| !is_http_url(url)) {
             return Err(invalid(
                 "trackers",
@@ -328,18 +502,36 @@ impl EngineConfig {
         Ok(config)
     }
 
-    /// The session settings of a transfer with `overrides` of its own, applied after the
-    /// profile and the config's overrides.
-    pub fn transfer_session(
+    /// The settings of a transfer with `overrides` of its own, by dotted key. Keys under
+    /// `limits.` (`download` and `upload`, none by default) and `sharing.` (as in the config,
+    /// whose values are the defaults) are the transfer's own; the rest are session settings,
+    /// applied after the profile and the config's overrides.
+    pub fn transfer(
         &self,
         overrides: &BTreeMap<String, Value>,
-    ) -> Result<Config, ConfigError> {
-        let mut config = self.session()?;
+    ) -> Result<TransferConfig, ConfigError> {
+        let mut session = self.session()?;
+        let mut own = TransferOverrides {
+            limits: RateLimits::default(),
+            sharing: self.sharing,
+        };
         for (key, value) in overrides {
-            config.set(key, value.clone())?;
+            match TRANSFER_PREFIXES
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+            {
+                true => own = set_in(&own, key, value.clone())?,
+                false => session.set(key, value.clone())?,
+            }
         }
-        config.validate()?;
-        Ok(config)
+        session.validate()?;
+        check_rates("limits", own.limits)?;
+        check_sharing("sharing", &own.sharing)?;
+        Ok(TransferConfig {
+            session,
+            limits: own.limits,
+            sharing: own.sharing,
+        })
     }
 
     /// Where state and the identity are kept.
@@ -360,6 +552,62 @@ impl EngineConfig {
                 .ok_or_else(|| invalid("save_folder", "cannot find the home directory")),
         }
     }
+}
+
+/// `config` with the setting at the dotted `key` replaced by `value`.
+fn set_in<T: Serialize + serde::de::DeserializeOwned>(
+    config: &T,
+    key: &str,
+    value: Value,
+) -> Result<T, ConfigError> {
+    let mut tree = serde_json::to_value(config).expect("every config serializes");
+    let no_such = || invalid(key, "there is no such setting");
+    let (parents, last) = match key.rsplit_once('.') {
+        Some((parents, last)) => (Some(parents), last),
+        None => (None, key),
+    };
+    let mut object = tree.as_object_mut().expect("a config is an object");
+    for part in parents.into_iter().flat_map(|p| p.split('.')) {
+        object = object
+            .get_mut(part)
+            .and_then(Value::as_object_mut)
+            .ok_or_else(no_such)?;
+    }
+    // Unset optional settings are left out of the tree; unknown ones fail to parse.
+    object.insert(last.to_owned(), value);
+    serde_json::from_value(tree).map_err(|e| invalid(key, e.to_string()))
+}
+
+/// Checks speed limits, naming them under `prefix`.
+fn check_rates(prefix: &str, limits: RateLimits) -> Result<(), ConfigError> {
+    for (name, limit) in [("download", limits.download), ("upload", limits.upload)] {
+        if limit == Some(0) {
+            return Err(invalid(
+                &format!("{prefix}.{name}"),
+                "must be at least 1 byte per second, or null for no limit",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_sharing(prefix: &str, sharing: &SharingLimits) -> Result<(), ConfigError> {
+    if sharing
+        .ratio
+        .is_some_and(|ratio| !(ratio.is_finite() && ratio > 0.0))
+    {
+        return Err(invalid(
+            &format!("{prefix}.ratio"),
+            "must be a number above 0, or null for no limit",
+        ));
+    }
+    if sharing.time == Some(Duration::ZERO) {
+        return Err(invalid(
+            &format!("{prefix}.time"),
+            "must be longer than 0, or null for no limit",
+        ));
+    }
+    Ok(())
 }
 
 fn is_http_url(url: &str) -> bool {
@@ -456,7 +704,7 @@ trackers: [https://tracker.example.org]
         assert_eq!(session.upload.reciprocal_slots, 7);
 
         let transfer = BTreeMap::from([("upload.reciprocal_slots".to_owned(), json!(9))]);
-        let session = config.transfer_session(&transfer).unwrap();
+        let session = config.transfer(&transfer).unwrap().session;
         assert_eq!(session.upload.reciprocal_slots, 9);
         assert_eq!(session.connections.max, background.connections.max);
 
@@ -484,6 +732,94 @@ trackers: [https://tracker.example.org]
     }
 
     #[test]
+    fn limits_sharing_and_notifications_are_read() {
+        use crate::schedule::{TimeOfDay, Weekday};
+
+        let config = EngineConfig::from_yaml(
+            r#"
+limits:
+  download: 1000000
+  alternative:
+    upload: 50000
+    schedule: { days: [mon, fri], from: "09:00", to: "17:00" }
+sharing: { ratio: 2.5, time: 12h, action: remove }
+notifications: { command: [sh, -c, "echo done"] }
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.sharing.time, Some(Duration::from_secs(12 * 3600)));
+        assert_eq!(config.sharing.action, SharingAction::Remove);
+        let text = config.to_yaml();
+        assert_eq!(EngineConfig::from_yaml(&text).unwrap(), config, "{text}");
+
+        let at = |day, hour| LocalTime {
+            day,
+            time: TimeOfDay::new(hour, 0).unwrap(),
+        };
+        let normal = RateLimits {
+            download: Some(1_000_000),
+            upload: None,
+        };
+        let alternative = RateLimits {
+            download: None,
+            upload: Some(50_000),
+        };
+        assert_eq!(config.limits.in_effect(at(Weekday::Mon, 10)), alternative);
+        assert_eq!(config.limits.in_effect(at(Weekday::Mon, 18)), normal);
+        assert_eq!(config.limits.in_effect(at(Weekday::Tue, 10)), normal);
+        let mut toggled = config.clone();
+        toggled
+            .set("limits.alternative.enabled", json!(true))
+            .unwrap();
+        assert_eq!(toggled.limits.in_effect(at(Weekday::Tue, 10)), alternative);
+    }
+
+    #[test]
+    fn a_transfer_overrides_its_limits_and_sharing() {
+        let config = EngineConfig::from_yaml("sharing: { ratio: 2, time: 1h }").unwrap();
+        let defaults = config.transfer(&BTreeMap::new()).unwrap();
+        assert_eq!(defaults.limits, RateLimits::default());
+        assert_eq!(defaults.sharing, config.sharing);
+        assert_eq!(defaults.session, config.session().unwrap());
+
+        let overrides = BTreeMap::from([
+            ("limits.upload".to_owned(), json!(4096)),
+            ("sharing.ratio".to_owned(), json!(null)),
+            ("sharing.action".to_owned(), json!("remove")),
+            ("upload.reciprocal_slots".to_owned(), json!(9)),
+        ]);
+        let transfer = config.transfer(&overrides).unwrap();
+        assert_eq!(transfer.limits.upload, Some(4096));
+        assert_eq!(transfer.sharing.ratio, None);
+        assert_eq!(transfer.sharing.time, Some(Duration::from_secs(3600)));
+        assert_eq!(transfer.sharing.action, SharingAction::Remove);
+        assert_eq!(transfer.session.upload.reciprocal_slots, 9);
+
+        let error = |key: &str, value| {
+            let overrides = BTreeMap::from([(key.to_owned(), value)]);
+            config.transfer(&overrides).unwrap_err().to_string()
+        };
+        assert!(error("limits.upload", json!(0)).contains("limits.upload"));
+        assert!(error("limits.nope", json!(1)).contains("limits.nope"));
+        assert!(error("sharing.ratio", json!(-1)).contains("sharing.ratio"));
+        assert!(error("sharing.time", json!("soon")).contains("sharing.time"));
+    }
+
+    #[test]
+    fn sharing_limits_are_reached_by_ratio_or_time() {
+        let hour = Duration::from_secs(3600);
+        let limits = SharingLimits {
+            ratio: Some(2.0),
+            time: Some(hour),
+            action: SharingAction::Stop,
+        };
+        assert!(!limits.reached(Some(1.9), hour / 2));
+        assert!(limits.reached(Some(2.0), Duration::ZERO));
+        assert!(limits.reached(None, hour));
+        assert!(!SharingLimits::default().reached(Some(100.0), hour * 1000));
+    }
+
+    #[test]
     fn invalid_settings_are_explained() {
         let error = |yaml: &str| EngineConfig::from_yaml(yaml).unwrap_err().to_string();
         assert!(error("settings: { profile: fast }").contains("fast"));
@@ -498,6 +834,19 @@ trackers: [https://tracker.example.org]
         assert!(error("data_dir: relative/path").contains("data_dir"));
         assert!(error("queue: { max_active_downloads: 0 }").contains("max_active_downloads"));
         assert!(error("trackers: [ftp://example.org]").contains("trackers"));
+        assert!(error("limits: { upload: 0 }").contains("limits.upload"));
+        assert!(
+            error("limits: { alternative: { download: 0 } }")
+                .contains("limits.alternative.download")
+        );
+        assert!(
+            error("limits: { alternative: { schedule: { from: '25:00', to: '01:00' } } }")
+                .contains("25:00")
+        );
+        assert!(error("sharing: { ratio: 0 }").contains("sharing.ratio"));
+        assert!(error("sharing: { time: 0s }").contains("sharing.time"));
+        assert!(error("sharing: { action: pause }").contains("pause"));
+        assert!(error("notifications: { command: [''] }").contains("notifications.command"));
         assert!(error("lan: { enabled: off }").contains("invalid config"));
 
         let mut config = EngineConfig::default();

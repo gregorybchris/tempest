@@ -198,6 +198,7 @@ mod tests {
             ratio: None,
             downloaded: 0,
             uploaded: 0,
+            seeding_time: 0,
             download_rate: 0,
             upload_rate: 0,
             connections: 0,
@@ -211,6 +212,7 @@ mod tests {
             save_folder: PathBuf::from("/downloads"),
             content_dir: None,
             link: String::new(),
+            settings: Default::default(),
         }
     }
 

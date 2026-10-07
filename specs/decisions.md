@@ -2077,3 +2077,44 @@ UI screenshot tests are not required.
 **Options:** an older MSRV tested separately; MSRV equal to the pin.
 
 **Decision:** `rust-version` equals the pinned toolchain, and CI installs the toolchain from `rust-toolchain.toml`, so the pin is the one source of truth. An older MSRV would need its own CI job and is not useful for a binary distributed through releases.
+
+---
+
+## D-142: Implicit directories count in case-insensitive path checks
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/content.md` forbade two entries whose paths differ only by case, but said nothing about the directories that implicitly contain entries. Files `A/b` and `a/c` were valid, yet macOS and Windows would write both into one folder, so the bundle could not be written identically everywhere.
+
+**Options:** leave it to clients; forbid case-insensitively equal directory paths too.
+
+**Decision:** Forbid it. No two different paths, counting implicit directories, may be equal when compared case-insensitively. This keeps the Paths section's promise that a valid bundle is written the same way on every system, and makes "a directory entry must be empty" and "nothing inside a file or symlink" unambiguous.
+
+---
+
+## D-143: Bundles made from a single file
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** A manifest's entries are relative to the bundle's top level, and its `name` is typically the top-level folder. Nothing said what sharing a single file produces.
+
+**Options:** a bundle named after the file with one entry of the same name; a special "single file" manifest form.
+
+**Decision:** Sharing a file creates a bundle named after it, with one entry whose path is the file's name. Sharing a folder creates a bundle named after the folder, whose entries are its contents. The protocol needs no special case. Where a downloader writes a one-file bundle (for example, directly in the download folder rather than in a folder of the same name) is client policy, decided with the download path (M4).
+
+When building a manifest, the client converts file names and symlink targets to NFC and refuses anything else the path rules forbid, naming the offending path, rather than renaming it.
+
+---
+
+## D-144: Link formatting and parsing details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/discovery.md` says link values are percent-encoded per RFC 3986 and unknown parameters are ignored, but not which characters are encoded, how `+` is read, or what a malformed known parameter does.
+
+**Decision:**
+
+- Writers percent-encode everything except unreserved characters and `! $ ' ( ) * , ; : @ / ?`, so addresses and tracker URLs stay readable. `&`, `=`, `+`, `#`, spaces, brackets and non-ASCII text are encoded.
+- Readers decode `%XX` escapes and take every other character literally. `+` is a plus, not a space (RFC 3986, not HTML forms).
+- The scheme is matched case-insensitively. A fragment is ignored.
+- A link is rejected if `bundle` is missing, a parameter allowed once appears twice, a known parameter has a malformed value, or `addr`/`relay` appear without `peer`. Rejecting rather than skipping bad values means a mangled link fails loudly.

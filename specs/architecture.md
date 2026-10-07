@@ -30,7 +30,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 
 | Crate | Contents | May depend on |
 | --- | --- | --- |
-| `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing) |
+| `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization) |
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | `protocol` |
 | `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client | `protocol`, `core` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net` |

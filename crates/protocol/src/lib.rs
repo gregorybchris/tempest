@@ -8,6 +8,10 @@
 //! - [`frame`]: how messages are framed on streams, with size limits.
 //! - [`hash`]: hashes and the domain-separated hash functions.
 //! - [`tree`]: chunks, chunk trees, roots, proofs and Data verification.
+//! - [`manifest`]: manifests, their validation and bundle IDs.
+//! - [`path`]: the rules for manifest paths and symlink targets.
+//! - [`layout`]: bundle-wide chunk numbering.
+//! - [`link`]: `tempest:` links.
 //! - [`range`]: chunk ranges and canonical range lists.
 //! - [`address`]: network addresses.
 //! - [`message`]: peer message types.
@@ -15,12 +19,19 @@
 pub mod address;
 pub mod frame;
 pub mod hash;
+pub mod layout;
+pub mod link;
+pub mod manifest;
 pub mod message;
+pub mod path;
 pub mod range;
 pub mod tree;
 pub mod wire;
 
 pub use address::Address;
 pub use hash::Hash;
+pub use layout::ChunkLayout;
+pub use link::Link;
+pub use manifest::{BundleId, Entry, EntryKind, FileInfo, Manifest};
 pub use range::{ChunkRange, RangeList};
 pub use wire::{Decode, DecodeError, Encode, Reader, Writer};

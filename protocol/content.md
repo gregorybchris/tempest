@@ -128,7 +128,7 @@ Paths are designed so that any valid bundle can be written identically on Window
   - MUST NOT end with `.` or a space
   - MUST NOT be a name reserved on Windows (see below)
 - Where this section compares paths **case-insensitively**, it means comparing them after Unicode simple case folding (the `C` and `S` mappings of `CaseFolding.txt`, Unicode 15.1).
-- No two entries' paths may be equal when compared case-insensitively.
+- No two different paths may be equal when compared case-insensitively. This covers entries' paths and the paths of the directories that implicitly contain them. For example, files `A/b` and `a/c` cannot both appear.
 - No entry's path may lie inside the path of a file or symlink entry, compared case-insensitively. For example, a file `a` and a file `A/b` cannot both appear.
 
 **Reserved names.** A segment is reserved if the part before its first `.`, with any trailing spaces removed, matches one of the following when compared case-insensitively:

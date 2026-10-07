@@ -2,14 +2,12 @@
 
 use crate::frame::{self, Frame};
 use crate::hash::HASH_LEN;
+use crate::manifest::MAX_MANIFEST_LEN;
 use crate::tree::CHUNK_SIZE;
 use crate::wire::DecodeError;
 
 /// The largest frame length of any control message: 16 MiB.
 pub const MAX_CONTROL_FRAME: u32 = 16 * 1024 * 1024;
-
-/// The largest manifest: 64 MiB.
-pub const MAX_MANIFEST_LEN: u32 = 64 * 1024 * 1024;
 
 /// The longest Reject or Goodbye message text: 1 KiB.
 pub const MAX_REASON_MESSAGE_LEN: u32 = 1024;
@@ -88,7 +86,7 @@ impl MessageType {
     pub fn max_frame_length(self) -> u32 {
         match self {
             Self::Data => max_data_frame_length(MAX_REQUEST_CHUNKS),
-            Self::Manifest => 1 + 4 + MAX_MANIFEST_LEN,
+            Self::Manifest => 1 + 4 + MAX_MANIFEST_LEN as u32,
             Self::Reject => 1 + 2 + 4 + MAX_REASON_MESSAGE_LEN,
             Self::Request => 1 + 4 + 4,
             Self::ManifestRequest => 1,

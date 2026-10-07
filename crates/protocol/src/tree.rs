@@ -149,6 +149,9 @@ pub enum InvalidRequest {
     /// `count` was not a power of two.
     #[error("count {0} is not a power of two")]
     CountNotPowerOfTwo(u32),
+    /// `start` was not within any file of the bundle.
+    #[error("start is not within any file of the bundle")]
+    OutsideBundle,
     /// `start` was not within the file.
     #[error("start is past the file's last chunk")]
     StartPastEnd,

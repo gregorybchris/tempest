@@ -37,3 +37,17 @@ path = "fuzz_targets/verify_data.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "link"
+path = "fuzz_targets/link.rs"
+test = false
+doc = false
+bench = false

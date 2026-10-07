@@ -32,6 +32,15 @@ pub enum DecodeError {
     /// A frame had a message type this protocol doesn't define.
     #[error("unknown message type {0:#04x}")]
     UnknownMessageType(u8),
+    /// A manifest had a format version other than 1.
+    #[error("unknown manifest version {0}")]
+    UnknownManifestVersion(u8),
+    /// A manifest entry had an unknown kind.
+    #[error("unknown manifest entry kind {0}")]
+    UnknownEntryKind(u8),
+    /// A manifest decoded but broke a rule.
+    #[error("invalid manifest: {0}")]
+    InvalidManifest(Box<crate::manifest::ManifestError>),
     /// A frame had a length of zero, so no message type.
     #[error("frame has no message type")]
     EmptyFrame,

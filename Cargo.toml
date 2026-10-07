@@ -11,13 +11,17 @@ repository = "https://github.com/gregorybchris/tempest"
 rust-version = "1.99"
 
 [workspace.dependencies]
-tempest-protocol = { path = "crates/protocol" }
+tempest-protocol = { path = "crates/protocol", version = "0.1.0" }
 
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "2"
+unicode-normalization = "0.1"
 
 hex = "0.4"
 proptest = "1"
+tempfile = "3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

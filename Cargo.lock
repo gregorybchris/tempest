@@ -520,6 +520,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-core"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rand",
+ "rand_chacha",
+ "tempest-protocol",
+ "thiserror",
+]
+
+[[package]]
 name = "tempest-protocol"
 version = "0.1.0"
 dependencies = [

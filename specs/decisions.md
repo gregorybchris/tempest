@@ -2162,3 +2162,43 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - A malformed ID, address or relay identity anywhere in a body makes the whole body invalid, rather than skipping the bad value.
 - Text forms are the same as in links: IDs are lowercase hex and IPv4-mapped IPv6 addresses are read as IPv4.
 
+
+---
+
+## D-148: The core's session and driver boundary
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-068 makes the core sans-IO but doesn't say what one state machine covers or who handles chunk bytes. The simulator must model 1,000-peer swarms of large bundles, which it can't do if every Data carries and hashes real bytes.
+
+**Options:** the core receives and sends whole messages, including chunk bytes, and verifies Data itself; the core sees every message except chunk payloads, and the driver reads, verifies and stores chunks; the core calls a synchronous storage trait.
+
+**Decision:**
+
+- One `Session` per bundle: one peer's participation in one swarm, over all of its connections for that bundle. The engine's bundle actor drives one, and so does each simulated peer.
+- The session never sees chunk bytes. It asks the driver to send Data for a range, and the driver builds it from storage. When Data arrives, the driver verifies it (the session offers a helper that uses the manifest), stores it, and reports only the outcome. Manifests do pass through the session, which checks them against the bundle ID.
+- Request streams are named on both sides: the session names the streams it opens, the driver names the ones the other peer opens. The driver reports when it has finished sending Data, so the session can limit concurrent uploads and let the upload strategy order them.
+- Every random choice comes from a ChaCha8 generator seeded by the driver, which gives the same sequence on every platform. Session state uses ordered maps, so iteration order never depends on hashing.
+
+**Rationale:** Storage I/O stays in the driver, where it belongs in the engine's actor design (D-085), and the simulator can model payloads by size alone. A synchronous storage trait would block the bundle actor on disk.
+
+---
+
+## D-149: Session policies the strategies spec leaves open
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** Implementing the session needed answers to small policy questions not covered by `specs/strategies.md` or the protocol.
+
+**Decision:**
+
+- **Requests from peers not being served** are rejected with `busy`. Requests already accepted are still answered after this peer stops serving the requester.
+- **After a Reject**, this peer sends that provider no further requests for a configurable delay (default 1 s), instead of retrying at once.
+- **Have before the manifest:** Have and HaveUpdates received before the manifest are kept as received and checked once it arrives. A peer that sends more than a configured number of ranges before then is disconnected with `done`.
+- **A manifest that doesn't match the bundle ID, or doesn't decode,** counts as bad data (D-067): the sender is closed with `bad_data` and banned.
+- **A banned peer that connects again** is closed at once with `bad_data`.
+- **Only one ManifestRequest is in flight at a time.** A peer that answers `dont_have` isn't asked again until it announces chunks.
+- **Complete peers don't dial.** They wait for incomplete peers to connect.
+- **Candidates** is answered with this peer's own direct addresses. Hole punching itself is left to the driver.
+
+**Rationale:** Each choice is the simplest that avoids busy loops or unbounded memory, and each can be revisited with simulation data.

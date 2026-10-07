@@ -1,0 +1,586 @@
+//! A single session driven by hand: the opening sequence, protocol violations, request handling
+//! and the policies around them.
+
+mod common;
+
+use std::time::Duration;
+
+use common::{file_bytes, peer_id};
+use tempest_core::content::MemoryContent;
+use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
+use tempest_core::{
+    Action, Config, ConnId, EventKind, Inbound, LocalPeer, Reply, RequestId, Response, Session,
+    StreamId, Time,
+};
+use tempest_protocol::message::{
+    Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, Reject,
+    RejectReason, Request, Serving, Want,
+};
+use tempest_protocol::tree::VerifyError;
+use tempest_protocol::{BundleId, ChunkRange, Hash, Message, PeerId, RangeList};
+
+const CHUNK: usize = 16 * 1024;
+const C: ConnId = ConnId(7);
+
+/// A bundle of 40 chunks in two files: chunks 0–2 and 3–39.
+fn content() -> MemoryContent {
+    MemoryContent::new(
+        "bundle",
+        vec![
+            ("a".to_owned(), file_bytes(1, 40_000)),
+            ("b".to_owned(), file_bytes(2, 37 * CHUNK)),
+        ],
+    )
+}
+
+fn local(n: u8) -> LocalPeer {
+    LocalPeer {
+        peer_id: peer_id(n),
+        addresses: Vec::new(),
+        relay: None,
+    }
+}
+
+fn complete(config: Config) -> Session {
+    let content = content();
+    let have = RangeList::from_chunks(0..40);
+    Session::with_manifest(config, local(5), content.manifest().clone(), &have, 0).unwrap()
+}
+
+fn fresh(bundle_id: BundleId) -> Session {
+    Session::new(Config::default(), local(5), bundle_id, 0).unwrap()
+}
+
+fn hello(bundle_id: BundleId) -> Hello {
+    Hello {
+        bundle_id,
+        capabilities: Vec::new(),
+        client: "test".to_owned(),
+        max_request_chunks: 64,
+        max_open_requests: 32,
+        addresses: Vec::new(),
+        relay: None,
+    }
+}
+
+fn ranges(chunks: impl IntoIterator<Item = u32>) -> RangeList {
+    RangeList::from_chunks(chunks)
+}
+
+fn connect(session: &mut Session, conn: ConnId, peer: PeerId, direction: Direction) {
+    let info = ConnInfo {
+        peer,
+        direction,
+        path: PathKind::Direct,
+    };
+    session.handle_connected(Time::ZERO, conn, info);
+}
+
+fn control(session: &mut Session, conn: ConnId, message: Message) {
+    session.handle_message(Time::ZERO, conn, Inbound::Control(message));
+}
+
+/// Accepts a connection from peer 9 and completes the opening with `have`.
+fn open(session: &mut Session, have: RangeList) {
+    connect(session, C, peer_id(9), Direction::Accepted);
+    let id = session.bundle_id();
+    control(session, C, Message::Hello(hello(id)));
+    control(session, C, Message::Have(Have { ranges: have }));
+}
+
+fn request(session: &mut Session, stream: u64, message: Message) {
+    let inbound = Inbound::Request {
+        stream: StreamId(stream),
+        message,
+    };
+    session.handle_message(Time::ZERO, C, inbound);
+}
+
+fn chunks(start: u32, count: u32) -> Message {
+    Message::Request(Request { start, count })
+}
+
+fn closes(actions: &[Action]) -> Vec<GoodbyeReason> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Close { reason, .. } => Some(*reason),
+            _ => None,
+        })
+        .collect()
+}
+
+fn replies(actions: &[Action]) -> Vec<(u64, Reply)> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Respond { stream, reply, .. } => Some((stream.0, reply.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn reject_reason(reply: &Reply) -> Option<RejectReason> {
+    match reply {
+        Reply::Reject(Reject { reason, .. }) => Some(*reason),
+        _ => None,
+    }
+}
+
+fn sent(actions: &[Action]) -> Vec<Message> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Send { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_dialing_peer_speaks_first() {
+    let mut session = complete(Config::default());
+    connect(&mut session, C, peer_id(9), Direction::Dialed);
+    let sent = sent(&session.poll_actions());
+    assert!(matches!(&sent[0], Message::Hello(h) if h.bundle_id == session.bundle_id()));
+    assert_eq!(
+        sent[1],
+        Message::Have(Have {
+            ranges: ranges(0..40)
+        })
+    );
+    assert_eq!(sent.len(), 2);
+}
+
+#[test]
+fn the_accepting_peer_answers_hello_with_hello_and_have() {
+    let mut session = fresh(content().manifest().bundle_id());
+    connect(&mut session, C, peer_id(9), Direction::Accepted);
+    assert!(session.poll_actions().is_empty());
+    let id = session.bundle_id();
+    control(&mut session, C, Message::Hello(hello(id)));
+    let sent = sent(&session.poll_actions());
+    assert!(matches!(sent[0], Message::Hello(_)));
+    // Without the manifest, Have is empty.
+    assert_eq!(sent[1], Message::Have(Have::default()));
+}
+
+#[test]
+fn the_opening_must_be_hello_then_have() {
+    let id = content().manifest().bundle_id();
+    let mut session = fresh(id);
+    connect(&mut session, C, peer_id(9), Direction::Accepted);
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+
+    let mut session = fresh(id);
+    connect(&mut session, C, peer_id(9), Direction::Accepted);
+    control(&mut session, C, Message::Hello(hello(id)));
+    control(&mut session, C, Message::Serving(Serving { serving: true }));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+
+    let mut session = fresh(id);
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Hello(hello(id)));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+}
+
+#[test]
+fn hello_for_another_bundle() {
+    let other = Hash::new([3; 32]);
+    let mut session = fresh(content().manifest().bundle_id());
+    connect(&mut session, C, peer_id(9), Direction::Accepted);
+    control(&mut session, C, Message::Hello(hello(other)));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::UnknownBundle]
+    );
+
+    let mut session = fresh(content().manifest().bundle_id());
+    connect(&mut session, C, peer_id(9), Direction::Dialed);
+    control(&mut session, C, Message::Hello(hello(other)));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+}
+
+#[test]
+fn holdings_must_respect_the_range_rules() {
+    let mut session = complete(Config::default());
+    open(&mut session, ranges(0..41));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+
+    let updates = [
+        HaveUpdate {
+            added: ranges([3]),
+            removed: RangeList::new(),
+        },
+        HaveUpdate {
+            added: RangeList::new(),
+            removed: ranges([9]),
+        },
+    ];
+    for update in updates {
+        let mut session = complete(Config::default());
+        open(&mut session, ranges(0..5));
+        session.poll_actions();
+        control(&mut session, C, Message::HaveUpdate(update));
+        assert_eq!(
+            closes(&session.poll_actions()),
+            [GoodbyeReason::ProtocolViolation]
+        );
+    }
+}
+
+#[test]
+fn holdings_before_the_manifest_are_checked_when_it_arrives() {
+    let content = content();
+    let mut session = fresh(content.manifest().bundle_id());
+    // Out of range, but unknowable until the manifest arrives.
+    open(&mut session, ranges(0..50));
+    let actions = session.poll_actions();
+    assert!(closes(&actions).is_empty());
+    let request = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Request {
+                request,
+                message: OutRequest::Manifest,
+                ..
+            } => Some(*request),
+            _ => None,
+        })
+        .expect("asks for the manifest");
+    let response = Response::Manifest(ManifestMessage {
+        manifest: content.manifest_bytes(),
+    });
+    session.handle_message(Time::ZERO, C, Inbound::Response { request, response });
+    let actions = session.poll_actions();
+    assert!(matches!(actions[0], Action::StoreManifest { .. }));
+    assert_eq!(closes(&actions), [GoodbyeReason::ProtocolViolation]);
+}
+
+#[test]
+fn a_manifest_that_does_not_match_is_bad_data() {
+    let mut session = fresh(content().manifest().bundle_id());
+    open(&mut session, RangeList::new());
+    let response = Response::Manifest(ManifestMessage {
+        manifest: b"not it".to_vec(),
+    });
+    session.handle_message(
+        Time::ZERO,
+        C,
+        Inbound::Response {
+            request: RequestId(0),
+            response,
+        },
+    );
+    assert_eq!(closes(&session.poll_actions()), [GoodbyeReason::BadData]);
+    assert!(session.manifest().is_none());
+}
+
+#[test]
+fn requests_that_arrive_before_the_opening_are_held() {
+    let mut session = complete(Config::default());
+    connect(&mut session, C, peer_id(9), Direction::Accepted);
+    request(&mut session, 1, Message::ManifestRequest);
+    let id = session.bundle_id();
+    control(&mut session, C, Message::Hello(hello(id)));
+    assert!(replies(&session.poll_actions()).is_empty());
+    control(&mut session, C, Message::Have(Have::default()));
+    assert_eq!(replies(&session.poll_actions()), [(1, Reply::Manifest)]);
+}
+
+#[test]
+fn requests_are_checked_before_they_are_served() {
+    let mut session = complete(Config::default());
+    open(&mut session, RangeList::new());
+    // Not serving a peer that hasn't said it wants anything.
+    request(&mut session, 1, chunks(0, 1));
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    let actions = session.poll_actions();
+    assert_eq!(
+        reject_reason(&replies(&actions)[0].1),
+        Some(RejectReason::Busy)
+    );
+    assert!(sent(&actions).contains(&Message::Serving(Serving { serving: true })));
+
+    let cases = [
+        (chunks(1, 2), RejectReason::Invalid),   // misaligned
+        (chunks(0, 3), RejectReason::Invalid),   // not a power of two
+        (chunks(0, 8), RejectReason::Invalid),   // wider than file a's tree
+        (chunks(40, 1), RejectReason::Invalid),  // outside the bundle
+        (chunks(3, 128), RejectReason::Invalid), // above max_request_chunks
+    ];
+    for (i, (message, reason)) in cases.into_iter().enumerate() {
+        request(&mut session, 10 + i as u64, message);
+        let replies = replies(&session.poll_actions());
+        assert_eq!(reject_reason(&replies[0].1), Some(reason), "case {i}");
+    }
+
+    // File a's last aligned pair reaches into padding, which is allowed.
+    request(&mut session, 20, chunks(2, 1));
+    request(&mut session, 21, chunks(3, 32));
+    let replies = replies(&session.poll_actions());
+    assert_eq!(replies[0], (20, Reply::Data { start: 2, count: 1 }));
+    assert_eq!(
+        replies[1],
+        (
+            21,
+            Reply::Data {
+                start: 3,
+                count: 32
+            }
+        )
+    );
+}
+
+#[test]
+fn a_peer_without_the_chunks_says_dont_have() {
+    let content = content();
+    let have = ranges(0..3);
+    let mut session = Session::with_manifest(
+        Config::default(),
+        local(5),
+        content.manifest().clone(),
+        &have,
+        0,
+    )
+    .unwrap();
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    request(&mut session, 1, chunks(3, 1));
+    let replies = replies(&session.poll_actions());
+    assert_eq!(reject_reason(&replies[0].1), Some(RejectReason::DontHave));
+}
+
+#[test]
+fn open_requests_and_upload_slots_are_limited() {
+    let config = Config {
+        max_open_requests: 2,
+        upload_slots: 1,
+        ..Config::default()
+    };
+    let mut session = complete(config);
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    session.poll_actions();
+    for stream in 1..=3 {
+        request(&mut session, stream, chunks(3 + stream as u32, 1));
+    }
+    let replies = replies(&session.poll_actions());
+    // One is sent, one waits for the upload slot, and one is too many.
+    assert_eq!(replies.len(), 2);
+    assert_eq!(replies[0], (1, Reply::Data { start: 4, count: 1 }));
+    assert_eq!(reject_reason(&replies[1].1), Some(RejectReason::Busy));
+
+    let sent = Inbound::DataSent {
+        stream: StreamId(1),
+    };
+    session.handle_message(Time::ZERO, C, sent);
+    let next = self::replies(&session.poll_actions());
+    assert_eq!(next, [(2, Reply::Data { start: 5, count: 1 })]);
+    let uploaded = session
+        .poll_events()
+        .into_iter()
+        .filter(|e| matches!(e.kind, EventKind::Uploaded { .. }))
+        .count();
+    assert_eq!(uploaded, 1);
+
+    // A reset frees the slot without counting as sent.
+    session.handle_message(
+        Time::ZERO,
+        C,
+        Inbound::RequestReset {
+            stream: StreamId(2),
+        },
+    );
+    assert_eq!(session.uploaded(), CHUNK as u64);
+}
+
+#[test]
+fn messages_on_the_wrong_stream_are_violations() {
+    let mut session = complete(Config::default());
+    open(&mut session, RangeList::new());
+    request(&mut session, 1, Message::Want(Want { wanted: true }));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+
+    let mut session = complete(Config::default());
+    open(&mut session, RangeList::new());
+    control(&mut session, C, chunks(0, 1));
+    assert_eq!(
+        closes(&session.poll_actions()),
+        [GoodbyeReason::ProtocolViolation]
+    );
+}
+
+/// Opens a connection to a provider with every chunk that serves us, returning the first
+/// request the session sends.
+fn fetching_session() -> (Session, RequestId, u32, u32) {
+    let content = content();
+    let mut session = Session::with_manifest(
+        Config::default(),
+        local(5),
+        content.manifest().clone(),
+        &RangeList::new(),
+        0,
+    )
+    .unwrap();
+    open(&mut session, ranges(0..40));
+    control(&mut session, C, Message::Serving(Serving { serving: true }));
+    let actions = session.poll_actions();
+    assert!(sent(&actions).contains(&Message::Want(Want { wanted: true })));
+    let (request, start, count) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Request {
+                request,
+                message: OutRequest::Chunks { start, count },
+                ..
+            } => Some((*request, *start, *count)),
+            _ => None,
+        })
+        .expect("requests chunks");
+    (session, request, start, count)
+}
+
+#[test]
+fn data_that_fails_verification_bans_the_peer() {
+    let (mut session, request, ..) = fetching_session();
+    let data = Data::default();
+    assert!(matches!(
+        session.verify_data(C, request, &data),
+        Some(Err(
+            VerifyError::WrongProofLength { .. } | VerifyError::WrongDataLength { .. }
+        ))
+    ));
+    let response = Response::Data(Err(VerifyError::RootMismatch));
+    session.handle_message(Time::ZERO, C, Inbound::Response { request, response });
+    assert_eq!(closes(&session.poll_actions()), [GoodbyeReason::BadData]);
+    assert!(
+        session
+            .poll_events()
+            .iter()
+            .any(|e| e.kind == EventKind::Banned { peer: peer_id(9) })
+    );
+
+    connect(&mut session, ConnId(8), peer_id(9), Direction::Accepted);
+    assert_eq!(closes(&session.poll_actions()), [GoodbyeReason::BadData]);
+}
+
+#[test]
+fn a_rejected_provider_is_retried_after_a_delay() {
+    let (mut session, request, ..) = fetching_session();
+    let response = Response::Reject(Reject {
+        reason: RejectReason::Busy,
+        message: String::new(),
+    });
+    session.handle_message(Time::ZERO, C, Inbound::Response { request, response });
+    // The other requests in flight are still open, so nothing new is sent yet.
+    assert!(session.poll_actions().is_empty());
+    let retry = session.next_timer().expect("a retry is scheduled");
+    assert_eq!(retry, Time::ZERO + Duration::from_secs(1));
+    session.handle_timer(retry);
+    let actions = session.poll_actions();
+    assert!(actions.iter().any(|a| matches!(a, Action::Request { .. })));
+}
+
+#[test]
+fn verified_data_is_announced() {
+    let (mut session, request, start, count) = fetching_session();
+    let response = Response::Data(Ok(()));
+    session.handle_message(Time::ZERO, C, Inbound::Response { request, response });
+    let sent = sent(&session.poll_actions());
+    // The request may reach past its file's end into the tree's padding.
+    let have = session.have().unwrap();
+    assert!(have.len() <= count && have.iter().all(|c| (start..start + count).contains(&c)));
+    let added = ranges(have.iter());
+    assert!(sent.contains(&Message::HaveUpdate(HaveUpdate {
+        added,
+        removed: RangeList::new()
+    })));
+}
+
+#[test]
+fn the_lower_peer_id_keeps_one_of_two_connections() {
+    let bundle_id = content().manifest().bundle_id();
+    // Local ID 5 is lower than 9, so this session decides.
+    let mut session = complete(Config::default());
+    for conn in [ConnId(1), ConnId(2)] {
+        connect(&mut session, conn, peer_id(9), Direction::Accepted);
+        control(&mut session, conn, Message::Hello(hello(bundle_id)));
+        control(&mut session, conn, Message::Have(Have::default()));
+    }
+    let closed: Vec<_> = session
+        .poll_actions()
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Close { conn, reason, .. } => Some((conn, reason)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(closed, [(ConnId(2), GoodbyeReason::Duplicate)]);
+
+    // Peer 3 is lower, so the session waits for its choice.
+    let mut session = complete(Config::default());
+    for conn in [ConnId(1), ConnId(2)] {
+        connect(&mut session, conn, peer_id(3), Direction::Accepted);
+        control(&mut session, conn, Message::Hello(hello(bundle_id)));
+        control(&mut session, conn, Message::Have(Have::default()));
+    }
+    assert!(closes(&session.poll_actions()).is_empty());
+    session.handle_closed(
+        Time::ZERO,
+        ConnId(2),
+        Closed::Goodbye {
+            reason: GoodbyeReason::Duplicate,
+            message: String::new(),
+        },
+    );
+    assert_eq!(session.connection_count(), 1);
+}
+
+#[test]
+fn candidates_get_one_reply() {
+    let mut session = complete(Config::default());
+    open(&mut session, RangeList::new());
+    session.poll_actions();
+    for _ in 0..2 {
+        control(&mut session, C, Message::Candidates(Candidates::default()));
+    }
+    let replies: Vec<_> = sent(&session.poll_actions())
+        .into_iter()
+        .filter(|m| matches!(m, Message::Candidates(_)))
+        .collect();
+    assert_eq!(replies.len(), 1);
+}
+
+#[test]
+fn ranges_must_fit_when_starting_with_a_manifest() {
+    let content = content();
+    let have = RangeList::from_ranges(vec![ChunkRange { start: 0, end: 41 }]).unwrap();
+    let result = Session::with_manifest(
+        Config::default(),
+        local(5),
+        content.manifest().clone(),
+        &have,
+        0,
+    );
+    assert!(result.is_err());
+}

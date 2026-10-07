@@ -12,6 +12,7 @@ tempest-core.workspace = true
 tempest-net.workspace = true
 tempest-protocol.workspace = true
 tempest-sim.workspace = true
+tempest-tracker.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true

@@ -179,18 +179,28 @@ pub struct Summary {
 pub struct BundleHandle {
     /// Decision events (D-006), from the start. Call `resubscribe` for another receiver.
     pub events: broadcast::Receiver<Event>,
-    /// The bundle's progress.
+    /// The bundle's progress. The sender is dropped once the bundle stops.
     pub status: watch::Receiver<Status>,
-    inbox: mpsc::Sender<Report>,
+    bundle_id: BundleId,
+    peers: PeerSink,
     shutdown: Arc<watch::Sender<bool>>,
     task: JoinHandle<Result<Summary, DriverError>>,
 }
 
 impl BundleHandle {
+    /// The bundle's ID.
+    pub fn bundle_id(&self) -> BundleId {
+        self.bundle_id
+    }
+
     /// Adds peers the session may dial, such as from a link or a tracker.
     pub async fn add_peers(&self, peers: Vec<PeerRecord>) {
-        // A bundle that has stopped needs no peers.
-        let _ = self.inbox.send(Report::AddPeers(peers)).await;
+        self.peers.add_peers(peers).await;
+    }
+
+    /// Somewhere for discovery to deliver peers to, apart from the handle.
+    pub fn peer_sink(&self) -> PeerSink {
+        self.peers.clone()
     }
 
     /// Asks the session to close its connections with `shutting_down` and stop.
@@ -202,6 +212,17 @@ impl BundleHandle {
     /// fails. Storage is flushed and closed by then.
     pub async fn finished(self) -> Result<Summary, DriverError> {
         self.task.await.expect("the bundle task panicked")
+    }
+}
+
+/// Where discovery delivers the peers it finds for one bundle.
+#[derive(Debug, Clone)]
+pub struct PeerSink(mpsc::Sender<Report>);
+
+impl PeerSink {
+    /// Adds peers the session may dial. Returns false once the bundle has stopped.
+    pub async fn add_peers(&self, peers: Vec<PeerRecord>) -> bool {
+        self.0.send(Report::AddPeers(peers)).await.is_ok()
     }
 }
 
@@ -331,7 +352,8 @@ impl Node {
             status,
         );
         let task = match task {
-            Ok(task) => task,
+            // Discovery reads the first status to learn whether the bundle starts complete.
+            Ok(task) => task.with_status_published(),
             Err(error) => {
                 let _ = self.commands.send(Command::Unregister { bundle_id }).await;
                 return Err(error);
@@ -347,7 +369,8 @@ impl Node {
         Ok(BundleHandle {
             events: events_receiver,
             status: status_receiver,
-            inbox,
+            bundle_id,
+            peers: PeerSink(inbox),
             shutdown,
             task,
         })

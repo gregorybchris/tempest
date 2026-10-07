@@ -10,7 +10,7 @@ use tempest_net::{DEFAULT_PORT, Storage, StorageConfig};
 use tempest_protocol::{Link, Manifest};
 
 use crate::bundle::{BundleInfo, build_manifest, unix_millis};
-use crate::peer::PeerArgs;
+use crate::peer::{Peer, PeerArgs};
 use crate::progress::{StatusLine, bytes};
 
 #[derive(Debug, clap::Args)]
@@ -29,6 +29,10 @@ pub struct ShareArgs {
     /// The bundle's creation time, in milliseconds since the Unix epoch. Defaults to now.
     #[arg(long, allow_hyphen_values = true)]
     created: Option<i64>,
+    /// A tracker to announce the bundle to, and to name in the link, such as
+    /// `https://tracker.example.org`. Repeat for more.
+    #[arg(long, value_name = "URL")]
+    tracker: Vec<String>,
     /// The UDP port to accept peers on, 0 for any.
     #[arg(long, default_value_t = DEFAULT_PORT)]
     port: u16,
@@ -49,6 +53,7 @@ pub fn share(args: ShareArgs) -> Result<()> {
 
     let mut link = Link::new(manifest.bundle_id());
     link.name = Some(manifest.name().to_owned());
+    link.trackers = args.tracker.clone();
     if args.dry_run {
         println!("link      {link}");
         return Ok(());
@@ -81,6 +86,7 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
         .context("cannot open the shared files")?;
     let peer = args.peer.start(args.port, true)?;
     let mut handle = peer.node.share(storage).await?;
+    let announcers = peer.announce(&args.tracker, &handle)?;
 
     link.peer = Some(peer.node.endpoint().peer_id());
     link.addrs = peer.addresses.clone();
@@ -121,6 +127,7 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
         eprintln!("stopping");
     }
     peer.stop().await;
+    Peer::stop_announcing(announcers).await;
     let summary = handle.finished().await?;
     eprintln!("uploaded {}", bytes(summary.uploaded));
     Ok(())

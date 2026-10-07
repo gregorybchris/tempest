@@ -32,8 +32,14 @@ impl Sharer {
     /// Shares `path` on 127.0.0.1 with a port the system picks, and waits for its link. The
     /// identity file is passed with `--identity`, or in the environment if `by_env` is set.
     fn start(path: &Path, identity: &Path, by_env: bool) -> Self {
+        Self::start_with(path, identity, by_env, &[])
+    }
+
+    /// [`Sharer::start`] with `extra` arguments.
+    fn start_with(path: &Path, identity: &Path, by_env: bool, extra: &[&str]) -> Self {
         let mut command = tempest();
         command.args(["share", "--bind", "127.0.0.1", "--port", "0"]);
+        command.args(extra);
         if by_env {
             command.env("TEMPEST_IDENTITY", identity);
         } else {
@@ -44,16 +50,7 @@ impl Sharer {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child = command.spawn().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let (lines, received) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
-                if lines.send(line).is_err() {
-                    break;
-                }
-            }
-        });
+        let received = lines(child.stdout.take().unwrap());
         let field = |name: &str| loop {
             let line = received
                 .recv_timeout(STARTUP)
@@ -65,6 +62,54 @@ impl Sharer {
         let peer = field("peer");
         let link = field("link");
         Self { child, peer, link }
+    }
+}
+
+/// The lines `stream` yields, read on another thread.
+fn lines(stream: impl std::io::Read + Send + 'static) -> mpsc::Receiver<String> {
+    let (lines, received) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stream).lines() {
+            let Ok(line) = line else { break };
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    received
+}
+
+/// A running `tempest tracker` on localhost, killed when dropped.
+struct TrackerProcess {
+    child: Child,
+    url: String,
+}
+
+impl TrackerProcess {
+    fn start() -> Self {
+        let mut child = tempest()
+            .args(["tracker", "--bind", "127.0.0.1", "--port", "0"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let received = lines(child.stderr.take().unwrap());
+        let line = received
+            .recv_timeout(STARTUP)
+            .expect("the tracker printed nothing");
+        let url = line
+            .strip_prefix("tracker listening on ")
+            .and_then(|rest| rest.split(';').next())
+            .unwrap_or_else(|| panic!("unexpected line: {line}"))
+            .to_owned();
+        Self { child, url }
+    }
+}
+
+impl Drop for TrackerProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -161,6 +206,31 @@ fn get_downloads_what_share_serves() {
 }
 
 #[test]
+fn get_finds_the_sharer_through_a_tracker() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photos");
+    sample_folder(&source);
+    let tracker = TrackerProcess::start();
+    let identity = dir.path().join("sharer.pem");
+    let sharer = Sharer::start_with(&source, &identity, false, &["--tracker", &tracker.url]);
+    let link: Link = sharer.link.parse().unwrap();
+    assert_eq!(link.trackers, std::slice::from_ref(&tracker.url));
+
+    // Only the bundle and the tracker: the sharer is found by asking the tracker.
+    let mut bare = Link::new(link.bundle);
+    bare.trackers = link.trackers.clone();
+    let output = dir.path().join("downloads");
+    let got = get(
+        &bare.to_string(),
+        &output,
+        &dir.path().join("getter.pem"),
+        &[],
+    );
+    assert!(got.status.success(), "{}", stderr(&got));
+    assert_same_tree(&source, &output.join("photos"));
+}
+
+#[test]
 fn the_identity_persists_and_can_be_set_by_environment() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("notes.txt");
@@ -178,17 +248,17 @@ fn the_identity_persists_and_can_be_set_by_environment() {
 }
 
 #[test]
-fn get_needs_a_peer_and_an_address() {
+fn get_needs_a_peer_with_an_address_or_a_tracker() {
     let dir = tempfile::tempdir().unwrap();
     let identity = dir.path().join("identity.pem");
     let bundle = "207855f013f5a4066c9987ee3fa4b0ae63c8eeee02035634587286457cf5b85a";
     let peer = "5c988adc6dcd30b09514f566977b3500f65b3ff749ef37312ed02545bf4b0823";
 
     let cases = [
-        (format!("tempest:?bundle={bundle}"), "names no peer"),
+        (format!("tempest:?bundle={bundle}"), "names neither"),
         (
             format!("tempest:?bundle={bundle}&peer={peer}"),
-            "no address",
+            "names neither",
         ),
         (
             "https://example.com".to_owned(),

@@ -5,8 +5,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use tempest_net::{Endpoint, EndpointConfig, Identity, Node, NodeConfig};
+use tempest_net::{
+    AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, Identity, Node, NodeConfig,
+    TrackerClient,
+};
 use tempest_protocol::Address;
+
+/// How long a tracker request may take.
+const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The environment variable that overrides where the identity is stored.
 pub const IDENTITY_ENV: &str = "TEMPEST_IDENTITY";
@@ -32,11 +38,43 @@ pub struct Peer {
 }
 
 impl Peer {
+    /// Starts announcing `handle`'s bundle to each of `trackers`.
+    pub fn announce(&self, trackers: &[String], handle: &BundleHandle) -> Result<Vec<Announcer>> {
+        if trackers.is_empty() {
+            return Ok(Vec::new());
+        }
+        let endpoint = self.node.endpoint();
+        let port = endpoint
+            .local_addrs()
+            .first()
+            .context("the endpoint has no socket")?
+            .port();
+        let config = AnnounceConfig {
+            addrs: tempest_net::public_addresses(&self.addresses),
+            ..AnnounceConfig::new(endpoint.peer_id(), port)
+        };
+        let client = TrackerClient::new(TRACKER_TIMEOUT).context("cannot set up HTTPS")?;
+        let announcers = trackers
+            .iter()
+            .map(|tracker| {
+                Announcer::spawn(client.clone(), tracker.clone(), config.clone(), handle)
+            })
+            .collect();
+        Ok(announcers)
+    }
+
     /// Shuts the node down, waiting a moment for its Goodbyes to arrive. Connections that never
     /// finished their handshake, such as dials to an unreachable address, take seconds to
     /// drain, and nobody is waiting for their Goodbye.
     pub async fn stop(&self) {
         let _ = tokio::time::timeout(Duration::from_secs(1), self.node.shutdown()).await;
+    }
+
+    /// Waits a moment for `announcers` to tell their trackers the bundle stopped.
+    pub async fn stop_announcing(announcers: Vec<Announcer>) {
+        let stopping: tokio::task::JoinSet<()> =
+            announcers.into_iter().map(Announcer::stop).collect();
+        let _ = tokio::time::timeout(Duration::from_secs(2), stopping.join_all()).await;
     }
 }
 

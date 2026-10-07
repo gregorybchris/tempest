@@ -220,6 +220,11 @@ impl BundleTask {
         self.publish_status();
     }
 
+    pub(super) fn with_status_published(self) -> Self {
+        self.publish_status();
+        self
+    }
+
     fn publish_status(&self) {
         let session = &self.session;
         let status = Status {

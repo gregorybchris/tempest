@@ -15,11 +15,14 @@ tempest-protocol = { path = "crates/protocol", version = "0.1.0" }
 tempest-core = { path = "crates/core", version = "0.1.0" }
 tempest-sim = { path = "crates/sim", version = "0.1.0" }
 tempest-net = { path = "crates/net", version = "0.1.0" }
+tempest-tracker = { path = "crates/tracker", version = "0.1.0" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 # Bundled so no system DuckDB is needed (D-075); json gives JSON columns and functions.
 duckdb = { version = "1.10506", features = ["bundled", "json"] }
+# Seeds the tracker's peer sampler. Through rand it would give tempest-core OS randomness too.
+getrandom = { version = "0.3", features = ["std"] }
 # No default features: core must never reach for the OS's randomness (D-068).
 rand = { version = "0.9", default-features = false, features = ["alloc"] }
 rand_chacha = { version = "0.9", default-features = false }
@@ -42,11 +45,19 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 socket2 = "0.6"
+
+# HTTP for trackers (D-043): axum serves, reqwest asks. Both use only HTTP/1.1 and tokio; reqwest
+# gets rustls on ring with the platform's certificate verifier, like the rest of the TLS stack.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls-platform-verifier = "0.6"
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 
 hex = "0.4"
 proptest = "1"
 tempfile = "3"
+# Calls an axum router directly in tests, without a socket.
+tower = { version = "0.5", default-features = false, features = ["util"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -2697,3 +2697,47 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - On exit, both wait at most a second for their Goodbyes to drain, since a dial still handshaking with an unreachable address takes several seconds to.
 
 **Rationale:** The identity is state, not configuration, and outlives any single bundle. Advertising what peers on other machines can reach keeps links short and useful, while an explicit loopback bind is how tests and single-machine setups ask for loopback. A fresh folder per download can never overwrite unrelated files that happen to share a name with a bundle's entries; resuming into existing folders can come back with the engine's state store (D-082). A one-shot `get` that lingers would surprise someone using it in a script; lingering is the engine's job.
+
+---
+
+## D-176: Tracker server details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/trackers.md` defines the peer-list API but leaves the server's own policies open: transport security, rate limits, memory bounds, errors outside the listed codes, and how the observed IP is found behind a proxy.
+
+**Options for HTTPS:** built into the tracker with its own certificate settings; plain HTTP, with HTTPS from a reverse proxy in front (chosen). **For rate limiting:** none; per IP; per peer, on `update` only (chosen). **For bounding memory:** a cap per swarm; one cap across all swarms (chosen). **For shared state:** an actor owning the swarms; a mutex around plain data (chosen).
+
+**Decision:**
+
+- The tracker serves plain HTTP on TCP 4777 (D-126). HTTPS is a reverse proxy's job. With `--behind-proxy`, the observed IP is the last `X-Forwarded-For` entry, which the proxy appends; otherwise it is the TCP peer address. IPv4-mapped addresses are read as IPv4.
+- The default interval is 300 seconds. An `update` sooner than the minimum interval (default 60 seconds) after the same peer's last announce is refused with `rate_limited` and `retry_after_secs`. `started`, `completed` and `stopped` are never refused as early, since each reports a change.
+- `num_want` is capped at 200. An announce with more than 16 `addrs`, or with port 0, is `invalid_request`. Bodies are limited to 16 KiB; a larger one is refused with status 413 and `invalid_request`.
+- At most 1,000,000 peers are listed across all swarms. Beyond that, new peers are refused with `unavailable` and a 60-second `retry_after_secs`; listed peers can still announce.
+- A peer's listed addresses are its observed address followed by its `addrs`, without duplicates. A later announce replaces them, so anyone can overwrite a listing by forging its peer ID; as `protocol/trackers.md` notes, that only wastes connection attempts.
+- Unknown paths and methods answer 404 `not_found` and 405 `method_not_allowed`, in the same JSON error shape. Every refusal with `retry_after_secs` also sets `Retry-After`.
+- A private tracker serves only the bundles given with `--allow`, refusing others with `bundle_not_allowed`. Recommended relays come from `--relay`.
+- The swarms are plain data behind a mutex, taking the time and observed IP as arguments so the rules are tested without a server. A sweep every minute (or every interval, if shorter) frees silent peers and empty swarms. The random choice of listed peers is seeded from the operating system.
+
+**Rationale:** A reverse proxy is the usual way to give an HTTP service a certificate, and keeps certificate handling out of the tracker. Only `update` has a schedule a client can break; the other events are rare and each changes what the tracker knows. One global cap bounds memory however announces are spread across bundles. Every announce takes the lock for microseconds, so an actor would add complexity for no gain.
+
+---
+
+## D-177: Tracker client details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** Clients announce to trackers (`protocol/trackers.md`) from `tempest-net`. The spec fixes the events and the duty to honor `retry_after_secs`, but not the HTTP stack, back-off, limits or which addresses to announce.
+
+**Options for HTTP:** hyper directly; reqwest (chosen), with rustls on ring and the platform's certificate verifier, matching the peer TLS stack. **For the announce loop:** one task per tracker per bundle (chosen); one task per tracker serving every bundle.
+
+**Decision:**
+
+- `TrackerClient` makes requests with a 30-second timeout in the CLI and reads at most 1 MiB of response. HTTP and HTTPS URLs are both accepted.
+- An `Announcer` per bundle and tracker sends `started` (with `complete` from the bundle's current status), `completed` as soon as the bundle completes, `update` every interval, and `stopped` when the bundle stops or the announcer is stopped or dropped. `stopped` is skipped if the tracker never accepted `started`, or while the tracker's `retry_after_secs` is still running.
+- A failed announce is retried after `retry_after_secs` if given, otherwise after 15 seconds doubling up to 30 minutes. The event that failed is the one retried. A tracker interval below 30 seconds is raised to 30.
+- Only addresses that may be reachable from the internet go in `addrs`: no loopback, private, link-local, shared (100.64.0.0/10), unique local or documentation addresses. The tracker adds the observed address itself.
+- The peers in each response are handed to the bundle's session, as a link's peers are. The announcer's state (accepted announces, swarm counts, last error) is published on a watch channel for UIs.
+- `tempest share --tracker URL` names the tracker in the link and announces to it. `tempest get` asks every tracker the link names, plus any given with `--tracker`, and needs either a peer with an address or a tracker.
+
+**Rationale:** reqwest is the standard async HTTP client and lets the TLS configuration match the rest of Tempest's. A task per bundle and tracker keeps each announce schedule independent and easy to follow; trackers see the same requests either way. Announcing only public addresses follows the protocol's advice not to leak local network details.

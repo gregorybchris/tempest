@@ -6,6 +6,7 @@ mod peer;
 mod progress;
 mod share;
 mod sim;
+mod tracker;
 
 use std::process::ExitCode;
 
@@ -28,6 +29,8 @@ enum Command {
     /// Simulate swarms.
     #[command(subcommand)]
     Sim(sim::SimCommand),
+    /// Run a tracker, which helps peers in public swarms find each other.
+    Tracker(tracker::TrackerArgs),
 }
 
 fn main() -> ExitCode {
@@ -36,6 +39,7 @@ fn main() -> ExitCode {
         Command::Share(args) => share::share(args),
         Command::Get(args) => get::get(args),
         Command::Sim(command) => sim::sim(command),
+        Command::Tracker(args) => tracker::tracker(args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

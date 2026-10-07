@@ -25,6 +25,9 @@ cargo install --path crates/tempest
 
 tempest share ./photos   # prints a tempest: link, then shares until Ctrl-C
 tempest get '<link>'     # downloads the bundle into ./<its name>
+
+tempest tracker                                   # runs a tracker
+tempest share --tracker http://host:4777 ./photos # announces the bundle to it
 ```
 
 `tempest <command> --help` lists each command's options.

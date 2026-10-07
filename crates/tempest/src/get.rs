@@ -1,4 +1,5 @@
-//! `tempest get`: download a bundle from the peer its link names.
+//! `tempest get`: download a bundle from the peer its link names and the peers its trackers
+//! list.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -8,11 +9,11 @@ use tempest_core::event::CloseCause;
 use tempest_core::{Event, EventKind};
 use tempest_net::{BundleHandle, Destination, Status};
 use tempest_protocol::message::{GoodbyeReason, PeerRecord};
-use tempest_protocol::{Address, Link};
+use tempest_protocol::{Address, BundleId, Link};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::Instant;
 
-use crate::peer::PeerArgs;
+use crate::peer::{Peer, PeerArgs};
 use crate::progress::{StatusLine, bytes, duration};
 
 #[derive(Debug, clap::Args)]
@@ -27,6 +28,9 @@ pub struct GetArgs {
     /// unreachable.
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     timeout: u64,
+    /// A tracker to find peers through, besides those the link names. Repeat for more.
+    #[arg(long, value_name = "URL")]
+    tracker: Vec<String>,
     /// The UDP port to use, 0 for any.
     #[arg(long, default_value_t = 0)]
     port: u16,
@@ -39,41 +43,50 @@ pub fn get(args: GetArgs) -> Result<()> {
         .link
         .parse()
         .with_context(|| format!("not a valid tempest: link: {}", args.link))?;
-    let Some(peer_id) = link.peer else {
+    let record = link
+        .peer
+        .filter(|_| !link.addrs.is_empty())
+        .map(|peer_id| PeerRecord {
+            peer_id,
+            addresses: link.addrs.clone(),
+            relay: None,
+        });
+    let mut trackers = link.trackers.clone();
+    trackers.extend(args.tracker.iter().cloned());
+    if record.is_none() && trackers.is_empty() {
         bail!(
-            "the link names no peer to download from \
-             (finding peers through trackers is not supported yet)"
-        );
-    };
-    if link.addrs.is_empty() {
-        bail!(
-            "the link has no address for its peer \
+            "the link names neither a peer with an address nor a tracker \
              (reaching peers through relays is not supported yet)"
         );
     }
-    let record = PeerRecord {
-        peer_id,
-        addresses: link.addrs.clone(),
-        relay: None,
-    };
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
-    runtime.block_on(download(args, link, record))
+    runtime.block_on(download(args, link.bundle, record, trackers))
 }
 
-async fn download(args: GetArgs, link: Link, record: PeerRecord) -> Result<()> {
-    let addresses = record.addresses.clone();
+async fn download(
+    args: GetArgs,
+    bundle: BundleId,
+    record: Option<PeerRecord>,
+    trackers: Vec<String>,
+) -> Result<()> {
+    let sources = Sources {
+        addresses: record.iter().flat_map(|r| r.addresses.clone()).collect(),
+        trackers: trackers.len(),
+    };
     let peer = args.peer.start(args.port, false)?;
     let destination = Destination::NewFolderIn(args.output.clone());
     let mut handle = peer
         .node
-        .download(link.bundle, destination, vec![record])
+        .download(bundle, destination, record.into_iter().collect())
         .await?;
+    let announcers = peer.announce(&trackers, &handle)?;
     let started = Instant::now();
     let timeout = Duration::from_secs(args.timeout);
-    let mut watch = Watch::new(&addresses, timeout);
+    let mut watch = Watch::new(&sources, timeout);
     let outcome = watch.until_complete(&mut handle).await;
 
     peer.stop().await;
+    Peer::stop_announcing(announcers).await;
     // A storage failure ends the bundle early, and explains more than the timeout it causes.
     handle.finished().await.context("the download failed")?;
     let status = outcome?;
@@ -88,9 +101,34 @@ async fn download(args: GetArgs, link: Link, record: PeerRecord) -> Result<()> {
     Ok(())
 }
 
+/// Where a download looks for peers, to explain a failure.
+struct Sources {
+    /// The addresses of the peer the link names.
+    addresses: Vec<Address>,
+    /// How many trackers it asks.
+    trackers: usize,
+}
+
+impl Sources {
+    fn describe(&self) -> String {
+        let addresses: Vec<String> = self.addresses.iter().map(ToString::to_string).collect();
+        let trackers = match self.trackers {
+            0 => None,
+            1 => Some("peers from 1 tracker".to_owned()),
+            n => Some(format!("peers from {n} trackers")),
+        };
+        let addresses = (!addresses.is_empty()).then(|| addresses.join(", "));
+        [addresses, trackers]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" or ")
+    }
+}
+
 /// Follows a download, showing its progress, until it completes or stalls.
 struct Watch<'a> {
-    addresses: &'a [Address],
+    sources: &'a Sources,
     timeout: Duration,
     line: StatusLine,
     /// Why the last attempt to reach the sharer failed, if one did.
@@ -98,9 +136,9 @@ struct Watch<'a> {
 }
 
 impl<'a> Watch<'a> {
-    fn new(addresses: &'a [Address], timeout: Duration) -> Self {
+    fn new(sources: &'a Sources, timeout: Duration) -> Self {
         Self {
-            addresses,
+            sources,
             timeout,
             line: StatusLine::new(),
             trouble: None,
@@ -154,7 +192,7 @@ impl<'a> Watch<'a> {
         }
     }
 
-    /// Remembers why the sharer couldn't be reached or closed the connection.
+    /// Remembers why a peer couldn't be reached or closed the connection.
     fn note(&mut self, event: Event) {
         match event.kind {
             EventKind::DialFailed { .. } => {
@@ -164,7 +202,7 @@ impl<'a> Watch<'a> {
                 cause: CloseCause::Remote { reason, message },
                 ..
             } => {
-                let mut trouble = format!("the sharer closed the connection: {}", why(reason));
+                let mut trouble = format!("a peer closed the connection: {}", why(reason));
                 if !message.is_empty() {
                     trouble.push_str(&format!(" ({message})"));
                 }
@@ -181,10 +219,9 @@ impl<'a> Watch<'a> {
     fn stalled(&self, status: &Status) -> anyhow::Error {
         let seconds = self.timeout.as_secs();
         let mut message = if status.manifest.is_none() {
-            let addresses: Vec<String> = self.addresses.iter().map(ToString::to_string).collect();
             format!(
                 "could not get the bundle from {} within {seconds} s",
-                addresses.join(", ")
+                self.sources.describe()
             )
         } else {
             format!("no progress for {seconds} s")

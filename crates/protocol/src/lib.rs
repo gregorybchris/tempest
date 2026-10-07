@@ -17,6 +17,7 @@
 //! - [`message`]: peer messages.
 //! - [`lan`]: LAN discovery messages.
 //! - [`relay`]: relay control messages, Forward and Forwarded datagrams, and relay identities.
+//! - [`spki`]: Ed25519 public keys as TLS raw public keys.
 //! - [`tracker`]: the tracker API's JSON types.
 
 pub mod address;
@@ -30,6 +31,7 @@ pub mod message;
 pub mod path;
 pub mod range;
 pub mod relay;
+pub mod spki;
 mod text;
 pub mod tracker;
 pub mod tree;

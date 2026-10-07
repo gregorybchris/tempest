@@ -2609,3 +2609,24 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Tests cut every peer's upload to 60% and require each golden scenario to fail both checks on completion time.
 
 **Rationale:** One scenario per model feature keeps a regression in one feature from hiding in averages over others, and small swarms keep the quick check to a few seconds in debug. Medians of paired changes ignore one unusual seed, and the interval keeps noise from failing the check, while tolerances, not mere significance, decide what counts as a regression, as in D-163. A command rather than an environment variable makes the long check and updates a single, discoverable step between milestones.
+
+---
+
+## D-172: QUIC endpoint, TLS and identity file details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** M4 needs concrete choices for the parts of `protocol/connections.md` it leaves to implementations: how the key is encoded and stored, how rustls and quinn are set up, and the transport's timers.
+
+**Options for the key file:** raw seed bytes; hex text; a PKCS#8 PEM file, as `openssl genpkey -algorithm ed25519` writes (chosen). **For the crypto provider:** aws-lc-rs (rustls's default, needs a C toolchain and CMake on some platforms); ring (chosen). **For sockets:** one dual-stack socket; one IPv4 socket and one IPv6-only socket (chosen). **For an unexpected peer ID:** close after the handshake; fail the handshake in the certificate verifier (chosen).
+
+**Decision:**
+
+- The identity is a PKCS#8 PEM file created with owner-only permissions. Loading it never replaces a file that fails to parse.
+- A raw public key must be exactly the DER form of an Ed25519 SubjectPublicKeyInfo (RFC 8410); anything else fails the handshake. `protocol/connections.md` now spells out that form.
+- TLS uses rustls on ring, TLS 1.3 only, Ed25519 signatures only. Session resumption and 0-RTT are off. SNI is not sent.
+- An endpoint binds one IPv4 socket and one IPv6-only socket. If the IPv6 socket can't be bound for a reason other than its port being in use, the endpoint carries on with IPv4 only.
+- A dialing peer that expects a peer ID rejects any other key in the certificate verifier, before presenting its own key.
+- Initial and minimum MTU are 1,200 bytes with path MTU discovery on. Peers may open `max_open_requests` + 1 bidirectional streams and no unidirectional ones. Connections time out after 30 s of silence and send keep-alives every 10 s.
+
+**Rationale:** PEM PKCS#8 is the standard, inspectable format for keys. ring builds everywhere without extra tools. Separate sockets per family make "one socket per address family" literal and avoid platforms without dual-stack sockets. Without resumption every connection proves both keys, so a connection's peer ID is always from this handshake. Failing in the verifier closes the connection with a TLS alert, the earliest possible point. Keep-alives every 10 s stay inside routers' usual UDP mapping timeouts at negligible cost.

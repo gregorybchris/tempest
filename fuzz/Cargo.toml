@@ -111,3 +111,10 @@ path = "fuzz_targets/scenario.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "spki"
+path = "fuzz_targets/spki.rs"
+test = false
+doc = false
+bench = false

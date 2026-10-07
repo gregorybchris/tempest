@@ -32,7 +32,7 @@ Each peer has an Ed25519 key pair ([RFC 8032](https://www.rfc-editor.org/rfc/rfc
   - both certificate-type extensions (`client_certificate_type`, `server_certificate_type`) offer `RawPublicKey`;
   - the accepting peer MUST send a CertificateRequest;
   - the signature scheme is `ed25519` (`0x0807`);
-  - the key is carried as a SubjectPublicKeyInfo, from which the 32-byte peer ID is extracted;
+  - the key is carried as a SubjectPublicKeyInfo ([RFC 8410](https://www.rfc-editor.org/rfc/rfc8410)), from which the 32-byte peer ID is extracted. Its DER form is the 12 bytes `302a300506032b6570032100` followed by the key, and a peer MUST reject any other encoding;
   - the server name (SNI) MAY be omitted and MUST NOT be required.
 - If the connecting peer expected a particular peer ID (for example, one given in a link), it MUST close the connection if the presented key does not match.
 

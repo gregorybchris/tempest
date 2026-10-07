@@ -1,0 +1,27 @@
+[package]
+name = "tempest-net"
+description = "QUIC transport and the production driver for Tempest's sans-IO core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tempest-core.workspace = true
+tempest-protocol.workspace = true
+
+pem-rfc7468.workspace = true
+quinn.workspace = true
+ring.workspace = true
+rustls.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[lints]
+workspace = true

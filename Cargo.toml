@@ -14,6 +14,7 @@ rust-version = "1.99"
 tempest-protocol = { path = "crates/protocol", version = "0.1.0" }
 tempest-core = { path = "crates/core", version = "0.1.0" }
 tempest-sim = { path = "crates/sim", version = "0.1.0" }
+tempest-net = { path = "crates/net", version = "0.1.0" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -29,6 +30,15 @@ serde-saphyr = { version = "1.3", default-features = false, features = ["deseria
 sha2 = "0.10"
 thiserror = "2"
 unicode-normalization = "0.1"
+
+pem-rfc7468 = { version = "1", features = ["std"] }
+# QUIC over tokio with rustls on ring (D-018, D-084); no platform certificate verifier, since
+# peers authenticate with raw public keys (D-020).
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+socket2 = "0.6"
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 
 hex = "0.4"
 proptest = "1"

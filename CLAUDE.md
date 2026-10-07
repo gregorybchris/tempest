@@ -16,6 +16,15 @@
 - Anything longer goes in `specs/`, or in `protocol/` for the protocol. Link to it from the README only when it helps.
 - Technical guidance, such as framework rules and architecture, belongs in `specs/`, not in this file.
 
+## Avoiding staleness
+
+Agents can't read every file every time, so anything that must be kept in sync by hand will eventually drift. Avoid creating it:
+
+- Don't document temporary things (prototypes, experiments, scaffolding) in lasting docs like the README.
+- Don't repeat implementation details (exact values, file paths, function names) in prose when the code or spec already defines them. Describe concepts and link to the source of truth.
+- Prefer one source of truth per fact. If a fact must appear in two places, make one point to the other.
+- Avoid long-range dependencies between files that no test checks.
+
 ## Prose
 
 Applies to docs, specs, comments and messages.

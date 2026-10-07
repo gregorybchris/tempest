@@ -1,0 +1,16 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "draw(&app, 80, 12).backend()"
+---
+"  Transfers   Share   Catalog   Settings                  ↓9.8M  ↑1.6M  [green] "
+"─ /#musiczzz · by size ▲ · 0 of 6 ──────────────────────────────────────────────"
+"  Name              Size▲ Progress            ↓     ↑    ETA Status        Peers"
+"                                                                                "
+"           Nothing matches /#musiczzz. Press esc to clear the filters.          "
+"                                                                                "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"                                                                                "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" esc clear filters  / filter  a add  : command  s sort  1-4 areas  ? help       "

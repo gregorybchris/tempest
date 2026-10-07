@@ -1,0 +1,540 @@
+use std::path::PathBuf;
+
+use tempest_engine::api::{AddRequest, RemovedInfo};
+
+use super::*;
+use crate::finding::{SortKey, StatusFilter};
+use crate::model::tests::transfer;
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn press(app: &mut App, code: KeyCode) -> Option<Request> {
+    app.key(key(code))
+}
+
+/// Presses each char of `keys` in turn, returning the last request.
+fn type_keys(app: &mut App, keys: &str) -> Option<Request> {
+    keys.chars()
+        .map(|c| press(app, KeyCode::Char(c)))
+        .last()
+        .flatten()
+}
+
+fn app_with(transfers: Vec<TransferInfo>) -> App {
+    let mut app = App::new(Origin::Daemon, Theme::default());
+    app.apply(ApiEvent::Snapshot(transfers));
+    app
+}
+
+/// Three transfers: "alpha" downloading and tagged, "beta" stopped, "gamma" sharing.
+fn three() -> App {
+    let mut alpha = transfer(1, "alpha", 0);
+    alpha.status = Status::Downloading;
+    alpha.size = Some(300);
+    alpha.tags = ["music".to_owned()].into();
+    let mut beta = transfer(2, "beta", 1);
+    beta.size = Some(900);
+    let mut gamma = transfer(3, "gamma", 2);
+    gamma.status = Status::Sharing;
+    gamma.size = Some(600);
+    gamma.content_dir = Some(PathBuf::from("/downloads/gamma"));
+    app_with(vec![alpha, beta, gamma])
+}
+
+fn selected_name(app: &App) -> Option<&str> {
+    app.selected_transfer().map(|t| t.name.as_str())
+}
+
+fn visible_names(app: &App) -> Vec<&str> {
+    app.visible().iter().map(|t| t.name.as_str()).collect()
+}
+
+fn target(app: &App) -> Target {
+    let transfer = app.selected_transfer().unwrap();
+    Target {
+        id: transfer.id,
+        name: transfer.name.clone(),
+    }
+}
+
+#[test]
+fn the_cursor_moves_within_the_list_and_survives_removals() {
+    let mut app = three();
+    assert_eq!(selected_name(&app), Some("alpha"));
+    press(&mut app, KeyCode::Char('k'));
+    assert_eq!(selected_name(&app), Some("alpha"));
+    press(&mut app, KeyCode::Char('j'));
+    assert_eq!(selected_name(&app), Some("beta"));
+    press(&mut app, KeyCode::Char('G'));
+    assert_eq!(selected_name(&app), Some("gamma"));
+    press(&mut app, KeyCode::PageUp);
+    assert_eq!(selected_name(&app), Some("alpha"));
+    press(&mut app, KeyCode::End);
+
+    // Removing the selected transfer moves the cursor to its neighbor.
+    let id = app.selected.unwrap();
+    app.apply(ApiEvent::Removed(RemovedInfo { id }));
+    assert_eq!(selected_name(&app), Some("beta"));
+    app.apply(ApiEvent::Snapshot(vec![]));
+    assert_eq!(app.selected, None);
+    assert_eq!(press(&mut app, KeyCode::Char(' ')), None);
+}
+
+#[test]
+fn space_starts_what_is_stopped_and_stops_what_runs() {
+    let mut app = three();
+    let alpha = target(&app);
+    assert_eq!(
+        press(&mut app, KeyCode::Char(' ')),
+        Some(Request::Transfer(alpha.clone(), Action::Stop))
+    );
+    assert_eq!(
+        press(&mut app, KeyCode::Char('F')),
+        Some(Request::Transfer(alpha, Action::ForceStart))
+    );
+    press(&mut app, KeyCode::Down);
+    let beta = target(&app);
+    assert_eq!(
+        press(&mut app, KeyCode::Char(' ')),
+        Some(Request::Transfer(beta, Action::Start))
+    );
+}
+
+#[test]
+fn recheck_and_queue_keys_ask_the_engine() {
+    let mut app = three();
+    let alpha = target(&app);
+    let ask = |action| Some(Request::Transfer(alpha.clone(), action));
+    assert_eq!(press(&mut app, KeyCode::Char('R')), ask(Action::Recheck));
+    assert_eq!(
+        press(&mut app, KeyCode::Char('K')),
+        ask(Action::Queue(QueueStep::Up))
+    );
+    assert_eq!(
+        press(&mut app, KeyCode::Char('J')),
+        ask(Action::Queue(QueueStep::Down))
+    );
+    assert_eq!(
+        press(&mut app, KeyCode::Char('<')),
+        ask(Action::Queue(QueueStep::Top))
+    );
+    assert_eq!(
+        press(&mut app, KeyCode::Char('>')),
+        ask(Action::Queue(QueueStep::Bottom))
+    );
+}
+
+#[test]
+fn the_add_modal_sends_every_field() {
+    let mut app = three();
+    assert_eq!(
+        press(&mut app, KeyCode::Char('a')),
+        Some(Request::Categories)
+    );
+    app.finished(
+        &Request::Categories,
+        Ok(Reply::Categories(vec![
+            "films".to_owned(),
+            "music".to_owned(),
+        ])),
+    );
+    app.paste("tempest:abc?n=thing");
+    press(&mut app, KeyCode::Tab);
+    type_keys(&mut app, "/media");
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Tab);
+    type_keys(&mut app, "live, 2026");
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char(' '));
+    let Some(Request::Add(request)) = press(&mut app, KeyCode::Enter) else {
+        panic!("enter adds");
+    };
+    assert_eq!(
+        *request,
+        AddRequest {
+            link: Some("tempest:abc?n=thing".to_owned()),
+            save_folder: Some(PathBuf::from("/media")),
+            category: Some("music".to_owned()),
+            tags: ["2026".to_owned(), "live".to_owned()].into(),
+            stopped: true,
+            ..AddRequest::default()
+        }
+    );
+    assert_eq!(app.modal, None);
+}
+
+#[test]
+fn the_add_modal_refuses_a_missing_link_or_relative_folder() {
+    let mut app = three();
+    press(&mut app, KeyCode::Char('a'));
+    assert_eq!(press(&mut app, KeyCode::Enter), None);
+    let Some(Modal::Add(form)) = &app.modal else {
+        panic!("the modal stays open");
+    };
+    assert_eq!(form.error.as_deref(), Some("Paste a tempest: link."));
+    type_keys(&mut app, "tempest:abc");
+    press(&mut app, KeyCode::Down);
+    type_keys(&mut app, "downloads");
+    assert_eq!(press(&mut app, KeyCode::Enter), None);
+    let Some(Modal::Add(form)) = &app.modal else {
+        panic!("the modal stays open");
+    };
+    assert_eq!(
+        form.error.as_deref(),
+        Some("The save folder must be an absolute path.")
+    );
+}
+
+#[test]
+fn remove_asks_whether_to_keep_the_files() {
+    let mut app = three();
+    let alpha = target(&app);
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(
+            alpha.clone(),
+            Action::Remove {
+                delete_files: false
+            }
+        ))
+    );
+    press(&mut app, KeyCode::Delete);
+    press(&mut app, KeyCode::Tab);
+    assert!(matches!(
+        app.modal,
+        Some(Modal::Remove {
+            delete_files: true,
+            ..
+        })
+    ));
+    press(&mut app, KeyCode::Char('k'));
+    press(&mut app, KeyCode::Char('d'));
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(
+            alpha,
+            Action::Remove { delete_files: true }
+        ))
+    );
+}
+
+#[test]
+fn rename_sends_the_new_name_or_none_to_reset() {
+    let mut app = three();
+    let alpha = target(&app);
+    press(&mut app, KeyCode::Char('r'));
+    let Some(Modal::Text { input, .. }) = &app.modal else {
+        panic!("rename opens a text modal");
+    };
+    assert_eq!(input.text(), "alpha");
+    type_keys(&mut app, "-2");
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(
+            alpha.clone(),
+            Action::Rename(Some("alpha-2".to_owned()))
+        ))
+    );
+    press(&mut app, KeyCode::Char('r'));
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(alpha, Action::Rename(None)))
+    );
+}
+
+#[test]
+fn tags_are_edited_as_a_comma_separated_list() {
+    let mut app = three();
+    let alpha = target(&app);
+    press(&mut app, KeyCode::Char('t'));
+    let Some(Modal::Text { input, .. }) = &app.modal else {
+        panic!("tags open a text modal");
+    };
+    assert_eq!(input.text(), "music");
+    type_keys(&mut app, ", #live");
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(
+            alpha,
+            Action::Tags(["live".to_owned(), "music".to_owned()].into())
+        ))
+    );
+}
+
+#[test]
+fn the_category_picker_lists_the_engines_categories() {
+    let mut app = three();
+    let alpha = target(&app);
+    assert_eq!(
+        press(&mut app, KeyCode::Char('C')),
+        Some(Request::Categories)
+    );
+    assert_eq!(app.pick_items(&PickKind::Category(alpha.clone())).len(), 1);
+    app.finished(
+        &Request::Categories,
+        Ok(Reply::Categories(vec![
+            "films".to_owned(),
+            "music".to_owned(),
+        ])),
+    );
+    press(&mut app, KeyCode::Char('j'));
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(
+            alpha.clone(),
+            Action::Category(Some("films".to_owned()))
+        ))
+    );
+    press(&mut app, KeyCode::Char('C'));
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(alpha, Action::Category(None)))
+    );
+}
+
+#[test]
+fn move_storage_needs_an_absolute_path() {
+    let mut app = three();
+    let alpha = target(&app);
+    press(&mut app, KeyCode::Char('m'));
+    let Some(Modal::Text { input, .. }) = &app.modal else {
+        panic!("move opens a text modal");
+    };
+    assert_eq!(input.text(), "/downloads");
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_keys(&mut app, "elsewhere");
+    assert_eq!(press(&mut app, KeyCode::Enter), None);
+    let Some(Modal::Text { error, .. }) = &app.modal else {
+        panic!("the modal stays open");
+    };
+    assert_eq!(error.as_deref(), Some("Enter an absolute path."));
+    press(&mut app, KeyCode::Home);
+    type_keys(&mut app, "/");
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(
+            alpha,
+            Action::Move(PathBuf::from("/elsewhere"))
+        ))
+    );
+}
+
+#[test]
+fn open_shows_the_folder_here_or_names_it_when_the_engine_is_remote() {
+    let mut app = three();
+    assert_eq!(
+        press(&mut app, KeyCode::Char('o')),
+        Some(Request::Open(PathBuf::from("/downloads")))
+    );
+    press(&mut app, KeyCode::Char('G'));
+    assert_eq!(
+        press(&mut app, KeyCode::Char('o')),
+        Some(Request::Open(PathBuf::from("/downloads/gamma")))
+    );
+    app.local = false;
+    assert_eq!(press(&mut app, KeyCode::Char('o')), None);
+    assert_eq!(
+        app.notice.unwrap().text,
+        "gamma is in /downloads/gamma on the engine's machine."
+    );
+}
+
+#[test]
+fn esc_closes_every_modal_without_asking_anything() {
+    let mut app = three();
+    for opener in ['a', 'x', 'r', 't', 'C', 'm', 'f', 's', ':', '?', '/'] {
+        press(&mut app, KeyCode::Char(opener));
+        assert!(app.modal.is_some(), "{opener} opens a modal");
+        assert_eq!(press(&mut app, KeyCode::Esc), None, "{opener}");
+        assert_eq!(app.modal, None, "esc closes what {opener} opened");
+    }
+}
+
+#[test]
+fn the_filter_applies_as_it_is_typed() {
+    let mut app = three();
+    press(&mut app, KeyCode::Char('j'));
+    press(&mut app, KeyCode::Char('/'));
+    type_keys(&mut app, "#mus");
+    assert_eq!(visible_names(&app), ["alpha"]);
+    assert_eq!(selected_name(&app), Some("alpha"), "the cursor follows");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.modal, None);
+    assert_eq!(app.finding.text, "#mus");
+    assert!(app.hints().iter().any(|hint| hint.keys == "esc"));
+
+    // Reopening edits the filter; esc there clears it.
+    press(&mut app, KeyCode::Char('/'));
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(visible_names(&app), ["alpha", "beta", "gamma"]);
+
+    // In the list, esc clears the filters.
+    press(&mut app, KeyCode::Char('/'));
+    type_keys(&mut app, "zzz");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.visible().is_empty());
+    assert_eq!(app.selected, None);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(visible_names(&app).len(), 3);
+}
+
+#[test]
+fn status_and_sort_pickers_change_the_list() {
+    let mut app = three();
+    press(&mut app, KeyCode::Char('f'));
+    let items = app.pick_items(&PickKind::Status);
+    assert_eq!(
+        (items[0].label.as_str(), items[0].note.as_str()),
+        ("All", "3")
+    );
+    assert_eq!(items[2].note, "1", "one sharing");
+    type_keys(&mut app, "jj");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.finding.status, Some(StatusFilter::Sharing));
+    assert_eq!(visible_names(&app), ["gamma"]);
+    assert_eq!(selected_name(&app), Some("gamma"));
+
+    press(&mut app, KeyCode::Char('f'));
+    press(&mut app, KeyCode::Char('g'));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.finding.status, None);
+
+    press(&mut app, KeyCode::Char('s'));
+    type_keys(&mut app, "jj");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.finding.sort.key, SortKey::Size);
+    assert_eq!(visible_names(&app), ["beta", "gamma", "alpha"]);
+    press(&mut app, KeyCode::Char('S'));
+    assert_eq!(visible_names(&app), ["alpha", "gamma", "beta"]);
+    assert_eq!(app.finding.describe(), "by size ▲");
+}
+
+#[test]
+fn the_palette_runs_what_matches() {
+    let mut app = three();
+    press(&mut app, KeyCode::Char(':'));
+    type_keys(&mut app, "rena");
+    press(&mut app, KeyCode::Enter);
+    assert!(matches!(
+        app.modal,
+        Some(Modal::Text {
+            kind: TextKind::Rename,
+            ..
+        })
+    ));
+    press(&mut app, KeyCode::Esc);
+
+    press(&mut app, KeyCode::Char(':'));
+    type_keys(&mut app, "queue");
+    press(&mut app, KeyCode::Down);
+    let alpha = target(&app);
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(alpha, Action::Queue(QueueStep::Down)))
+    );
+
+    press(&mut app, KeyCode::Char(':'));
+    type_keys(&mut app, "zzz");
+    assert_eq!(press(&mut app, KeyCode::Enter), None);
+    assert_eq!(app.modal, None);
+}
+
+#[test]
+fn areas_switch_by_number_or_bracket_and_wrap() {
+    let mut app = app_with(vec![]);
+    press(&mut app, KeyCode::Char('3'));
+    assert_eq!(app.area, Area::Catalog);
+    press(&mut app, KeyCode::Char(']'));
+    press(&mut app, KeyCode::Char(']'));
+    assert_eq!(app.area, Area::Transfers);
+    press(&mut app, KeyCode::Char('['));
+    assert_eq!(app.area, Area::Settings);
+    // Transfer keys do nothing outside Transfers.
+    assert_eq!(press(&mut app, KeyCode::Char('a')), None);
+    assert_eq!(app.modal, None);
+}
+
+#[test]
+fn hints_list_only_keys_that_work() {
+    let has = |app: &App, command: Command| {
+        let (keys, _) = command.hint().unwrap();
+        app.hints().iter().any(|hint| hint.keys == keys)
+    };
+    let mut app = app_with(vec![]);
+    assert!(!has(&app, Command::StartStop), "nothing to start");
+    assert!(!has(&app, Command::Down), "nothing to move to");
+    assert!(has(&app, Command::Add));
+    app.apply(ApiEvent::Snapshot(vec![transfer(1, "a", 0)]));
+    assert!(has(&app, Command::StartStop));
+    assert!(!has(&app, Command::ClearFilters));
+    press(&mut app, KeyCode::Char('2'));
+    assert!(!has(&app, Command::StartStop), "not on Share");
+    assert_eq!(app.hints().last().unwrap().keys, "?");
+    press(&mut app, KeyCode::Char('?'));
+    assert_eq!(app.hints().len(), 1);
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(app.modal, None, "any key closes help");
+}
+
+#[test]
+fn help_lists_the_areas_sections() {
+    let mut app = three();
+    let titles =
+        |app: &App| -> Vec<&str> { app.help_sections().iter().map(|(s, _)| s.title()).collect() };
+    assert_eq!(titles(&app), ["Move", "Transfer", "Queue", "Find", "App"]);
+    press(&mut app, KeyCode::Char('4'));
+    assert_eq!(titles(&app), ["App"]);
+}
+
+#[test]
+fn notices_report_successes_and_failures_and_fade() {
+    let mut app = three();
+    let request = Request::Transfer(target(&app), Action::Start);
+    app.finished(&request, Err("The engine is shutting down.".to_owned()));
+    let notice = app.notice.clone().unwrap();
+    assert_eq!(
+        notice.text,
+        "Couldn't start alpha: The engine is shutting down."
+    );
+    assert!(notice.error);
+    for _ in 0..NOTICE_TICKS {
+        app.tick();
+    }
+    assert_eq!(app.notice, None);
+
+    let cases = [
+        (Action::Start, "Started alpha."),
+        (
+            Action::Remove { delete_files: true },
+            "Removed alpha and deleted its files.",
+        ),
+        (Action::Rename(None), "alpha has its bundle's name again."),
+        (
+            Action::Tags(["a".to_owned(), "b".to_owned()].into()),
+            "Tagged alpha: a, b.",
+        ),
+        (
+            Action::Queue(QueueStep::Top),
+            "Moved alpha to the top of the queue.",
+        ),
+    ];
+    for (action, text) in cases {
+        app.finished(&Request::Transfer(target(&app), action), Ok(Reply::Done));
+        let notice = app.notice.clone().unwrap();
+        assert_eq!((notice.text.as_str(), notice.error), (text, false));
+    }
+    let add = Request::Add(Box::default());
+    app.finished(&add, Ok(Reply::Added("thing".to_owned())));
+    assert_eq!(app.notice.clone().unwrap().text, "Added thing.");
+    app.finished(&add, Err("The link is not valid.".to_owned()));
+    assert_eq!(
+        app.notice.clone().unwrap().text,
+        "Couldn't add the link: The link is not valid."
+    );
+}

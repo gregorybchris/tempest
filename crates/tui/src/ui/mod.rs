@@ -3,17 +3,18 @@
 //! The screen follows the shared client layout (`specs/interfaces.md`): the areas and rates on
 //! top, the area's content, and a bar of the keys that work at the bottom.
 
+mod modal;
 mod transfers;
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::layout::{Constraint, Flex, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use tempest_engine::Status;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Area, Binding, Origin};
+use crate::app::{App, Area, Hint, Modal, Origin};
 use crate::format;
 use crate::model::Connection;
 use crate::theme::Theme;
@@ -35,14 +36,44 @@ pub fn draw(frame: &mut Frame, app: &App) {
     .areas(area);
     draw_header(frame, app, header);
     rule(frame, theme, top_rule);
+    if app.area == Area::Transfers {
+        draw_finding(frame, app, top_rule);
+    }
     match app.area {
         Area::Transfers => transfers::draw(frame, app, body),
         other => draw_empty_area(frame, theme, other, body),
     }
     draw_footer(frame, app, footer);
-    if app.help {
-        draw_help(frame, app, area);
+    modal::draw(frame, app, area);
+}
+
+/// The filters and order on the rule above the list, with how many transfers they leave.
+fn draw_finding(frame: &mut Frame, app: &App, area: Rect) {
+    let description = app.finding.describe();
+    if description.is_empty() {
+        return;
     }
+    let theme = &app.theme;
+    let mut spans = vec![Span::styled(
+        format!(" {description} "),
+        Style::new().fg(theme.hot),
+    )];
+    if app.finding.filtering() {
+        let shown = app.visible().len();
+        let total = app.model.transfers().len();
+        spans.push(Span::styled(
+            format!("· {shown} of {total} "),
+            Style::new().fg(theme.dim),
+        ));
+    }
+    let line = Line::from(spans);
+    let width = (line.width() as u16).min(area.width.saturating_sub(2));
+    let text = Rect {
+        x: area.x + 1,
+        width,
+        ..area
+    };
+    frame.render_widget(Paragraph::new(line), text);
 }
 
 /// A horizontal rule across `area`.
@@ -169,29 +200,53 @@ fn draw_empty_area(frame: &mut Frame, theme: &Theme, which: Area, area: Rect) {
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
+    let hint = |hint: &Hint| {
+        vec![
+            Span::styled(
+                hint.keys,
+                Style::new().fg(theme.fg).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" {}  ", hint.action), Style::new().fg(theme.dim)),
+        ]
+    };
+    // While filtering, the footer is the prompt, with its keys on the right.
+    if let Some(Modal::Filter(input)) = &app.modal {
+        let keys: Vec<Span> = app.hints().iter().flat_map(hint).collect();
+        let keys = Line::from(keys);
+        let keys_width = (keys.width() as u16).min(area.width / 2);
+        let [prompt, input_area, keys_area] = Layout::horizontal([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(keys_width),
+        ])
+        .areas(area);
+        frame.render_widget(
+            Paragraph::new(Span::styled(" /", Style::new().fg(theme.hot))),
+            prompt,
+        );
+        let (text, cursor) = input.view(usize::from(input_area.width.saturating_sub(1)));
+        frame.render_widget(
+            Paragraph::new(Span::styled(text, Style::new().fg(theme.hot))),
+            input_area,
+        );
+        frame.set_cursor_position(Position::new(input_area.x + cursor as u16, area.y));
+        frame.render_widget(Paragraph::new(keys), keys_area);
+        return;
+    }
     let line = match &app.notice {
         Some(notice) => {
             let color = if notice.error { theme.bad } else { theme.hot };
             Line::styled(format!(" {}", notice.text), Style::new().fg(color))
         }
         None => {
-            // Hints that don't fit are left out, except help, which lists them all.
+            // Hints that don't fit are left out, except the last (help, or how to close).
             let hints = app.hints();
-            let (help, others) = hints.split_last().expect("help is always a hint");
-            let hint = |binding: &Binding| {
-                vec![
-                    Span::styled(
-                        binding.keys,
-                        Style::new().fg(theme.fg).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(format!(" {}  ", binding.action), Style::new().fg(theme.dim)),
-                ]
-            };
-            let room = usize::from(area.width).saturating_sub(1 + Line::from(hint(help)).width());
+            let (last, others) = hints.split_last().expect("there is always a hint");
+            let room = usize::from(area.width).saturating_sub(1 + Line::from(hint(last)).width());
             let mut spans = vec![Span::raw(" ")];
             let mut used = 0;
-            for binding in others {
-                let spans_of = hint(binding);
+            for each in others {
+                let spans_of = hint(each);
                 let width = Line::from(spans_of.clone()).width();
                 if used + width > room {
                     break;
@@ -199,55 +254,11 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 used += width;
                 spans.extend(spans_of);
             }
-            spans.extend(hint(help));
+            spans.extend(hint(last));
             Line::from(spans)
         }
     };
     frame.render_widget(Paragraph::new(line), area);
-}
-
-fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = &app.theme;
-    let bindings = app.help_bindings();
-    let width = 44.min(area.width);
-    let height = (bindings.len() as u16 + 4).min(area.height);
-    let [popup] = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .areas(area);
-    let [popup] = Layout::horizontal([Constraint::Length(width)])
-        .flex(Flex::Center)
-        .areas(popup);
-    let mut lines: Vec<Line> = bindings
-        .iter()
-        .map(|binding| {
-            Line::from(vec![
-                Span::styled(
-                    format!(" {:>9}  ", binding.keys),
-                    Style::new().fg(theme.hot),
-                ),
-                Span::styled(binding.action, Style::new().fg(theme.fg)),
-            ])
-        })
-        .collect();
-    lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        " Arrow keys work like j and k.",
-        Style::new().fg(theme.dim),
-    ));
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::bordered()
-                .border_type(BorderType::Double)
-                .border_style(Style::new().fg(theme.down))
-                .style(Style::new().bg(theme.raise).fg(theme.fg))
-                .title(Line::styled(
-                    format!(" {} keys ", app.area.title()),
-                    Style::new().add_modifier(Modifier::BOLD),
-                )),
-        ),
-        popup,
-    );
 }
 
 #[cfg(test)]

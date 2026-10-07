@@ -136,6 +136,8 @@ ratatui, with a k9s/lazygit-style keyboard model (D-090):
 - `/` to filter, `:` for commands, `?` for help
 - a persistent hint bar showing available keys
 
+Keys, hints, help and the palette come from one binding table (D-191). Filters and sorting behave as D-192 describes.
+
 The TUI is minimal but powerful, giving quick access to every essential feature.
 
 ## Visualization ideas

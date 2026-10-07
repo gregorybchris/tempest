@@ -1,0 +1,16 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "draw(&app, 120, 12).backend()"
+---
+"  Transfers   Share   Catalog   Settings                                                          ↓9.8M  ↑1.6M  [green] "
+"─ /#music · 2 of 6 ─────────────────────────────────────────────────────────────────────────────────────────────────────"
+"  Name                                                Size Progress            ↓     ↑    ETA Status        Peers  Ratio"
+"▌ ensemble-2026.tar                                   4.2G ████████░░  81%  9.8M  1.2M     3m Downloading    7/12   0.12"
+"  field-recordings                                    812M ██████████ 100%     –  400K      – Sharing         3/3   2.40"
+"                                                                                                                        "
+"                                                                                                                        "
+"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"
+" Downloading from 7 of 12 peers, 2 through relays. About 3 minutes left.                                                "
+"                                                                                                                        "
+"────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"
+" /#music                                                                                         enter keep  esc clear  "

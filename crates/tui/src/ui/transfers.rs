@@ -11,6 +11,7 @@ use super::{fit, rule, status_color, status_label};
 use crate::app::App;
 use crate::columns::{self, BAR, Column, SPACING};
 use crate::explain::{Fix, explain};
+use crate::finding::{Finding, Sort, SortKey};
 use crate::format;
 use crate::model::Connection;
 use crate::theme::Theme;
@@ -37,9 +38,22 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     let shown = columns::fitting(area.width.saturating_sub(MARKER + SPACING));
     let name_width = name_width(&shown, area.width);
 
+    let sorted = sorted_column(app.finding.sort.key);
+    let arrow = if app.finding.sort.ascending() {
+        "▲"
+    } else {
+        "▼"
+    };
     let mut titles = vec![Cell::from("")];
     titles.extend(shown.iter().map(|column| {
-        let line = Line::from(column.title());
+        let line = if Some(*column) == sorted {
+            Line::from(vec![
+                Span::raw(column.title()),
+                Span::styled(arrow, Style::new().fg(theme.hot)),
+            ])
+        } else {
+            Line::from(column.title())
+        };
         let line = if column.numeric() {
             line.right_aligned()
         } else {
@@ -84,9 +98,17 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(table, area, &mut state);
 
     if visible.is_empty() {
+        let filters = Finding {
+            sort: Sort::default(),
+            ..app.finding.clone()
+        };
         let message = match app.model.connection {
-            Connection::Connecting => "Connecting to the engine…",
-            _ => "No transfers yet. `tempest get <link>` or `tempest share <path>` adds one.",
+            Connection::Connecting => "Connecting to the engine…".to_owned(),
+            _ if !app.model.transfers().is_empty() => format!(
+                "Nothing matches {}. Press esc to clear the filters.",
+                filters.describe()
+            ),
+            _ => "No transfers yet. Press a to add a link.".to_owned(),
         };
         let [middle] = Layout::vertical([Constraint::Length(2)])
             .flex(Flex::Center)
@@ -98,6 +120,22 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
             middle,
         );
     }
+}
+
+/// The column showing what the list is sorted by, if one does.
+fn sorted_column(key: SortKey) -> Option<Column> {
+    Some(match key {
+        SortKey::Queue | SortKey::Added => return None,
+        SortKey::Name => Column::Name,
+        SortKey::Size => Column::Size,
+        SortKey::Progress => Column::Progress,
+        SortKey::Status => Column::Status,
+        SortKey::Down => Column::Down,
+        SortKey::Up => Column::Up,
+        SortKey::Peers => Column::Peers,
+        SortKey::TimeLeft => Column::Eta,
+        SortKey::Ratio => Column::Ratio,
+    })
 }
 
 /// The name column's width: what the other columns leave.

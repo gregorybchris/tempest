@@ -9,7 +9,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tempest_engine::api::client::ApiEvent;
 use tempest_engine::{Kind, Status, TransferInfo};
 use tempest_protocol::Hash;
-use tempest_tui::app::{App, Origin};
+use tempest_tui::app::{App, Origin, Reply, Request};
 use tempest_tui::model::Connection;
 use tempest_tui::theme::Theme;
 use tempest_tui::ui;
@@ -60,6 +60,7 @@ fn transfers() -> Vec<TransferInfo> {
             connections: 7,
             relayed: 2,
             peers: 12,
+            tags: ["music".to_owned()].into(),
             ..transfer(0, "ensemble-2026.tar", Status::Downloading)
         },
         TransferInfo {
@@ -70,6 +71,7 @@ fn transfers() -> Vec<TransferInfo> {
             upload_rate: 400_000,
             connections: 3,
             peers: 3,
+            tags: ["live".to_owned(), "music".to_owned()].into(),
             ..transfer(1, "field-recordings", Status::Sharing)
         },
         TransferInfo {
@@ -122,6 +124,15 @@ fn press(app: &mut App, keys: &str) {
     for c in keys.chars() {
         app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     }
+}
+
+fn press_code(app: &mut App, code: KeyCode) {
+    app.key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+fn with_categories(app: &mut App) {
+    let categories = vec!["films".to_owned(), "music".to_owned()];
+    app.finished(&Request::Categories, Ok(Reply::Categories(categories)));
 }
 
 fn draw(app: &App, width: u16, height: u16) -> Terminal<TestBackend> {
@@ -196,4 +207,94 @@ fn every_theme_colors_the_screen() {
         assert!(header.contains(&format!("[{}]", theme.name)), "{header}");
         press(&mut app, "T");
     }
+}
+
+#[test]
+fn the_add_modal() {
+    let mut app = app();
+    press(&mut app, "a");
+    with_categories(&mut app);
+    app.paste("tempest:7f3a9c2be1d04a5f8e6b7c9d0a1b2c3d4e5f60718293a4b5c6d7e8f9?n=ensemble");
+    press_code(&mut app, KeyCode::Tab);
+    press_code(&mut app, KeyCode::Tab);
+    press_code(&mut app, KeyCode::Right);
+    insta::assert_snapshot!(draw(&app, 80, 24).backend());
+    // A refused form says why.
+    press_code(&mut app, KeyCode::Up);
+    press(&mut app, "media");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("add_refused", draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn the_remove_confirmation() {
+    let mut app = app();
+    press(&mut app, "xd");
+    insta::assert_snapshot!(draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn text_modals() {
+    let mut app = app();
+    press(&mut app, "r");
+    insta::assert_snapshot!("rename", draw(&app, 80, 12).backend());
+    press_code(&mut app, KeyCode::Esc);
+    press(&mut app, "t");
+    insta::assert_snapshot!("tags", draw(&app, 80, 12).backend());
+    press_code(&mut app, KeyCode::Esc);
+    press(&mut app, "m");
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    press(&mut app, "media");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("move_refused", draw(&app, 80, 12).backend());
+}
+
+#[test]
+fn pickers() {
+    let mut app = app();
+    press(&mut app, "C");
+    insta::assert_snapshot!("category_loading", draw(&app, 80, 14).backend());
+    with_categories(&mut app);
+    press(&mut app, "j");
+    insta::assert_snapshot!("category", draw(&app, 80, 14).backend());
+    press_code(&mut app, KeyCode::Esc);
+    press(&mut app, "f");
+    insta::assert_snapshot!("status", draw(&app, 80, 24).backend());
+    press_code(&mut app, KeyCode::Esc);
+    press(&mut app, "s");
+    insta::assert_snapshot!("sort", draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn the_command_palette() {
+    let mut app = app();
+    press(&mut app, ":");
+    insta::assert_snapshot!("palette", draw(&app, 80, 24).backend());
+    press(&mut app, "queue");
+    press_code(&mut app, KeyCode::Down);
+    insta::assert_snapshot!("palette_filtered", draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn a_filtered_and_sorted_list() {
+    let mut app = app();
+    press(&mut app, "/#music");
+    insta::assert_snapshot!("filter_prompt", draw(&app, 120, 12).backend());
+    press_code(&mut app, KeyCode::Enter);
+    // Sort by size, smallest first.
+    press(&mut app, "sjj");
+    press_code(&mut app, KeyCode::Enter);
+    press(&mut app, "S");
+    insta::assert_snapshot!("filtered_and_sorted", draw(&app, 120, 12).backend());
+    press(&mut app, "/zzz");
+    press_code(&mut app, KeyCode::Enter);
+    insta::assert_snapshot!("nothing_matches", draw(&app, 80, 12).backend());
+}
+
+#[test]
+fn notices_replace_the_hints() {
+    let mut app = app();
+    let request = Request::Categories;
+    app.finished(&request, Err("cannot reach the engine".to_owned()));
+    insta::assert_snapshot!(draw(&app, 80, 8).backend());
 }

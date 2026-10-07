@@ -2997,3 +2997,40 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 **Decision:** D-138's order holds: ↑, then ETA, ↓ and size go as the terminal narrows; name, progress and status stay. Peers and ratio fill extra width after ↑. The sketch's text now points to D-138.
 
 **Rationale:** Time left answers one of the list's four questions ("how long"), and ↑ answers none of them.
+
+---
+
+## D-191: TUI keys for transfer controls, the queue and finding
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-118's controls and finding features need keys in the TUI. `1`-`4` and `[ ]` switch areas (D-136), so the prototype's status-filter keys (`0`-`7`, `[ ]`) clash, and the spec reserves `c` and `g` for the chunk map and rates chart in the detail pane (M7.3).
+
+**Options for the status filter:** cycle with a pair of keys; open a picker with counts (chosen). **For queue moves:** `K`/`J` plus `ctrl` variants; `K`/`J` one place and `<`/`>` to the top or bottom (chosen); palette only.
+
+**Decision:**
+
+- One table binds every command to its keys. Key handling, the hint bar, the help overlay and the `:` palette all read it, so they can't disagree.
+- Lower-case keys act on the selection or open a modal (`a`, `x`, `r`, `t`, `m`, `o`, `f`, `s`); upper-case ones are the stronger or less common variant (`F`, `R`, `S`, `K`/`J`). The category picker is `C`, leaving `c` to the chunk map.
+- Status filter and sort open pickers; `S` reverses the order. `esc` in the list clears the filters.
+- Every modal closes on `esc` without doing anything; the filter prompt also clears what it typed.
+- `o` opens the folder with the system's opener when the engine's API is on a loopback address, and otherwise says where the folder is on the engine's machine.
+
+**Rationale:** Pickers show what each choice leaves (counts per status) and need no memorized order. `K`/`J` follow vim's "shift moves the thing, not the cursor" habit, and `<`/`>` read as "to the start or end". A single table keeps help and hints from drifting from the keys.
+
+---
+
+## D-192: How filters and sorting behave
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-118 lists filtering by name, tag and status and sorting by ten keys, but not how a query matches or which way each sort runs. The TUI and the web UI should behave alike (D-119).
+
+**Decision:**
+
+- A query is words that must all match, ignoring case: `#word` matches any tag containing it, any other word the name. Matching is live as the query is typed.
+- The default order is the queue. Each sort key has a natural direction: name A to Z, status in the glossary's order, time left soonest first, and size, progress, rates, peers, ratio and date added largest or newest first. Reversing flips it.
+- Unknown values (a size before the manifest arrives, no time left, no ratio) sort last in either direction. Ties keep queue order.
+- "Peers" sorts by open connections, the closest the API comes to "peers serving us".
+
+**Rationale:** Natural directions put what users look for first (the fastest, the biggest, the nearly done). Keeping unknowns last stops reversing from filling the top of the list with dashes.

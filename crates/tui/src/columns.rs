@@ -84,7 +84,8 @@ impl Column {
             Self::Eta => 6,
             Self::Status => 11,
             Self::Peers => 7,
-            Self::Ratio => 5,
+            // Room for "Ratio" and a sort arrow.
+            Self::Ratio => 6,
         }
     }
 
@@ -127,9 +128,9 @@ mod tests {
     #[test]
     fn narrow_terminals_drop_up_then_eta_then_down_then_size() {
         use Column::*;
-        assert_eq!(fitting(81), Column::ORDER);
+        assert_eq!(fitting(82), Column::ORDER);
         assert_eq!(
-            fitting(80),
+            fitting(81),
             [Name, Size, Progress, Down, Up, Eta, Status, Peers]
         );
         assert_eq!(fitting(74), [Name, Size, Progress, Down, Up, Eta, Status]);

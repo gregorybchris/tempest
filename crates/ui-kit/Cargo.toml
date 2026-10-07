@@ -1,0 +1,28 @@
+[package]
+name = "tempest-ui-kit"
+description = "Tempest's design system for its web UIs: themes, components, charts and the chunk map"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+leptos.workspace = true
+send_wrapper.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+  "DomRect",
+  "DomRectReadOnly",
+  "Element",
+  "MouseEvent",
+  "PointerEvent",
+  "ResizeObserver",
+  "ResizeObserverEntry",
+] }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

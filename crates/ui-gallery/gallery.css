@@ -1,0 +1,54 @@
+/* The gallery's own layout; components come from the UI kit's stylesheet. */
+
+.gallery {
+  display: grid;
+  gap: 34px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 28px 18px 64px;
+}
+
+.gallery__section {
+  display: grid;
+  gap: 14px;
+}
+
+.gallery__title {
+  font-size: var(--text-xl);
+}
+
+.gallery__grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+  gap: 34px 26px;
+}
+
+.gallery__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+
+.gallery__stack {
+  display: grid;
+  gap: 16px;
+}
+
+body {
+  padding-bottom: 34px;
+}
+
+.hints {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+}
+
+@media (max-width: 640px) {
+  .meters,
+  .hints {
+    display: none;
+  }
+}

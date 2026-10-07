@@ -19,6 +19,7 @@ tempest-tracker = { path = "crates/tracker", version = "0.1.0" }
 tempest-engine = { path = "crates/engine", version = "0.1.0" }
 tempest-relay = { path = "crates/relay", version = "0.1.0" }
 tempest-tui = { path = "crates/tui", version = "0.1.0" }
+tempest-ui-kit = { path = "crates/ui-kit", version = "0.1.0" }
 
 anyhow = "1"
 # Local time for the alternative speed limits' schedule.
@@ -81,6 +82,17 @@ ratatui = "0.30"
 unicode-width = "0.2"
 # Snapshot tests of the terminal UI's screens.
 insta = "1"
+
+# The web UIs (D-117), client-side rendered to WebAssembly. Leptos stays on 0.8.
+leptos = "0.8"
+web-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-test = "0.3"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+# Lets components clean up browser objects, which aren't Send, in Leptos's cleanups.
+send_wrapper = "0.6"
 
 # Calls an axum router directly in tests, without a socket.
 tower = { version = "0.5", default-features = false, features = ["util"] }

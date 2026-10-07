@@ -1,0 +1,26 @@
+[package]
+name = "tempest-ui-gallery"
+description = "A living catalog of Tempest's design system, and the browser benchmark of its live views"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+tempest-ui-kit.workspace = true
+
+console_error_panic_hook.workspace = true
+leptos = { workspace = true, features = ["csr"] }
+web-sys = { workspace = true, features = ["Location", "Performance"] }
+
+[dev-dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+wasm-bindgen-test.workspace = true
+web-sys = { workspace = true, features = ["HtmlElement", "MessageChannel", "MessagePort", "NodeList"] }
+
+[lints]
+workspace = true

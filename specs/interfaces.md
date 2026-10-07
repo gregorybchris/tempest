@@ -12,7 +12,7 @@ Tempest's user-facing interfaces and the quality bar they share. Decisions refer
 | Tracker catalog | Same framework as the client web UI | Tracker server |
 | Simulation results UI | Same framework as the client web UI | DuckDB results database |
 
-The three web UIs share a design-system crate, `ui-kit`, with colors, typography, components and chart styles (D-076).
+The three web UIs share a design-system crate, `ui-kit`, with colors, typography, components and chart styles (D-076, D-198). `ui-gallery` shows all of it.
 
 ## Quality bar
 
@@ -60,7 +60,7 @@ The web UIs use Leptos (D-117). Code written for them, by people or agents, foll
 - Use Leptos 0.8 (pinned). Don't mix in APIs from 0.6 or older.
 - Never create one memo per item that subscribes to a shared signal. Removing a subscriber is O(n) in `reactive_graph`, so this pattern becomes quadratic: 1,536 such memos cost about 55 ms per update in an early prototype. Use one effect that diffs into per-item signals, `Selector`, or keyed stores.
 - Keep UI logic in plain Rust modules, and keep components thin.
-- A CI benchmark of a 1,536-cell live view guards against performance regressions.
+- A CI benchmark of a 1,536-cell live view guards against performance regressions (D-199).
 
 ## Client layout
 

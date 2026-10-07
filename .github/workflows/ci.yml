@@ -50,6 +50,30 @@ jobs:
       - name: Slow simulation tests
         run: cargo test --release -p tempest-sim -- --include-ignored
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Installs the pinned toolchain with its WebAssembly target.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # The test runner must match the wasm-bindgen crate the lockfile has.
+      - name: Find wasm-bindgen's version
+        id: wasm-bindgen
+        run: echo "version=$(cargo metadata --format-version 1 --locked | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version')" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+      # The UI kit's own tests use native-only crates; the gallery's are the browser benchmark.
+      - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-kit -- -D warnings
+      - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-gallery --all-targets -- -D warnings
+      # The 1,536-cell live view benchmark (specs/interfaces.md), in headless Chrome.
+      - name: Live view benchmark
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+          CHROMEDRIVER: ${{ env.CHROMEWEBDRIVER }}/chromedriver
+        run: cargo test --target wasm32-unknown-unknown -p tempest-ui-gallery -- --nocapture
+
   deny:
     runs-on: ubuntu-latest
     steps:

@@ -3123,3 +3123,36 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - TUI keys: `|` picks columns, `v` lists the views (`enter` shows one, `x` deletes it) and `V` saves the current one.
 
 **Rationale:** Views answer "show me these, in this order"; columns are a standing preference. Keeping them apart makes each simpler to explain, and both live in `ui` (D-195).
+
+---
+
+## D-198: The UI kit's shape
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-076 calls for one design-system crate shared by the web UIs, and the architecture lets `ui-kit` depend on nothing of Tempest's. The web UIs are served by the engine and may run with no internet access.
+
+**Options for styling:** CSS written by Rust components; one stylesheet with themes as custom properties (chosen). **For the font:** Google Fonts, as in the M0 prototype; IBM Plex Mono bundled with the kit (chosen). **For data types:** the engine's API types; the kit's own (chosen).
+
+**Decision:**
+
+- One stylesheet holds the four themes' tokens (D-089, D-135), the type scale and every component's classes. Each theme also has six series colors for charts with more lines than ↓ and ↑. Tests check that every theme defines the same tokens, that text colors keep 4.5:1 contrast on the backgrounds and series colors 3:1, and that the fonts it names exist.
+- The "clean" toggle the interfaces spec asks for turns off glow, scanlines and animation; reduced motion turns off animation and transitions.
+- IBM Plex Mono's Latin subset, in three weights, ships with the kit under the OFL.
+- Charts and the chunk map take the kit's own types: series of points with optional bands, bars with intervals, and chunk cells shaped like the engine's (D-193). Their geometry is plain Rust with tests; components only draw it and handle the pointer.
+
+**Rationale:** Custom properties switch themes without re-rendering, and a test is the only thing that keeps four hand-tuned palettes legible. A bundled font works offline and leaks no requests. Owning its types keeps the kit buildable for WebAssembly without the engine's native dependencies, and lets the simulation UI reuse the charts.
+
+---
+
+## D-199: The UI gallery and the live view benchmark
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** UI quality is checked by eye in all four themes, and the Leptos guidelines require a CI benchmark of a 1,536-cell live view. The pattern it guards against costs time in the browser's reactive graph and DOM, which a native test doesn't exercise.
+
+**Options:** a native test of the reactive graph alone; a Playwright script against a built page; `wasm-bindgen-test` in headless Chrome (chosen).
+
+**Decision:** A crate, `ui-gallery`, shows every component, chart and the chunk map on made-up live data, with the theme picked by a query parameter for screenshots. Its browser test mounts the chunk map with 1,536 cells, applies updates that each change an eighth of them, and fails when an update averages more than a 60 Hz frame. CI runs it in headless Chrome in a debug build.
+
+**Rationale:** A browser test measures what users feel, needs no JavaScript tooling, and uses the chromedriver GitHub's runners already have. The forbidden pattern takes about 25 times the diffing pattern's time, so a frame's budget separates them with room for slower runners.

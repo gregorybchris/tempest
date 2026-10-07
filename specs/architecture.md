@@ -35,7 +35,8 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client | `protocol`, `core` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results | `core` |
-| `ui-kit` | Shared design system for the web UIs (D-076) | (none) |
+| `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
+| `ui-gallery` | A catalog of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
 | `web` | Client web UI | `ui-kit` |
 | `tui` | Terminal UI | `engine` (its API client and types) |
 | `sim-web` | Simulation results UI | `ui-kit` |

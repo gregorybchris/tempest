@@ -75,6 +75,8 @@ pub(crate) enum Report {
     StorageFailed(StorageError),
     /// More peers to dial.
     AddPeers(Vec<PeerRecord>),
+    /// Asks for a handle to storage, once laid out.
+    Storage(oneshot::Sender<Option<Storage>>),
 }
 
 /// A connection the session knows about.
@@ -187,18 +189,18 @@ impl BundleTask {
             }
         }
 
-        let summary = Summary {
-            complete: self.session.is_complete(),
-            downloaded: self.session.downloaded(),
-            uploaded: self.session.uploaded(),
-        };
         let closed = match self.storage.take() {
-            Some(storage) => storage.close().await,
-            None => Ok(()),
+            Some(storage) => storage.close().await.map(Some),
+            None => Ok(None),
         };
-        match self.failure {
-            Some(error) => Err(error.into()),
-            None => closed.map(|()| summary).map_err(DriverError::from),
+        match (self.failure, closed) {
+            (Some(error), _) | (None, Err(error)) => Err(error.into()),
+            (None, Ok(checkpoint)) => Ok(Summary {
+                complete: self.session.is_complete(),
+                downloaded: self.session.downloaded(),
+                uploaded: self.session.uploaded(),
+                checkpoint,
+            }),
         }
     }
 
@@ -234,6 +236,7 @@ impl BundleTask {
             downloaded: session.downloaded(),
             uploaded: session.uploaded(),
             connections: session.connection_count(),
+            known_peers: session.known_peer_count(),
             complete: session.is_complete(),
         };
         self.status.send_if_modified(|current| {
@@ -300,6 +303,9 @@ impl BundleTask {
                 session.shutdown(now);
             }
             Report::AddPeers(peers) => session.add_peers(now, peers),
+            Report::Storage(reply) => {
+                let _ = reply.send(self.storage.clone());
+            }
         }
     }
 

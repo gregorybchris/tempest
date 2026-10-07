@@ -35,7 +35,7 @@ use tokio::task::JoinHandle;
 
 use self::bundle::{BundleTask, Report, Start};
 use crate::endpoint::{Connection, Endpoint, Incoming};
-use crate::storage::{Storage, StorageConfig, StorageError};
+use crate::storage::{Checkpoint, Storage, StorageConfig, StorageError};
 use crate::stream::read_message;
 
 /// How a [`Node`] and its bundles behave.
@@ -159,12 +159,14 @@ pub struct Status {
     pub uploaded: u64,
     /// The number of connections, open or opening.
     pub connections: usize,
+    /// The number of peers known, connected or not.
+    pub known_peers: usize,
     /// Every chunk is stored and synced to disk.
     pub complete: bool,
 }
 
 /// How a bundle's session ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     /// Every chunk was stored.
     pub complete: bool,
@@ -172,6 +174,8 @@ pub struct Summary {
     pub downloaded: u64,
     /// Payload bytes of Data sent.
     pub uploaded: u64,
+    /// What storage held when it closed, unless the manifest never arrived.
+    pub checkpoint: Option<Checkpoint>,
 }
 
 /// A running bundle. Dropping it leaves the bundle running until the node shuts down.
@@ -196,6 +200,14 @@ impl BundleHandle {
     /// Adds peers the session may dial, such as from a link or a tracker.
     pub async fn add_peers(&self, peers: Vec<PeerRecord>) {
         self.peers.add_peers(peers).await;
+    }
+
+    /// The bundle's storage, once laid out: from the start when shared, and once the manifest
+    /// arrives when downloaded. `None` before then and once the bundle has stopped.
+    pub async fn storage(&self) -> Option<Storage> {
+        let (reply, storage) = oneshot::channel();
+        self.peers.0.send(Report::Storage(reply)).await.ok()?;
+        storage.await.ok().flatten()
     }
 
     /// Somewhere for discovery to deliver peers to, apart from the handle.
@@ -291,15 +303,22 @@ impl Node {
         &self.endpoint
     }
 
-    /// Shares a bundle from `storage`, with the chunks it holds.
+    /// Runs a bundle from `storage`, with the chunks it holds: shares it, and downloads the rest
+    /// if it is incomplete.
     pub async fn share(&self, storage: Storage) -> Result<BundleHandle, DriverError> {
+        self.share_with(storage, None).await
+    }
+
+    /// [`share`](Self::share), with session settings of its own instead of the node's.
+    pub async fn share_with(
+        &self,
+        storage: Storage,
+        session: Option<Config>,
+    ) -> Result<BundleHandle, DriverError> {
         let have = storage.have().await?;
-        self.run(
-            storage.manifest().bundle_id(),
-            Start::Stored { storage, have },
-            Vec::new(),
-        )
-        .await
+        let bundle_id = storage.manifest().bundle_id();
+        let start = Start::Stored { storage, have };
+        self.run(bundle_id, start, Vec::new(), session).await
     }
 
     /// Downloads the bundle `bundle_id` to `destination` from `peers` and whomever they lead
@@ -311,8 +330,20 @@ impl Node {
         destination: impl Into<Destination>,
         peers: Vec<PeerRecord>,
     ) -> Result<BundleHandle, DriverError> {
+        self.download_with(bundle_id, destination, peers, None)
+            .await
+    }
+
+    /// [`download`](Self::download), with session settings of its own instead of the node's.
+    pub async fn download_with(
+        &self,
+        bundle_id: BundleId,
+        destination: impl Into<Destination>,
+        peers: Vec<PeerRecord>,
+        session: Option<Config>,
+    ) -> Result<BundleHandle, DriverError> {
         let destination = destination.into();
-        self.run(bundle_id, Start::Fetch { destination }, peers)
+        self.run(bundle_id, Start::Fetch { destination }, peers, session)
             .await
     }
 
@@ -321,7 +352,15 @@ impl Node {
         bundle_id: BundleId,
         start: Start,
         peers: Vec<PeerRecord>,
+        session: Option<Config>,
     ) -> Result<BundleHandle, DriverError> {
+        let config = match session {
+            Some(session) => Arc::new(NodeConfig {
+                session,
+                ..NodeConfig::clone(&self.config)
+            }),
+            None => self.config.clone(),
+        };
         let (inbox, receiver) = mpsc::channel(self.config.inbox.max(1));
         let shutdown = Arc::new(watch::channel(false).0);
         let (reply, registered) = oneshot::channel();
@@ -340,13 +379,13 @@ impl Node {
             .map_err(|_| DriverError::Stopped)?;
         registered.await.map_err(|_| DriverError::Stopped)??;
 
-        let (events, events_receiver) = broadcast::channel(self.config.events.max(1));
+        let (events, events_receiver) = broadcast::channel(config.events.max(1));
         let (status, status_receiver) = watch::channel(Status::default());
         let task = BundleTask::new(
             bundle_id,
             start,
             self.endpoint.clone(),
-            self.config.clone(),
+            config,
             inbox.clone(),
             events,
             status,

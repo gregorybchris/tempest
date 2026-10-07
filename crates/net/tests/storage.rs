@@ -282,6 +282,176 @@ async fn a_download_lays_out_every_entry() {
     download.close().await.unwrap();
 }
 
+/// Bumps `path`'s modification time, as a later write would.
+fn touch(path: &Path) {
+    let file = fs::OpenOptions::new().write(true).open(path).unwrap();
+    let later = file.metadata().unwrap().modified().unwrap() + Duration::from_secs(5);
+    file.set_modified(later).unwrap();
+}
+
+#[tokio::test]
+async fn a_download_resumes_from_its_checkpoint() {
+    let source = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let files = [
+        ("a", contents(5 * CHUNK_SIZE + 7, 0)),
+        ("b", contents(3 * CHUNK_SIZE, 1)),
+    ];
+    let manifest = make_bundle(source.path(), &files, vec![]);
+    let shared = Storage::open_shared(source.path(), manifest.clone(), StorageConfig::default())
+        .await
+        .unwrap();
+    let (download, _) =
+        Storage::create_download(dest.path(), manifest.clone(), StorageConfig::default())
+            .await
+            .unwrap();
+    // Chunks 1 and 4 of "a" and the first two of "b" (bundle chunks 6 and 7).
+    transfer(&shared, &download, &[(1, 1), (4, 1), (6, 2)]).await;
+    let checkpoint = download.close().await.unwrap();
+    assert_eq!(checkpoint.chunks_stored(), 4);
+    let checkpoint = tempest_net::Checkpoint::from_bytes(&checkpoint.to_bytes()).unwrap();
+
+    // Unchanged files: the recorded chunks come back, and can be served with their proofs.
+    let (resumed, have) = Storage::resume_download(
+        dest.path(),
+        manifest.clone(),
+        quick_syncs(),
+        checkpoint.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(have, RangeList::from_chunks([1, 4, 6, 7]));
+    for (start, count) in [(1, 1), (4, 1), (6, 2)] {
+        let data = resumed.read(start, count).await.unwrap();
+        verify(&manifest, start, count, &data).unwrap();
+    }
+    let completes = transfer(&shared, &resumed, &[(0, 1), (2, 2), (5, 1), (8, 1)]).await;
+    assert_eq!(completes, [false, false, false, true]);
+    resumed.close().await.unwrap();
+    for (path, data) in &files {
+        assert_eq!(&fs::read(dest.path().join(path)).unwrap(), data, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn changed_files_are_checked_against_the_checkpoint() {
+    let source = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let files = [
+        ("a", contents(4 * CHUNK_SIZE, 0)),
+        ("b", contents(2 * CHUNK_SIZE, 1)),
+    ];
+    let manifest = make_bundle(source.path(), &files, vec![]);
+    let shared = Storage::open_shared(source.path(), manifest.clone(), StorageConfig::default())
+        .await
+        .unwrap();
+    let (download, _) =
+        Storage::create_download(dest.path(), manifest.clone(), StorageConfig::default())
+            .await
+            .unwrap();
+    transfer(&shared, &download, &[(0, 2), (4, 1)]).await;
+    let checkpoint = download.close().await.unwrap();
+
+    // "a" changed since: its chunk 1 is damaged, so only chunk 0 is kept. "b" shrank, so it
+    // starts over.
+    let a = dest.path().join("a");
+    let mut bytes = fs::read(&a).unwrap();
+    bytes[CHUNK_SIZE + 3] ^= 1;
+    fs::write(&a, bytes).unwrap();
+    touch(&a);
+    let b = dest.path().join("b");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&b)
+        .unwrap()
+        .set_len(10)
+        .unwrap();
+
+    let (resumed, have) =
+        Storage::resume_download(dest.path(), manifest.clone(), quick_syncs(), checkpoint)
+            .await
+            .unwrap();
+    assert_eq!(have, RangeList::from_chunks([0]));
+    assert_eq!(fs::metadata(&b).unwrap().len(), 2 * CHUNK_SIZE as u64);
+    transfer(&shared, &resumed, &[(1, 1), (2, 2), (4, 2)]).await;
+    resumed.close().await.unwrap();
+    for (path, data) in &files {
+        assert_eq!(&fs::read(dest.path().join(path)).unwrap(), data, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn a_checkpoint_that_does_not_fit_the_manifest_is_ignored() {
+    let source = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let manifest = make_bundle(source.path(), &[("a", contents(3 * CHUNK_SIZE, 0))], vec![]);
+    let other_manifest = make_bundle(other.path(), &[("a", contents(3 * CHUNK_SIZE, 9))], vec![]);
+    let foreign = Storage::open_shared(other.path(), other_manifest, StorageConfig::default())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+
+    // The foreign tree contradicts this manifest's root, so nothing is trusted.
+    let (download, have) =
+        Storage::resume_download(dest.path(), manifest, StorageConfig::default(), foreign)
+            .await
+            .unwrap();
+    assert_eq!(have, RangeList::new());
+    download.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_shared_bundle_resumes_without_hashing_unchanged_files() {
+    let source = tempfile::tempdir().unwrap();
+    let files = [("a", contents(3 * CHUNK_SIZE, 0)), ("b", contents(100, 1))];
+    let manifest = make_bundle(source.path(), &files, vec![]);
+    let shared = Storage::open_shared(source.path(), manifest.clone(), StorageConfig::default())
+        .await
+        .unwrap();
+    let checkpoint = shared.close().await.unwrap();
+
+    let resumed = Storage::resume_shared(
+        source.path(),
+        manifest.clone(),
+        StorageConfig::default(),
+        checkpoint.clone(),
+    )
+    .await
+    .unwrap();
+    for (start, count) in all_requests(&manifest) {
+        let data = resumed.read(start, count).await.unwrap();
+        verify(&manifest, start, count, &data).unwrap();
+    }
+    resumed.close().await.unwrap();
+
+    // A touched file with the same contents still passes; a changed one fails.
+    let a = source.path().join("a");
+    touch(&a);
+    Storage::resume_shared(
+        source.path(),
+        manifest.clone(),
+        StorageConfig::default(),
+        checkpoint.clone(),
+    )
+    .await
+    .unwrap();
+    let mut bytes = fs::read(&a).unwrap();
+    bytes[0] ^= 1;
+    fs::write(&a, bytes).unwrap();
+    let error = Storage::resume_shared(
+        source.path(),
+        manifest,
+        StorageConfig::default(),
+        checkpoint,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("has changed"), "{error}");
+}
+
 #[tokio::test]
 async fn bad_data_is_never_stored() {
     let source = tempfile::tempdir().unwrap();

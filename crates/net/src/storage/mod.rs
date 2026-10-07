@@ -10,6 +10,7 @@
 //! - A download is laid out in a destination folder before its first chunk arrives. Writes are
 //!   verified first, and synced to disk in batches, then once more when the last chunk arrives.
 
+mod checkpoint;
 mod files;
 mod tree;
 
@@ -30,6 +31,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until};
 
+use checkpoint::FileState;
+pub use checkpoint::{Checkpoint, CheckpointError};
 use files::{BundleFile, Opened};
 use tree::FileTree;
 
@@ -169,6 +172,40 @@ impl Storage {
         Ok((storage, have))
     }
 
+    /// Shares a bundle as [`open_shared`](Self::open_shared) does, hashing only the files that
+    /// changed since `checkpoint` was taken.
+    pub async fn resume_shared(
+        base: impl Into<PathBuf>,
+        manifest: Arc<Manifest>,
+        config: StorageConfig,
+        checkpoint: Checkpoint,
+    ) -> Result<Self, StorageError> {
+        let base = base.into();
+        Self::start(manifest, config, false, move |manifest, layout| {
+            files::resume_shared(&base, manifest, layout, &checkpoint.files)
+        })
+        .await
+    }
+
+    /// Prepares to go on with a download as [`create_download`](Self::create_download) does,
+    /// starting from the chunks `checkpoint` recorded. A file's recorded chunks are trusted while
+    /// its size and modification time are unchanged since then, and checked against their
+    /// recorded hashes otherwise, so only changed files are read.
+    pub async fn resume_download(
+        dir: impl Into<PathBuf>,
+        manifest: Arc<Manifest>,
+        config: StorageConfig,
+        checkpoint: Checkpoint,
+    ) -> Result<(Self, RangeList), StorageError> {
+        let dir = dir.into();
+        let storage = Self::start(manifest, config, true, move |manifest, layout| {
+            files::resume_download(&dir, manifest, layout, &checkpoint.files)
+        })
+        .await?;
+        let have = storage.have().await?;
+        Ok((storage, have))
+    }
+
     /// Opens the files on the blocking pool and starts the task.
     async fn start(
         manifest: Arc<Manifest>,
@@ -189,10 +226,10 @@ impl Storage {
         let mut files = Vec::with_capacity(opened.len());
         let mut trees = Vec::with_capacity(opened.len());
         for (opened, span) in opened.into_iter().zip(layout.files()) {
-            if opened.complete {
+            for range in opened.have.ranges() {
                 have.insert_range(ChunkRange {
-                    start: span.first_chunk,
-                    end: span.end(),
+                    start: span.first_chunk + range.start,
+                    end: span.first_chunk + range.end,
                 });
             }
             files.push(opened.file);
@@ -275,9 +312,16 @@ impl Storage {
         self.call(|reply| Command::Stats { reply }).await
     }
 
-    /// Flushes and stops the storage task. Other handles to it fail with
-    /// [`StorageError::Stopped`] from then on.
-    pub async fn close(self) -> Result<(), StorageError> {
+    /// Waits for the operations in progress, syncs everything written, and returns what is
+    /// stored, to be saved for [`resume_download`](Self::resume_download) or
+    /// [`resume_shared`](Self::resume_shared).
+    pub async fn checkpoint(&self) -> Result<Checkpoint, StorageError> {
+        self.call(|reply| Command::Checkpoint { reply }).await?
+    }
+
+    /// Flushes and stops the storage task, returning its final checkpoint. Other handles to it
+    /// fail with [`StorageError::Stopped`] from then on.
+    pub async fn close(self) -> Result<Checkpoint, StorageError> {
         self.call(|reply| Command::Close { reply }).await?
     }
 
@@ -350,8 +394,11 @@ enum Command {
     Stats {
         reply: oneshot::Sender<StorageStats>,
     },
+    Checkpoint {
+        reply: oneshot::Sender<Result<Checkpoint, StorageError>>,
+    },
     Close {
-        reply: oneshot::Sender<Result<(), StorageError>>,
+        reply: oneshot::Sender<Result<Checkpoint, StorageError>>,
     },
 }
 
@@ -418,8 +465,7 @@ impl Task {
                 command = commands.recv(), if self.jobs.len() < self.parallel_jobs => {
                     match command {
                         Some(Command::Close { reply }) => {
-                            let result = self.flush().await;
-                            self.settle().await;
+                            let result = self.checkpoint().await;
                             let _ = reply.send(result);
                             return;
                         }
@@ -481,6 +527,9 @@ impl Task {
             }
             Command::Stats { reply } => {
                 let _ = reply.send(self.stats);
+            }
+            Command::Checkpoint { reply } => {
+                let _ = reply.send(self.checkpoint().await);
             }
             Command::Close { .. } => unreachable!("handled by run"),
         }
@@ -638,6 +687,34 @@ impl Task {
             Some(error) => Err(error),
             None => result,
         }
+    }
+
+    /// Flushes, then records what is stored and synced, with each file's size and modification
+    /// time as of now.
+    async fn checkpoint(&mut self) -> Result<Checkpoint, StorageError> {
+        self.flush().await?;
+        // Answering the write that completed the bundle restores modification times, which the
+        // checkpoint must see.
+        self.settle().await;
+        let have = self.have.to_ranges();
+        let mut states = Vec::with_capacity(self.files.len());
+        for ((file, tree), span) in self.files.iter().zip(&self.trees).zip(self.layout.files()) {
+            let metadata = file.file.metadata().map_err(|source| StorageError::Io {
+                path: file.path.clone(),
+                source,
+            })?;
+            let span = ChunkRange {
+                start: span.first_chunk,
+                end: span.end(),
+            };
+            states.push(FileState {
+                size: metadata.len(),
+                modified: checkpoint::modified(&metadata),
+                have: checkpoint::file_ranges(&have, span),
+                nodes: tree.known_nodes(),
+            });
+        }
+        Ok(Checkpoint { files: states })
     }
 
     /// If the last chunk has been written, syncs everything, restores the files' modification

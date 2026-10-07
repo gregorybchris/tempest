@@ -33,7 +33,9 @@ pub use endpoint::{
 };
 pub use identity::{Identity, IdentityError};
 pub use lan::{Lan, LanConfig};
-pub use storage::{Storage, StorageConfig, StorageError, StorageStats, Written};
+pub use storage::{
+    Checkpoint, CheckpointError, Storage, StorageConfig, StorageError, StorageStats, Written,
+};
 pub use stream::{ReadMessageError, read_message, read_message_within, write_message};
 pub use tls::UnexpectedPeer;
 pub use tracker::{

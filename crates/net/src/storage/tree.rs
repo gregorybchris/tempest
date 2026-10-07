@@ -101,6 +101,67 @@ impl FileTree {
         }
     }
 
+    /// The known nodes that can't be computed from known children: every known leaf, and above
+    /// them every known node missing a child. [`from_known`](Self::from_known) rebuilds the tree
+    /// from them.
+    pub fn known_nodes(&self) -> Vec<(TreeNode, Hash)> {
+        let mut known = Vec::new();
+        for (level, nodes) in self.levels.iter().enumerate() {
+            let level = level as u32;
+            for (index, hash) in nodes.iter().enumerate() {
+                let index = index as u64;
+                let Some(hash) = *hash else { continue };
+                let computable = level > 0
+                    && self.get(level - 1, 2 * index).is_some()
+                    && self.get(level - 1, 2 * index + 1).is_some();
+                if !computable {
+                    known.push((TreeNode { level, index }, hash));
+                }
+            }
+        }
+        known
+    }
+
+    /// The tree of a file of `chunk_count` chunks with root `root`, knowing `nodes` and every
+    /// node they let it compute. `None` if a node lies outside the tree or the nodes contradict
+    /// each other or the root.
+    pub fn from_known(chunk_count: u64, root: Hash, nodes: &[(TreeNode, Hash)]) -> Option<Self> {
+        let mut tree = Self::new(chunk_count, root);
+        for &(node, hash) in nodes {
+            let slot = tree
+                .levels
+                .get_mut(node.level as usize)?
+                .get_mut(usize::try_from(node.index).ok()?)?;
+            if slot.is_some_and(|known| known != hash) {
+                return None;
+            }
+            *slot = Some(hash);
+        }
+        for level in 0..tree.height() {
+            for parent in 0..tree.levels[level as usize + 1].len() as u64 {
+                let left = tree.get(level, 2 * parent);
+                let right = tree.get(level, 2 * parent + 1);
+                if let (Some(left), Some(right)) = (left, right) {
+                    let hash = node_hash(&left, &right);
+                    let slot = &mut tree.levels[level as usize + 1][parent as usize];
+                    if slot.is_some_and(|known| known != hash) {
+                        return None;
+                    }
+                    *slot = Some(hash);
+                }
+            }
+        }
+        Some(tree)
+    }
+
+    /// The leaf hash of chunk `position`, if known.
+    pub fn leaf(&self, position: u64) -> Option<Hash> {
+        self.levels[0]
+            .get(usize::try_from(position).ok()?)
+            .copied()
+            .flatten()
+    }
+
     /// The proof for `node`: the sibling of each node on the path from `node` up to (but not
     /// including) the root, lowest first. `None` if one isn't known.
     pub fn proof(&self, node: TreeNode) -> Option<Vec<Hash>> {
@@ -154,6 +215,24 @@ mod tests {
         assert_eq!(tree.proof(TreeNode { level: 0, index: 0 }), Some(vec![]));
     }
 
+    #[test]
+    fn contradicting_nodes_are_refused() {
+        let leaves = leaves(4);
+        let reference = ChunkTree::from_leaves(leaves.clone());
+        let full = FileTree::from_leaves(&leaves);
+        let mut known = full.known_nodes();
+        assert_eq!(known.len(), 4, "only the leaves are kept");
+        assert!(FileTree::from_known(4, reference.root(), &known).is_some());
+        // A wrong leaf no longer hashes to the root.
+        known[0].1 = leaf_hash(b"other");
+        assert_eq!(FileTree::from_known(4, reference.root(), &known), None);
+        // A node outside the tree.
+        let outside = [(TreeNode { level: 0, index: 9 }, leaves[0])];
+        assert_eq!(FileTree::from_known(4, reference.root(), &outside), None);
+        let above = [(TreeNode { level: 7, index: 0 }, leaves[0])];
+        assert_eq!(FileTree::from_known(4, reference.root(), &above), None);
+    }
+
     proptest! {
         /// After inserting any sequence of verified ranges, a downloader can prove exactly the
         /// ranges whose chunks it has, with the same proofs as the full tree.
@@ -182,6 +261,10 @@ mod tests {
                 }
             }
             prop_assert_eq!(tree.root(), Some(reference.root()));
+
+            // The nodes it keeps rebuild exactly the same tree.
+            let rebuilt = FileTree::from_known(count, reference.root(), &tree.known_nodes());
+            prop_assert_eq!(rebuilt, Some(tree));
         }
     }
 }

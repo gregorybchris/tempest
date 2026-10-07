@@ -10,9 +10,10 @@ use std::time::{Duration, UNIX_EPOCH};
 use tempest_protocol::hash::leaf_hash;
 use tempest_protocol::path::{ancestors, parent};
 use tempest_protocol::tree::{CHUNK_SIZE, chunk_count, leaf_hashes};
-use tempest_protocol::{ChunkLayout, EntryKind, FileInfo, Hash, Manifest};
+use tempest_protocol::{ChunkLayout, ChunkRange, EntryKind, FileInfo, Hash, Manifest, RangeList};
 
 use super::StorageError;
+use super::checkpoint::FileState;
 use super::tree::FileTree;
 
 /// How many chunks [`hash_leaves`] reads at a time.
@@ -29,13 +30,22 @@ pub(super) struct BundleFile {
     pub info: FileInfo,
 }
 
-/// A file just opened, with what is known of its chunk tree and whether its chunks are all
-/// present.
+/// A file just opened, with what is known of its chunk tree and the chunks present, as positions
+/// within the file.
 #[derive(Debug)]
 pub(super) struct Opened {
     pub file: BundleFile,
     pub tree: FileTree,
-    pub complete: bool,
+    pub have: RangeList,
+}
+
+/// Every chunk of a file of `size` bytes.
+fn all_chunks(size: u64) -> RangeList {
+    RangeList::from_ranges(vec![ChunkRange {
+        start: 0,
+        end: chunk_count(size) as u32,
+    }])
+    .expect("one non-empty range")
 }
 
 /// Where the entry at manifest path `path` lies under `base`. The manifest's path rules make
@@ -82,33 +92,108 @@ pub(super) fn open_shared(
     layout: &ChunkLayout,
 ) -> Result<Vec<Opened>, StorageError> {
     manifest_files(manifest, layout)
-        .map(|(path, info)| {
-            let path = fs_path(base, path);
-            let metadata = fs::symlink_metadata(&path).map_err(io_error(&path))?;
-            if !metadata.is_file() {
-                return Err(unusable(&path, "is not a regular file"));
-            }
-            let file = File::open(&path).map_err(io_error(&path))?;
-            let changed = || unusable(&path, "has changed since the bundle was made");
-            if file.metadata().map_err(io_error(&path))?.len() != info.size {
+        .map(|(path, info)| open_shared_file(fs_path(base, path), info, None))
+        .collect()
+}
+
+/// Opens one file of a shared bundle, read-only. With the state a checkpoint saved, the file is
+/// hashed only if its size or modification time changed since, and then checked chunk by chunk
+/// against the saved leaf hashes. Otherwise it is hashed to build its tree.
+fn open_shared_file(
+    path: PathBuf,
+    info: &FileInfo,
+    saved: Option<&FileState>,
+) -> Result<Opened, StorageError> {
+    let metadata = fs::symlink_metadata(&path).map_err(io_error(&path))?;
+    if !metadata.is_file() {
+        return Err(unusable(&path, "is not a regular file"));
+    }
+    let file = File::open(&path).map_err(io_error(&path))?;
+    let changed = || unusable(&path, "has changed since the bundle was made");
+    let metadata = file.metadata().map_err(io_error(&path))?;
+    if metadata.len() != info.size {
+        return Err(changed());
+    }
+    let all = all_chunks(info.size);
+    let saved_tree = saved
+        .filter(|saved| saved.have == all)
+        .and_then(|saved| Some((saved, saved_tree(info, saved)?)));
+    let tree = match saved_tree {
+        Some((saved, tree)) => {
+            let unchanged = saved.size == info.size
+                && saved.modified.is_some()
+                && saved.modified == super::checkpoint::modified(&metadata);
+            let intact = unchanged
+                || matching_chunks(&file, info.size, &tree, &all).map_err(io_error(&path))? == all;
+            if !intact {
                 return Err(changed());
             }
+            tree
+        }
+        None => {
             let tree =
                 FileTree::from_leaves(&hash_leaves(&file, info.size).map_err(io_error(&path))?);
             if tree.root() != Some(info.root) {
                 return Err(changed());
             }
-            Ok(Opened {
-                file: BundleFile {
-                    path,
-                    file,
-                    info: info.clone(),
-                },
-                tree,
-                complete: true,
-            })
-        })
+            tree
+        }
+    };
+    Ok(Opened {
+        file: BundleFile {
+            path,
+            file,
+            info: info.clone(),
+        },
+        tree,
+        have: all,
+    })
+}
+
+/// Opens the files of a bundle shared from `base`, as [`open_shared`] does, using `saved` to
+/// avoid hashing files unchanged since it was taken.
+pub(super) fn resume_shared(
+    base: &Path,
+    manifest: &Manifest,
+    layout: &ChunkLayout,
+    saved: &[FileState],
+) -> Result<Vec<Opened>, StorageError> {
+    manifest_files(manifest, layout)
+        .enumerate()
+        .map(|(i, (path, info))| open_shared_file(fs_path(base, path), info, saved.get(i)))
         .collect()
+}
+
+/// The tree a checkpoint saved for a file, if it is consistent with the file's root and knows
+/// the leaf of every chunk it says is present.
+fn saved_tree(info: &FileInfo, saved: &FileState) -> Option<FileTree> {
+    let count = chunk_count(info.size);
+    let tree = FileTree::from_known(count, info.root, &saved.nodes)?;
+    let known = saved
+        .have
+        .chunks()
+        .all(|position| tree.leaf(position.into()).is_some());
+    (known && saved.have.fits(count as u32)).then_some(tree)
+}
+
+/// The chunks of `candidates` whose contents on disk hash to the leaf `tree` knows for them.
+fn matching_chunks(
+    file: &File,
+    size: u64,
+    tree: &FileTree,
+    candidates: &RangeList,
+) -> io::Result<RangeList> {
+    let mut matching = Vec::new();
+    let mut buffer = vec![0; CHUNK_SIZE];
+    for position in candidates.chunks() {
+        let offset = u64::from(position) * CHUNK_SIZE as u64;
+        let len = (size - offset).min(CHUNK_SIZE as u64) as usize;
+        read_exact_at(file, &mut buffer[..len], offset)?;
+        if tree.leaf(position.into()) == Some(leaf_hash(&buffer[..len])) {
+            matching.push(position);
+        }
+    }
+    Ok(RangeList::from_chunks(matching))
 }
 
 /// Lays out a download of `manifest` in `dir`: creates `dir` if needed, then every directory,
@@ -121,6 +206,39 @@ pub(super) fn create_download(
     dir: &Path,
     manifest: &Manifest,
     layout: &ChunkLayout,
+) -> Result<Vec<Opened>, StorageError> {
+    lay_out(dir, manifest, layout, |_, path, info| {
+        open_download_file(path, info)
+    })
+}
+
+/// Lays out a download as [`create_download`] does, using `saved` to trust the chunks of files
+/// unchanged since it was taken, and to check those of changed files without downloading them
+/// again.
+pub(super) fn resume_download(
+    dir: &Path,
+    manifest: &Manifest,
+    layout: &ChunkLayout,
+    saved: &[FileState],
+) -> Result<Vec<Opened>, StorageError> {
+    lay_out(dir, manifest, layout, |i, path, info| {
+        match saved
+            .get(i)
+            .and_then(|saved| Some((saved, saved_tree(info, saved)?)))
+        {
+            Some((saved, tree)) => resume_download_file(path, info, saved, tree),
+            None => open_download_file(path, info),
+        }
+    })
+}
+
+/// Creates `dir`, the bundle's directories, its files with `open_file` (given each file's
+/// index, path and manifest fields), and finally its symlinks.
+fn lay_out(
+    dir: &Path,
+    manifest: &Manifest,
+    layout: &ChunkLayout,
+    mut open_file: impl FnMut(usize, PathBuf, &FileInfo) -> Result<Opened, StorageError>,
 ) -> Result<Vec<Opened>, StorageError> {
     fs::create_dir_all(dir).map_err(io_error(dir))?;
     let mut dirs = Directories {
@@ -135,7 +253,8 @@ pub(super) fn create_download(
         }
     }
     let opened = manifest_files(manifest, layout)
-        .map(|(path, info)| open_download_file(fs_path(dir, path), info))
+        .enumerate()
+        .map(|(i, (path, info))| open_file(i, fs_path(dir, path), info))
         .collect::<Result<Vec<_>, _>>()?;
     // Symlinks come last, so nothing is ever written through one.
     for entry in manifest.entries() {
@@ -180,27 +299,33 @@ impl Directories<'_> {
     }
 }
 
-/// Opens or creates one file of a download, sized to `info.size`.
-fn open_download_file(path: PathBuf, info: &FileInfo) -> Result<Opened, StorageError> {
+/// Opens one file of a download for reading and writing, creating it if it doesn't exist.
+/// Returns the file and whether it existed.
+fn open_writable(path: &Path, info: &FileInfo) -> Result<(File, bool), StorageError> {
     let mut options = OpenOptions::new();
     options.read(true).write(true);
     no_follow(&mut options);
-    let existing = match fs::symlink_metadata(&path) {
+    let existing = match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() => true,
-        Ok(_) => return Err(unusable(&path, "is in the way of a file")),
+        Ok(_) => return Err(unusable(path, "is in the way of a file")),
         Err(e) if e.kind() == ErrorKind::NotFound => {
             options.create_new(true);
             false
         }
-        Err(e) => return Err(io_error(&path)(e)),
+        Err(e) => return Err(io_error(path)(e)),
     };
-    let file = options.open(&path).map_err(io_error(&path))?;
-    set_executable(&file, info.executable).map_err(io_error(&path))?;
+    let file = options.open(path).map_err(io_error(path))?;
+    set_executable(&file, info.executable).map_err(io_error(path))?;
+    Ok((file, existing))
+}
 
+/// Opens or creates one file of a download, sized to `info.size`.
+fn open_download_file(path: PathBuf, info: &FileInfo) -> Result<Opened, StorageError> {
+    let (file, existing) = open_writable(&path, info)?;
     let count = chunk_count(info.size);
     let mut opened = Opened {
         tree: FileTree::new(count, info.root),
-        complete: false,
+        have: RangeList::new(),
         file: BundleFile {
             path,
             file,
@@ -220,14 +345,14 @@ fn open_download_file(path: PathBuf, info: &FileInfo) -> Result<Opened, StorageE
             .set_len(0)
             .map_err(io_error(&bundle_file.path))?;
         opened.tree = FileTree::from_leaves(&[leaf_hash(&[])]);
-        opened.complete = true;
+        opened.have = all_chunks(0);
     } else if existing && len == info.size {
         let leaves =
             hash_leaves(&bundle_file.file, info.size).map_err(io_error(&bundle_file.path))?;
         let tree = FileTree::from_leaves(&leaves);
         if tree.root() == Some(info.root) {
             opened.tree = tree;
-            opened.complete = true;
+            opened.have = all_chunks(info.size);
         }
     } else {
         bundle_file
@@ -236,6 +361,43 @@ fn open_download_file(path: PathBuf, info: &FileInfo) -> Result<Opened, StorageE
             .map_err(io_error(&bundle_file.path))?;
     }
     Ok(opened)
+}
+
+/// Opens one file of a download with the state a checkpoint saved for it, whose tree is
+/// `tree`. Its saved chunks are trusted if its size and modification time are unchanged, and
+/// otherwise checked against their saved leaf hashes. A file of the wrong size is resized and
+/// starts over.
+fn resume_download_file(
+    path: PathBuf,
+    info: &FileInfo,
+    saved: &FileState,
+    tree: FileTree,
+) -> Result<Opened, StorageError> {
+    if info.size == 0 {
+        return open_download_file(path, info);
+    }
+    let (file, _) = open_writable(&path, info)?;
+    let metadata = file.metadata().map_err(io_error(&path))?;
+    let have = if metadata.len() != info.size {
+        file.set_len(info.size).map_err(io_error(&path))?;
+        RangeList::new()
+    } else if saved.size == info.size
+        && saved.modified.is_some()
+        && saved.modified == super::checkpoint::modified(&metadata)
+    {
+        saved.have.clone()
+    } else {
+        matching_chunks(&file, info.size, &tree, &saved.have).map_err(io_error(&path))?
+    };
+    Ok(Opened {
+        file: BundleFile {
+            path,
+            file,
+            info: info.clone(),
+        },
+        tree,
+        have,
+    })
 }
 
 /// Creates the symlink at manifest path `path`, or accepts one already there with the same target.

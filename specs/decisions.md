@@ -2761,3 +2761,22 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `tempest share` and `tempest get` run LAN discovery unless `--no-lan` is given, and `--lan-port` changes the group port. `get` accepts a link with only a bundle ID while LAN discovery runs. If it can't start, they warn and carry on.
 
 **Rationale:** Announcing only where the endpoint is reachable keeps every heard-of address dialable. A socket bound per interface follows the protocol's advice to query from a unique port, and needs no per-packet source selection. A querier is a peer on the LAN like any other, and is likely downloading something. Seeds don't dial, so only downloads need peers.
+
+---
+
+## D-179: Chunk-level resume
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-082 keeps verified chunks for fast resume, and D-173 left chunk-level resume for the state store. A downloader can only serve a chunk it can prove, and the proof hashes it learned came with the Data it stored, so a list of chunks alone can't be served after a restart without hashing again.
+
+**Options for what is saved:** the chunks only, rebuilding proofs by hashing on resume; the chunks plus each file's known tree nodes (chosen). **For trusting the saved chunks:** always; while each file's size and modification time are unchanged since the save, checking the saved chunks against their saved leaf hashes otherwise (chosen); never. **For when it is saved:** after every write; every 30 seconds while downloading and whenever storage closes (chosen).
+
+**Decision:**
+
+- Storage produces a checkpoint after syncing: for each file, its size and modification time, the chunks stored, and the known tree nodes that can't be computed from known children. The engine saves it in the state store, encoded with the wire primitives and a version byte.
+- Resuming rebuilds each file's tree from the saved nodes and accepts it only if it hashes to the manifest's root and knows a leaf for every saved chunk; otherwise the file is opened as a fresh download would be. An unchanged file's saved chunks are trusted. A changed file of the right size keeps the saved chunks whose contents still match their saved leaf hashes; one of the wrong size is resized and starts over.
+- A shared or completed bundle resumes the same way, so restarting the engine hashes nothing that hasn't changed.
+
+**Rationale:** Saving the tree costs about 0.2% of the bundle per save and keeps every stored chunk servable at once. The size and modification time catch the usual ways files change between runs, and checking a changed file against saved leaves costs one read and no download. Checkpoints only record synced data, so a crash loses at most the chunks written since the last one.
+

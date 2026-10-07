@@ -23,8 +23,10 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = [
   "Clipboard",
+  "Document",
   "Element",
   "EventSource",
+  "FocusEvent",
   "Headers",
   "HtmlElement",
   "HtmlInputElement",
@@ -32,10 +34,14 @@ web-sys = { workspace = true, features = [
   "Location",
   "MessageEvent",
   "Navigator",
+  "Notification",
+  "NotificationOptions",
+  "NotificationPermission",
   "RequestInit",
   "Response",
   "ScrollIntoViewOptions",
   "ScrollLogicalPosition",
+  "Storage",
   "Window",
 ] }
 

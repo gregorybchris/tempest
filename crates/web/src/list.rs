@@ -193,6 +193,12 @@ fn Toolbar() -> impl IntoView {
             </button>
             <span class="toolbar__count dim">{shown}</span>
             <div class="toolbar__spacer"></div>
+            <Button small=true kind=ButtonKind::Ghost title="Saved views (v)" on_click=move || ui.dialog.set(Some(Dialog::Views))>
+                "views"
+            </Button>
+            <Button small=true kind=ButtonKind::Ghost title="Choose columns (|)" on_click=move || ui.dialog.set(Some(Dialog::Columns))>
+                "columns"
+            </Button>
             <Button kind=ButtonKind::Primary title="Add a transfer from a link (a)" on_click=move || ui.dialog.set(Some(Dialog::Add))>
                 "+ Add"
             </Button>

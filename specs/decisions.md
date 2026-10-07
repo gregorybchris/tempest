@@ -3212,3 +3212,25 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 **Rationale:** An explicit backoff gives the page one place to know the engine is gone and to say so, and a query parameter is the only way a new `EventSource` can resume. The rest keeps the TUI's habits without fighting the browser's own keys.
 
+---
+
+## D-203: The web UI's Share, Catalog and Settings areas, and its notifications
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The web UI needs the TUI's areas (D-196), columns and views (D-197), and notifications of completions and failures (D-118). A browser offers inline controls that a terminal can't, and its notification permission belongs to the browser, not the engine. The engine's settings type doesn't build for WebAssembly.
+
+**Options for editing settings:** a prompt per row, as in the TUI; each row's control in place (chosen). **For the notification switch:** the engine's `ui` settings; the browser's own storage (chosen). **For the web UI's effects:** the browser's storage; the `ui` settings (chosen). **For reading settings:** mirroring them by hand in the web UI; client types in `tempest-api` that skip what they don't name, checked against the engine by a test (chosen).
+
+**Decision:**
+
+- Catalog and Settings show D-196's sections as rows, each with its control in place: a field that saves on `enter`, a switch, a choice, the schedule's days and times, or a button. Changes through the API carry `•` and a reset button. The keyboard's cursor moves through the rows; `enter` uses the row's control, `x` its remove or reset button and `a` the add field of the cursor's section. The Queue section lists the waiting transfers with buttons to reorder them.
+- Share is D-196's form; while the engine builds the bundle the page shows an indeterminate bar and the seconds waited, then the link to copy. The shares are listed below it.
+- Catalog says plainly that browsing what trackers list arrives with M9, with its search field disabled.
+- A transfer's tags, category, folder and own limits, the columns and the saved views are dialogs, opened by the TUI's keys or buttons. `|` and `v` work from the list; `V` opens the views dialog at its save field.
+- The `ui` settings gain `scanlines` and `clean`, which the TUI ignores.
+- A completion or failure seen in the event stream gives a toast, and a browser notification when the user switched them on in this browser, which asks the browser's permission. Transfers first seen in a batch give none, so opening the page is quiet.
+- While a text field has the keys, the hint bar shows only `enter` and `esc`.
+
+**Rationale:** Controls in place are what a browser user expects and need no mode per kind, while one cursor keeps the TUI's keys. A permission granted to one browser shouldn't switch notifications on in another. Effects are part of the look, which D-195 keeps with the engine.
+

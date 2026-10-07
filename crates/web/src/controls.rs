@@ -5,6 +5,7 @@ use std::future::Future;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use tempest_api::requests::{QueuePlace, QueueStep};
 use tempest_api::{Status, TransferInfo};
 use tempest_ui_kit::components::{Toasts, Tone};
 use wasm_bindgen_futures::JsFuture;
@@ -68,9 +69,25 @@ impl Controls {
         self.run(api::recheck(transfer.id), format!("Checking {name}"));
     }
 
+    /// Moves a transfer in the queue.
+    pub fn queue(self, transfer: &TransferInfo, step: QueueStep) {
+        let name = transfer.name.clone();
+        let done = match step {
+            QueueStep::Top => format!("{name} is first in the queue"),
+            QueueStep::Up => format!("Moved {name} up the queue"),
+            QueueStep::Down => format!("Moved {name} down the queue"),
+            QueueStep::Bottom => format!("{name} is last in the queue"),
+        };
+        self.run(api::queue(transfer.id, QueuePlace::Step(step)), done);
+    }
+
     /// Copies a transfer's link.
     pub fn copy_link(self, transfer: &TransferInfo) {
-        let link = transfer.link.clone();
+        self.copy(transfer.link.clone());
+    }
+
+    /// Copies `link`.
+    pub fn copy(self, link: String) {
         spawn_local(async move {
             let promise = window().navigator().clipboard().write_text(&link);
             match JsFuture::from(promise).await.is_ok() {

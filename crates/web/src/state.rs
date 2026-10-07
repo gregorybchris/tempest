@@ -4,6 +4,7 @@
 use leptos::prelude::*;
 use tempest_api::columns::Column;
 use tempest_api::finding::Finding;
+use tempest_api::ui::SavedView;
 use tempest_protocol::BundleId;
 use tempest_ui_kit::Theme;
 
@@ -95,6 +96,18 @@ pub enum Dialog {
     Remove(BundleId),
     /// Rename a transfer.
     Rename(BundleId),
+    /// Edit a transfer's tags.
+    Tags(BundleId),
+    /// Set a transfer's category.
+    Category(BundleId),
+    /// Move a transfer's files.
+    Move(BundleId),
+    /// A transfer's own speed and sharing limits.
+    Limits(BundleId),
+    /// Choose the list's columns.
+    Columns,
+    /// The saved views, and saving the current one.
+    Views,
     /// The keys.
     Help,
 }
@@ -118,8 +131,22 @@ pub struct Ui {
     pub finding: RwSignal<Finding>,
     /// The palette.
     pub theme: RwSignal<Theme>,
+    /// Scanlines over the page.
+    pub scanlines: RwSignal<bool>,
+    /// No glow, scanlines or animation.
+    pub clean: RwSignal<bool>,
     /// The optional columns the user chose (D-197).
     pub columns: RwSignal<Vec<Column>>,
+    /// The saved views (D-197).
+    pub views: RwSignal<Vec<SavedView>>,
+    /// Whether this browser shows notifications.
+    pub notify: RwSignal<bool>,
+    /// Whether a text field has the keys.
+    pub typing: RwSignal<bool>,
+    /// The share the keyboard acts on in the Share area.
+    pub share: RwSignal<Option<BundleId>>,
+    /// The row the keyboard acts on in the Catalog and Settings areas, by its ID.
+    pub row: RwSignal<Option<String>>,
 }
 
 impl Ui {
@@ -134,16 +161,27 @@ impl Ui {
             dialog: RwSignal::new(None),
             finding: RwSignal::new(Finding::default()),
             theme: RwSignal::new(Theme::default()),
+            scanlines: RwSignal::new(false),
+            clean: RwSignal::new(false),
             columns: RwSignal::new(Column::DEFAULT.to_vec()),
+            views: RwSignal::new(Vec::new()),
+            notify: RwSignal::new(false),
+            typing: RwSignal::new(false),
+            share: RwSignal::new(None),
+            row: RwSignal::new(None),
         }
     }
 
-    /// Where the keyboard's focus is, tracked.
+    /// Where the keyboard's focus is, tracked, for hints.
     pub fn scope(self) -> Scope {
+        if self.typing.get() {
+            return Scope::Typing;
+        }
         scope(self.area.get(), self.open.get(), self.deeper.get())
     }
 
-    /// Where the keyboard's focus is now, untracked, for event handlers.
+    /// Where the keyboard's focus is now, untracked, for event handlers, which ignore keys
+    /// while typing.
     pub fn scope_now(self) -> Scope {
         scope(
             self.area.get_untracked(),
@@ -158,6 +196,16 @@ impl Ui {
         self.open.set(Some(id));
         self.tab.set(Tab::Summary);
         self.deeper.set(None);
+    }
+
+    /// Shows transfer `id`'s detail in the Transfers area, clearing filters that hide it.
+    pub fn show(self, id: BundleId) {
+        self.finding.update(|f| {
+            f.text.clear();
+            f.status = None;
+        });
+        self.area.set(Area::Transfers);
+        self.open(id);
     }
 
     /// Goes back one level: out of a deeper view, or out of the detail.
@@ -175,7 +223,8 @@ fn scope(area: Area, open: Option<BundleId>, deeper: Option<Deeper>) -> Scope {
         (Area::Transfers, None, _) => Scope::List,
         (Area::Transfers, Some(_), None) => Scope::Detail,
         (Area::Transfers, Some(_), Some(_)) => Scope::Deeper,
-        _ => Scope::Area,
+        (Area::Share, ..) => Scope::Share,
+        (Area::Catalog | Area::Settings, ..) => Scope::Rows,
     }
 }
 
@@ -195,5 +244,20 @@ mod tests {
         assert_eq!(Area::Settings.step(1), Area::Transfers);
         assert_eq!(Tab::Summary.step(1), Tab::Files);
         assert_eq!(Tab::Summary.step(-1), Tab::Decisions);
+    }
+
+    #[test]
+    fn each_area_has_its_scope() {
+        let id = tempest_protocol::Hash::new([1; 32]);
+        assert_eq!(scope(Area::Transfers, None, None), Scope::List);
+        assert_eq!(scope(Area::Transfers, Some(id), None), Scope::Detail);
+        assert_eq!(
+            scope(Area::Transfers, Some(id), Some(Deeper::Rates)),
+            Scope::Deeper
+        );
+        // A detail left open behind another area doesn't take its keys.
+        assert_eq!(scope(Area::Share, Some(id), None), Scope::Share);
+        assert_eq!(scope(Area::Catalog, None, None), Scope::Rows);
+        assert_eq!(scope(Area::Settings, None, None), Scope::Rows);
     }
 }

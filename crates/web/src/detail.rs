@@ -11,6 +11,7 @@ use leptos::task::spawn_local;
 use tempest_api::TransferInfo;
 use tempest_api::events::DecisionInfo;
 use tempest_api::explain::{Fix, explain};
+use tempest_api::requests::QueueStep;
 use tempest_protocol::BundleId;
 use tempest_ui_kit::chart::LineChart;
 use tempest_ui_kit::components::*;
@@ -20,7 +21,7 @@ use crate::api;
 use crate::controls::{Controls, runs};
 use crate::present;
 use crate::request::RequestError;
-use crate::state::{Deeper, Dialog, Tab, Ui};
+use crate::state::{Area, Deeper, Dialog, Tab, Ui};
 use crate::store::Store;
 
 /// How many cells the chunk map asks for (D-193): 32 rows of 48.
@@ -51,7 +52,7 @@ pub fn Detail() -> impl IntoView {
         transfer.with(|t| t.as_ref().map(|t| t.name.clone()).unwrap_or_default())
     });
     view! {
-        <Drawer open=Signal::derive(move || ui.open.get().is_some()) on_close=move || ui.open.set(None) title>
+        <Drawer open=Signal::derive(move || ui.open.get().is_some() && ui.area.get() == Area::Transfers) on_close=move || ui.open.set(None) title>
             {move || {
                 let id = ui.open.get()?;
                 Some(match ui.deeper.get() {
@@ -133,6 +134,13 @@ fn ControlsRow(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
             }
         }
     };
+    let queue = move |step: QueueStep| {
+        move || {
+            if let Some(t) = transfer.get_untracked() {
+                controls.queue(&t, step);
+            }
+        }
+    };
     let running = move || transfer.with(|t| t.as_ref().is_some_and(|t| runs(&t.status)));
     view! {
         <div class="detail__controls">
@@ -145,9 +153,20 @@ fn ControlsRow(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
             <Button small=true title="R" on_click=with(Controls::recheck)>"Recheck"</Button>
             <Button small=true title="r" on_click=dialog(Dialog::Rename)>"Rename"</Button>
             <Button small=true title="y" on_click=with(Controls::copy_link)>"Copy link"</Button>
+            <Button small=true title="t" on_click=dialog(Dialog::Tags)>"Tags…"</Button>
+            <Button small=true title="C" on_click=dialog(Dialog::Category)>"Category…"</Button>
+            <Button small=true title="L: its own speed and sharing limits" on_click=dialog(Dialog::Limits)>"Limits…"</Button>
+            <Button small=true title="m: move its files" on_click=dialog(Dialog::Move)>"Move…"</Button>
             <Button small=true kind=ButtonKind::Danger title="x" on_click=dialog(Dialog::Remove)>
                 "Remove…"
             </Button>
+        </div>
+        <div class="detail__queue">
+            <span class="dim">"queue"</span>
+            <Button small=true kind=ButtonKind::Ghost title="Top of the queue (<)" on_click=queue(QueueStep::Top)>"top"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Up the queue (K)" on_click=queue(QueueStep::Up)>"↑ up"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Down the queue (J)" on_click=queue(QueueStep::Down)>"↓ down"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Bottom of the queue (>)" on_click=queue(QueueStep::Bottom)>"bottom"</Button>
         </div>
     }
 }

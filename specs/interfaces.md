@@ -136,7 +136,7 @@ ratatui, with a k9s/lazygit-style keyboard model (D-090):
 - `/` to filter, `:` for commands, `?` for help
 - a persistent hint bar showing available keys
 
-Keys, hints, help and the palette come from one binding table (D-191), the source of truth for what each key does; `?` shows the current screen's. Filters and sorting behave as D-192 describes. The detail, chunk map and rates chart, and what `g` means in each, follow D-194. The Share, Catalog and Settings areas follow D-196, custom columns and saved views D-197, and the theme, columns and views are kept in the engine's settings (D-195).
+Keys, hints, help and the palette come from one binding table (D-191), the source of truth for what each key does; `?` shows the current screen's. Filters and sorting behave as D-192 describes. The detail, chunk map and rates chart, and what `g` means in each, follow D-194. The Share, Catalog and Settings areas follow D-196 (D-203 in the web UI), custom columns and saved views D-197, and the theme, columns and views are kept in the engine's settings (D-195).
 
 The key map in outline:
 

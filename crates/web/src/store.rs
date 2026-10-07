@@ -14,6 +14,7 @@ use tempest_api::model::Model;
 use tempest_api::{ApiEvent, TransferInfo};
 use tempest_protocol::BundleId;
 
+use crate::notify::{self, Notice, Seen};
 use crate::stream::Link;
 
 /// How long events wait to be applied together.
@@ -28,6 +29,8 @@ pub struct Store {
     pub link: RwSignal<Link>,
     /// Whether the engine has sent its transfers since the page opened.
     pub loaded: RwSignal<bool>,
+    /// What the last batch of events had worth telling the user, if anything.
+    pub notices: RwSignal<Vec<Notice>>,
     rows: StoredValue<HashMap<BundleId, RwSignal<TransferInfo>>>,
     pending: StoredValue<Vec<ApiEvent>>,
 }
@@ -39,6 +42,7 @@ impl Store {
             model: RwSignal::new(Model::new()),
             link: RwSignal::new(Link::Connecting),
             loaded: RwSignal::new(false),
+            notices: RwSignal::new(Vec::new()),
             rows: StoredValue::new(HashMap::new()),
             pending: StoredValue::new(Vec::new()),
         }
@@ -64,13 +68,20 @@ impl Store {
             .iter()
             .any(|e| matches!(e, ApiEvent::Snapshot(_) | ApiEvent::Reset(_)));
         // Rows are ready before anything that reads the model hears of the change.
+        let mut before = HashMap::new();
+        let mut notices = Vec::new();
         self.model.update_untracked(|model| {
+            before.extend(model.transfers().iter().map(|t| (t.id, Seen::of(t))));
             for event in events {
                 model.apply(event);
             }
+            notices = notify::notices(&before, model.transfers());
         });
         self.sync_rows();
         self.model.notify();
+        if !notices.is_empty() {
+            self.notices.set(notices);
+        }
         if snapshot && !self.loaded.get_untracked() {
             self.loaded.set(true);
         }

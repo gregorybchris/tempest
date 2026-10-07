@@ -6,25 +6,28 @@ use std::time::Duration;
 use leptos::ev;
 use leptos::html::{Input, Select};
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 use send_wrapper::SendWrapper;
 use serde_json::json;
 use tempest_api::prefs;
+use tempest_api::requests::QueueStep;
 use tempest_protocol::BundleId;
 use tempest_ui_kit::components::*;
-use tempest_ui_kit::theme::{ThemePicker, apply_look};
+use tempest_ui_kit::theme::apply_look;
 use tempest_ui_kit::{Look, Theme};
 use wasm_bindgen::JsCast;
 
+use crate::areas::{Catalog, Sections, Settings};
+use crate::config::Config;
 use crate::controls::Controls;
 use crate::detail::Detail;
 use crate::dialogs::Dialogs;
 use crate::keys::{self, Command, Scope};
 use crate::list::{Move, Order, Transfers};
+use crate::share::{Share, SharePath, share_ids};
 use crate::state::{Area, Deeper, Dialog, Ui};
 use crate::store::Store;
 use crate::stream::{Follower, Link};
-use crate::{api, present};
+use crate::{notify, present, share};
 
 /// How many seconds of rates the app bar's sparklines show.
 const SPARK_SECONDS: usize = 60;
@@ -54,28 +57,37 @@ pub fn App() -> impl IntoView {
 fn Shell() -> impl IntoView {
     let store = Store::new();
     let ui = Ui::new();
-    let controls = Controls::new(use_toasts());
+    let toasts = use_toasts();
+    let controls = Controls::new(toasts);
     let fields = Fields {
         search: NodeRef::new(),
         status: NodeRef::new(),
         sort: NodeRef::new(),
     };
     let order = Order::new(store, ui);
+    let config = Config::new(store, ui, toasts);
+    let sections = Sections::new(config, store, ui);
     provide_context(store);
     provide_context(ui);
     provide_context(controls);
     provide_context(fields);
     provide_context(order);
+    provide_context(config);
+    provide_context(sections);
+    provide_context(SharePath(NodeRef::new()));
 
     // Registered before the drawer's and dialogs' own, so `esc` goes back one level at a time.
     keyboard(store, ui, controls, fields, order);
+    typing(ui);
     follow(store);
-    look(store, ui, controls);
+    look(config, ui);
+    tell(store, ui, controls);
 
     let area = move || match ui.area.get() {
         Area::Transfers => view! { <Transfers /> }.into_any(),
+        Area::Share => view! { <Share /> }.into_any(),
+        Area::Catalog => view! { <Catalog /> }.into_any(),
         Area::Settings => view! { <Settings /> }.into_any(),
-        other => view! { <Later area=other /> }.into_any(),
     };
     let hints = Signal::derive(move || {
         keys::hints(ui.scope())
@@ -128,51 +140,105 @@ fn retry_now() {
     }
 }
 
-/// Keeps the theme and columns as the engine's `ui` settings say (D-195), and saves the theme
-/// when the user changes it. Like the TUI, the page takes the theme once, when it opens.
-fn look(store: Store, ui: Ui, controls: Controls) {
+/// Keeps the look, columns and views as the engine's `ui` settings say (D-195), and saves the
+/// look when the user changes it. Like the TUI, the page takes the look once, when the
+/// settings first arrive, and the columns and views whenever they change.
+fn look(config: Config, ui: Ui) {
     apply_look(Signal::derive(move || Look {
         theme: ui.theme.get(),
-        ..Look::default()
+        scanlines: ui.scanlines.get(),
+        clean: ui.clean.get(),
     }));
-    // The theme the engine has, once known.
-    let saved = StoredValue::new(None::<Theme>);
-    let loading = StoredValue::new(false);
-    // Loads the settings once the engine answers.
+    ui.notify.set(notify::enabled());
+    // The look the engine has, once known.
+    let saved = StoredValue::new(None::<(Theme, bool, bool)>);
     Effect::new(move |_| {
-        if store.link.get() != Link::Live || saved.get_value().is_some() || loading.get_value() {
-            return;
-        }
-        loading.set_value(true);
-        spawn_local(async move {
-            if let Ok(settings) = api::ui_settings().await {
+        config.info.with(|info| {
+            let Some(settings) = info.as_ref().map(|i| &i.settings.ui) else {
+                return;
+            };
+            if saved.get_value().is_none() {
                 let theme = Theme::named(&settings.theme).unwrap_or_default();
-                saved.set_value(Some(theme));
+                saved.set_value(Some((theme, settings.scanlines, settings.clean)));
                 ui.theme.set(theme);
-                ui.columns.set(prefs::columns(&settings));
+                ui.scanlines.set(settings.scanlines);
+                ui.clean.set(settings.clean);
             }
-            loading.set_value(false);
+            let columns = prefs::columns(settings);
+            if ui.columns.with_untracked(|c| *c != columns) {
+                ui.columns.set(columns);
+            }
+            if ui.views.with_untracked(|v| *v != settings.views) {
+                ui.views.set(settings.views.clone());
+            }
         });
     });
     Effect::new(move |_| {
-        let theme = ui.theme.get();
+        let now = (ui.theme.get(), ui.scanlines.get(), ui.clean.get());
         let Some(known) = saved.get_value() else {
             return;
         };
-        if known == theme {
+        if known == now {
             return;
         }
-        saved.set_value(Some(theme));
-        spawn_local(async move {
-            if let Err(error) = api::change_setting(prefs::THEME, json!(theme.name())).await {
-                controls.say(Tone::Bad, format!("The theme wasn't saved. {error}"));
+        saved.set_value(Some(now));
+        let changes = [
+            (known.0 != now.0).then(|| (prefs::THEME, json!(now.0.name()))),
+            (known.1 != now.1).then(|| (prefs::SCANLINES, json!(now.1))),
+            (known.2 != now.2).then(|| (prefs::CLEAN, json!(now.2))),
+        ];
+        for (key, value) in changes.into_iter().flatten() {
+            config.change_quietly(key, value);
+        }
+    });
+}
+
+/// Tells the user when a transfer completes or fails (`notify`).
+fn tell(store: Store, ui: Ui, controls: Controls) {
+    Effect::new(move |_| {
+        store.notices.with(|notices| {
+            let browser = ui.notify.get_untracked();
+            for notice in notices {
+                notify::tell(notice, browser, controls);
             }
         });
     });
 }
 
+/// Follows whether a text field has the keys, for the hint bar.
+fn typing(ui: Ui) {
+    let field = |e: &web_sys::FocusEvent| {
+        e.target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .is_some_and(|el| typing_in(&el))
+    };
+    let focus = window_event_listener(ev::focusin, move |e| ui.typing.set(field(&e)));
+    let blur = window_event_listener(ev::focusout, move |_| ui.typing.set(false));
+    on_cleanup(move || {
+        focus.remove();
+        blur.remove();
+    });
+}
+
+/// Whether `element` takes typed keys.
+fn typing_in(element: &web_sys::Element) -> bool {
+    match element.tag_name().as_str() {
+        "SELECT" | "TEXTAREA" => true,
+        "INPUT" => element
+            .get_attribute("type")
+            .is_none_or(|t| !matches!(t.as_str(), "checkbox" | "radio" | "submit" | "button")),
+        _ => false,
+    }
+}
+
 /// The keyboard (D-191): one listener, reading the bindings table.
 fn keyboard(store: Store, ui: Ui, controls: Controls, fields: Fields, order: Order) {
+    // Contexts are read here: the listener runs outside the component tree.
+    let lists = Lists {
+        order,
+        sections: expect_context(),
+        share_path: expect_context(),
+    };
     let handle = window_event_listener(ev::keydown, move |e| {
         if e.ctrl_key() || e.meta_key() || e.alt_key() {
             return;
@@ -181,7 +247,7 @@ fn keyboard(store: Store, ui: Ui, controls: Controls, fields: Fields, order: Ord
         let typing = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-            .is_some_and(|el| matches!(el.tag_name().as_str(), "INPUT" | "SELECT" | "TEXTAREA"));
+            .is_some_and(|el| typing_in(&el));
         if key == "Escape" {
             if escape(ui, typing, &e) {
                 e.prevent_default();
@@ -195,7 +261,7 @@ fn keyboard(store: Store, ui: Ui, controls: Controls, fields: Fields, order: Ord
             return;
         };
         e.prevent_default();
-        act(command, store, ui, controls, fields, order);
+        act(command, store, ui, controls, fields, lists);
     });
     on_cleanup(move || handle.remove());
 }
@@ -232,11 +298,31 @@ fn escape(ui: Ui, typing: bool, e: &web_sys::KeyboardEvent) -> bool {
     }
 }
 
-fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Fields, order: Order) {
+/// What the keys move through: the transfers, the rows of Catalog and Settings, the shares.
+#[derive(Clone, Copy)]
+struct Lists {
+    order: Order,
+    sections: Sections,
+    share_path: SharePath,
+}
+
+fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Fields, lists: Lists) {
+    let Lists {
+        order,
+        sections,
+        share_path: SharePath(share_path),
+    } = lists;
     // The transfer a command acts on: the open one, or the one under the cursor.
     let target = || {
         let id = ui.open.get_untracked().or(ui.cursor.get_untracked())?;
         store.model.with_untracked(|m| m.transfer(&id).cloned())
+    };
+    let scope = ui.scope_now();
+    // Moving acts on whatever the area lists.
+    let go = |to: Move| match scope {
+        Scope::Share => share::go(ui, &untrack(|| share_ids(store)), to),
+        Scope::Rows => sections.go(ui, to),
+        _ => order.go(to),
     };
     match command {
         Command::Area(i) => ui.area.set(Area::ALL[i]),
@@ -244,10 +330,10 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
         Command::PreviousArea => ui.area.update(|a| *a = a.step(-1)),
         Command::Theme => ui.theme.update(|t| *t = t.next()),
         Command::Help => ui.dialog.set(Some(Dialog::Help)),
-        Command::Down => order.go(Move::Down),
-        Command::Up => order.go(Move::Up),
-        Command::First => order.go(Move::First),
-        Command::Last => order.go(Move::Last),
+        Command::Down => go(Move::Down),
+        Command::Up => go(Move::Up),
+        Command::First => go(Move::First),
+        Command::Last => go(Move::Last),
         Command::Open => {
             if let Some(id) = ui.cursor.get_untracked() {
                 ui.open(id);
@@ -258,27 +344,70 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
         Command::StatusFilter => focus(fields.status.get_untracked().map(Into::into)),
         Command::Sort => focus(fields.sort.get_untracked().map(Into::into)),
         Command::Reverse => ui.finding.update(|f| f.sort.reversed = !f.sort.reversed),
+        Command::Views | Command::SaveView => ui.dialog.set(Some(Dialog::Views)),
+        Command::Columns => ui.dialog.set(Some(Dialog::Columns)),
         Command::NextTab => ui.tab.update(|t| *t = t.step(1)),
         Command::PreviousTab => ui.tab.update(|t| *t = t.step(-1)),
         Command::ChunkMap => ui.deeper.set(Some(Deeper::ChunkMap)),
         Command::Rates => ui.deeper.set(Some(Deeper::Rates)),
+        Command::NewShare => focus(share_path.get_untracked().map(Into::into)),
+        Command::ShowShare => {
+            let ids = untrack(|| share_ids(store));
+            let chosen = ui.share.get_untracked().filter(|id| ids.contains(id));
+            if let Some(id) = chosen.or(ids.first().copied()) {
+                ui.show(id);
+            }
+        }
+        Command::Change => sections.use_control(ui, "data-change"),
+        Command::AddEntry => sections.use_control(ui, "data-add"),
+        Command::RemoveEntry => sections.use_control(ui, "data-remove"),
+        Command::CopyLink if scope == Scope::Share => {
+            let ids = untrack(|| share_ids(store));
+            let chosen = ui.share.get_untracked().filter(|id| ids.contains(id));
+            match chosen.or(ids.first().copied()) {
+                Some(id) => {
+                    let link = store
+                        .model
+                        .with_untracked(|m| m.transfer(&id).map(|t| t.link.clone()));
+                    controls.copy(link.unwrap_or_default());
+                }
+                None => controls.say(Tone::Dim, "Share something first."),
+            }
+        }
         Command::StartStop
         | Command::ForceStart
         | Command::Remove
         | Command::Rename
         | Command::Recheck
-        | Command::CopyLink => {
+        | Command::CopyLink
+        | Command::Tags
+        | Command::Category
+        | Command::MoveStorage
+        | Command::Limits
+        | Command::QueueUp
+        | Command::QueueDown
+        | Command::QueueTop
+        | Command::QueueBottom => {
             let Some(transfer) = target() else {
                 controls.say(Tone::Dim, "Choose a transfer first: j and k move.");
                 return;
             };
+            let id = transfer.id;
             match command {
                 Command::StartStop => controls.start_stop(&transfer),
                 Command::ForceStart => controls.force_start(&transfer),
                 Command::Recheck => controls.recheck(&transfer),
                 Command::CopyLink => controls.copy_link(&transfer),
-                Command::Remove => ui.dialog.set(Some(Dialog::Remove(transfer.id))),
-                _ => ui.dialog.set(Some(Dialog::Rename(transfer.id))),
+                Command::QueueUp => controls.queue(&transfer, QueueStep::Up),
+                Command::QueueDown => controls.queue(&transfer, QueueStep::Down),
+                Command::QueueTop => controls.queue(&transfer, QueueStep::Top),
+                Command::QueueBottom => controls.queue(&transfer, QueueStep::Bottom),
+                Command::Remove => ui.dialog.set(Some(Dialog::Remove(id))),
+                Command::Tags => ui.dialog.set(Some(Dialog::Tags(id))),
+                Command::Category => ui.dialog.set(Some(Dialog::Category(id))),
+                Command::MoveStorage => ui.dialog.set(Some(Dialog::Move(id))),
+                Command::Limits => ui.dialog.set(Some(Dialog::Limits(id))),
+                _ => ui.dialog.set(Some(Dialog::Rename(id))),
             }
         }
     }
@@ -345,39 +474,5 @@ fn LinkBanner() -> impl IntoView {
             view! { <div class="banner tone--warn">"Reconnecting to the engine…"</div> }.into_any()
         }
         _ => ().into_any(),
-    }
-}
-
-/// The Settings area: the look, for now.
-#[component]
-fn Settings() -> impl IntoView {
-    let ui = expect_context::<Ui>();
-    view! {
-        <div class="area">
-            <Panel title="look">
-                <div class="area__stack">
-                    <p class="dim">"Every Tempest client on this engine shares the theme."</p>
-                    <ThemePicker theme=ui.theme />
-                </div>
-            </Panel>
-            <Empty
-                title="More settings are on the way"
-                text="Limits, the queue and categories are in the TUI and the config file for now."
-            />
-        </div>
-    }
-}
-
-/// An area the web UI doesn't have yet.
-#[component]
-fn Later(area: Area) -> impl IntoView {
-    let text = match area {
-        Area::Share => "Share files and folders from the TUI or with `tempest share` for now.",
-        _ => "Browse trackers from the TUI for now.",
-    };
-    view! {
-        <div class="area">
-            <Empty title=area.title() text=text.to_owned() />
-        </div>
     }
 }

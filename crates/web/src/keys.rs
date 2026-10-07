@@ -11,8 +11,12 @@ pub enum Scope {
     Detail,
     /// The chunk map or rates chart, one level into the detail.
     Deeper,
-    /// Share, Catalog or Settings.
-    Area,
+    /// The Share area.
+    Share,
+    /// The rows of the Catalog or Settings area.
+    Rows,
+    /// A text field, which takes every key but `esc`. Only hints and help use it.
+    Typing,
 }
 
 /// What a key does.
@@ -68,6 +72,38 @@ pub enum Command {
     ChunkMap,
     /// Open the rates chart.
     Rates,
+    /// Edit the transfer's tags.
+    Tags,
+    /// Set the transfer's category.
+    Category,
+    /// Move the transfer's files.
+    MoveStorage,
+    /// Set the transfer's own limits.
+    Limits,
+    /// Move the transfer up the queue.
+    QueueUp,
+    /// Move the transfer down the queue.
+    QueueDown,
+    /// Move the transfer to the top of the queue.
+    QueueTop,
+    /// Move the transfer to the bottom of the queue.
+    QueueBottom,
+    /// Show the saved views.
+    Views,
+    /// Save the list's filters and order as a view.
+    SaveView,
+    /// Choose the list's columns.
+    Columns,
+    /// Type a path to share.
+    NewShare,
+    /// Show the share under the cursor in Transfers.
+    ShowShare,
+    /// Change the row under the cursor.
+    Change,
+    /// Add a tracker, relay or category, by the section under the cursor.
+    AddEntry,
+    /// Remove the entry under the cursor, or give its setting the config file's value again.
+    RemoveEntry,
 }
 
 /// Keys bound to a command.
@@ -85,40 +121,40 @@ pub struct Binding {
     pub help: &'static str,
 }
 
-use Scope::{Area, Deeper, Detail, List};
+use Scope::{Deeper, Detail, List, Rows, Share, Typing};
 
-const EVERYWHERE: &[Scope] = &[List, Detail, Deeper, Area];
+const EVERYWHERE: &[Scope] = &[List, Detail, Deeper, Share, Rows];
 const TRANSFER: &[Scope] = &[List, Detail, Deeper];
 
 /// Every binding, in the order hints and help list them.
 pub const BINDINGS: &[Binding] = &[
     Binding {
         keys: &["j", "ArrowDown"],
-        scopes: &[List],
+        scopes: &[List, Share, Rows],
         command: Command::Down,
         hint: "move",
         help: "Move down the list",
     },
     Binding {
         keys: &["k", "ArrowUp"],
-        scopes: &[List],
+        scopes: &[List, Share, Rows],
         command: Command::Up,
         hint: "",
         help: "Move up the list",
     },
     Binding {
         keys: &["g", "Home"],
-        scopes: &[List],
+        scopes: &[List, Share, Rows],
         command: Command::First,
         hint: "",
-        help: "Go to the first transfer",
+        help: "Go to the first one",
     },
     Binding {
         keys: &["G", "End"],
-        scopes: &[List],
+        scopes: &[List, Share, Rows],
         command: Command::Last,
         hint: "",
-        help: "Go to the last transfer",
+        help: "Go to the last one",
     },
     Binding {
         keys: &["Enter"],
@@ -198,6 +234,69 @@ pub const BINDINGS: &[Binding] = &[
         help: "Copy the transfer's link",
     },
     Binding {
+        keys: &["y"],
+        scopes: &[Share],
+        command: Command::CopyLink,
+        hint: "copy link",
+        help: "Copy the share's link",
+    },
+    Binding {
+        keys: &["t"],
+        scopes: TRANSFER,
+        command: Command::Tags,
+        hint: "",
+        help: "Edit the transfer's tags",
+    },
+    Binding {
+        keys: &["C"],
+        scopes: TRANSFER,
+        command: Command::Category,
+        hint: "",
+        help: "Set the transfer's category",
+    },
+    Binding {
+        keys: &["m"],
+        scopes: TRANSFER,
+        command: Command::MoveStorage,
+        hint: "",
+        help: "Move the transfer's files to another folder",
+    },
+    Binding {
+        keys: &["L"],
+        scopes: TRANSFER,
+        command: Command::Limits,
+        hint: "",
+        help: "The transfer's own speed and sharing limits",
+    },
+    Binding {
+        keys: &["K"],
+        scopes: TRANSFER,
+        command: Command::QueueUp,
+        hint: "",
+        help: "Move it up the queue",
+    },
+    Binding {
+        keys: &["J"],
+        scopes: TRANSFER,
+        command: Command::QueueDown,
+        hint: "",
+        help: "Move it down the queue",
+    },
+    Binding {
+        keys: &["<"],
+        scopes: TRANSFER,
+        command: Command::QueueTop,
+        hint: "",
+        help: "Move it to the top of the queue",
+    },
+    Binding {
+        keys: &[">"],
+        scopes: TRANSFER,
+        command: Command::QueueBottom,
+        hint: "",
+        help: "Move it to the bottom of the queue",
+    },
+    Binding {
         keys: &["a"],
         scopes: &[List],
         command: Command::Add,
@@ -231,6 +330,62 @@ pub const BINDINGS: &[Binding] = &[
         command: Command::Reverse,
         hint: "",
         help: "Reverse the order",
+    },
+    Binding {
+        keys: &["v"],
+        scopes: &[List],
+        command: Command::Views,
+        hint: "views",
+        help: "Show the saved views",
+    },
+    Binding {
+        keys: &["V"],
+        scopes: &[List],
+        command: Command::SaveView,
+        hint: "",
+        help: "Save the filters and order as a view",
+    },
+    Binding {
+        keys: &["|"],
+        scopes: &[List],
+        command: Command::Columns,
+        hint: "",
+        help: "Choose the list's columns",
+    },
+    Binding {
+        keys: &["a"],
+        scopes: &[Share],
+        command: Command::NewShare,
+        hint: "share a path",
+        help: "Type the path of a file or folder to share",
+    },
+    Binding {
+        keys: &["Enter"],
+        scopes: &[Share],
+        command: Command::ShowShare,
+        hint: "show",
+        help: "Show the share in Transfers",
+    },
+    Binding {
+        keys: &["Enter", " "],
+        scopes: &[Rows],
+        command: Command::Change,
+        hint: "change",
+        help: "Change the row: type a value, flip a switch or pick the next choice",
+    },
+    Binding {
+        keys: &["a"],
+        scopes: &[Rows],
+        command: Command::AddEntry,
+        hint: "add",
+        help: "Add a tracker, relay or category, by the section the cursor is in",
+    },
+    Binding {
+        keys: &["x", "Delete"],
+        scopes: &[Rows],
+        command: Command::RemoveEntry,
+        hint: "remove/reset",
+        help: "Remove the entry, or give the setting the config file's value again",
     },
     Binding {
         keys: &["1"],
@@ -304,8 +459,12 @@ pub fn help(scope: Scope) -> impl Iterator<Item = &'static Binding> {
 }
 
 /// The hint bar for `scope`: each hinted binding's keys, as shown, and its hint. Moving and
-/// switching tabs show both directions' keys: `j` `k`, `h` `l`.
+/// switching tabs show both directions' keys: `j` `k`, `h` `l`. While typing, only `esc` and
+/// `enter` mean anything.
 pub fn hints(scope: Scope) -> Vec<(Vec<&'static str>, &'static str)> {
+    if scope == Typing {
+        return vec![(vec!["enter"], "save"), (vec!["esc"], "leave the field")];
+    }
     let mut hints = Vec::new();
     for binding in help(scope).filter(|b| !b.hint.is_empty()) {
         let mut keys = vec![shown(binding.keys[0])];
@@ -316,7 +475,7 @@ pub fn hints(scope: Scope) -> Vec<(Vec<&'static str>, &'static str)> {
         }
         hints.push((keys, binding.hint));
     }
-    if scope != Scope::List {
+    if matches!(scope, Detail | Deeper) {
         hints.insert(0, (vec!["esc"], "back"));
     }
     hints.push((vec!["1", "4"], "areas"));
@@ -352,19 +511,29 @@ mod tests {
         assert_eq!(command(" ", Detail), Some(Command::StartStop));
         assert_eq!(command("/", List), Some(Command::Filter));
         assert_eq!(command("3", Detail), Some(Command::Area(2)));
-        assert_eq!(command("T", Area), Some(Command::Theme));
+        assert_eq!(command("T", Rows), Some(Command::Theme));
         assert_eq!(command("?", List), Some(Command::Help));
         // `g` is the first transfer in the list and the rates chart in the detail (D-194).
         assert_eq!(command("g", List), Some(Command::First));
         assert_eq!(command("g", Detail), Some(Command::Rates));
+        // Keys follow the area: `a` adds a link, a share or an entry; `x` removes a transfer or
+        // an entry.
+        assert_eq!(command("a", Share), Some(Command::NewShare));
+        assert_eq!(command("a", Rows), Some(Command::AddEntry));
+        assert_eq!(command("x", Rows), Some(Command::RemoveEntry));
+        assert_eq!(command("Enter", Share), Some(Command::ShowShare));
+        assert_eq!(command(" ", Rows), Some(Command::Change));
+        assert_eq!(command("y", Share), Some(Command::CopyLink));
+        assert_eq!(command("K", Detail), Some(Command::QueueUp));
+        assert_eq!(command("|", List), Some(Command::Columns));
         // Transfer keys need a transfer.
-        assert_eq!(command("x", Area), None);
+        assert_eq!(command("t", Rows), None);
         assert_eq!(command("q", List), None);
     }
 
     #[test]
     fn no_key_means_two_things_in_one_scope() {
-        for scope in [List, Detail, Deeper, Area] {
+        for scope in [List, Detail, Deeper, Share, Rows] {
             let mut seen = HashSet::new();
             for binding in help(scope) {
                 for key in binding.keys {
@@ -384,6 +553,8 @@ mod tests {
         let detail = hints(Detail);
         assert_eq!(detail[0], (vec!["esc"], "back"));
         assert!(detail.contains(&(vec!["h", "l"], "tabs")));
+        assert!(hints(Rows).contains(&(vec!["enter"], "change")));
+        assert_eq!(hints(Typing)[1], (vec!["esc"], "leave the field"));
         assert!(BINDINGS.iter().all(|b| !b.help.is_empty()));
     }
 }

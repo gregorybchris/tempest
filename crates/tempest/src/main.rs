@@ -1,6 +1,7 @@
 //! The `tempest` binary.
 
 mod bundle;
+mod sim;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -24,6 +25,9 @@ struct Cli {
 enum Command {
     /// Create a bundle from a file or folder and print its link.
     Share(ShareArgs),
+    /// Simulate swarms.
+    #[command(subcommand)]
+    Sim(sim::SimCommand),
 }
 
 #[derive(Debug, clap::Args)]
@@ -48,6 +52,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Share(args) => share(args),
+        Command::Sim(command) => sim::sim(command),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

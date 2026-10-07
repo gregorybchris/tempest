@@ -15,6 +15,7 @@ serde = "1"
 serde_json = "1"
 tempest-core = { path = "../crates/core" }
 tempest-protocol = { path = "../crates/protocol" }
+tempest-sim = { path = "../crates/sim" }
 
 # Keep the fuzz crate out of the main workspace: it builds only on nightly.
 [workspace]
@@ -100,6 +101,13 @@ bench = false
 [[bin]]
 name = "session"
 path = "fuzz_targets/session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scenario"
+path = "fuzz_targets/scenario.rs"
 test = false
 doc = false
 bench = false

@@ -1,0 +1,20 @@
+# The smallest swarm: an origin and one downloader exchanging real, verified bytes.
+name: two-peers
+description: One origin sends a small bundle to one peer over a home connection.
+payload: real
+seeds: 3
+
+bundle:
+  files:
+    - { size: 3MiB }
+    - { size: 100KiB, count: 2 }
+    - { size: 0 }
+
+network: { latency: 20ms }
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: downloader
+    bandwidth: { up: 10Mbps, down: 50Mbps }

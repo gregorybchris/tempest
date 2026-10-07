@@ -1,0 +1,23 @@
+# Peers arriving steadily and leaving early, with a few sending bad data.
+name: churn
+description: A steady stream of peers that stay 10 minutes on average, with bad-data peers.
+duration: 1h
+seeds: 2
+
+bundle:
+  files: [{ size: 16MiB }]
+
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 100Mbps }
+  - class: home
+    count: 60
+    bandwidth: { up: 5Mbps, down: 50Mbps }
+    arrivals: { pattern: steady, interval: 10s }
+    churn: { session: 10m }
+  - class: bad
+    count: 3
+    behavior: bad-data
+    starts: complete
+    bandwidth: { up: 20Mbps, down: 20Mbps }

@@ -2334,3 +2334,77 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - **Direct sends:** the sender stops once a peer that lacked chunks while connected has every chunk and no connected peer still lacks any.
 
 **Rationale:** Each rule uses only what a session observes and keeps its state bounded. The timing values are starting points for simulation.
+
+---
+
+## D-157: Scenario file fields
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-072 puts a scenario and its experiment in one YAML file; `specs/simulation.md` left the field names open.
+
+**Options:** separate world and experiment files; one file with the world at the top level and the experiment under `experiment` (chosen); a free-form map interpreted by the simulator.
+
+**Decision:**
+
+- One file per scenario. The world sits at the top level: `bundle`, `network` (defaults for every peer's link), `tracker`, `settings` (a profile and overrides, as in D-150), and `peers`, a list of classes with a count, bandwidth, latency, loss, what they start with, a behavior, arrivals and churn. `experiment.vary` maps dotted setting keys to the values to try; every combination is a variant. The simulator's `scenario` module is the source of truth for the fields; `crates/sim/scenarios/` has examples.
+- `seeds: N` runs seeds 1 to N. The same seed in every variant gives paired runs (D-073).
+- Settings apply in order of increasing specificity: the profile, the scenario's overrides, the variant's values, then the class's overrides, so that a class pinned to a strategy keeps it while the experiment varies the rest.
+- Quantities carry units: sizes (`4MiB`, `1GB`), rates in bits (`20Mbps`) or bytes (`2MB/s`), fractions (`0.5%`) and durations as in D-150. A bare number is in the base unit.
+- `payload: virtual` (the default) sends sizes only, and the simulator decides whether Data passes verification. `payload: real` gives every peer the bundle's bytes and verifies every Data, for small scenarios.
+- Unknown fields, YAML 1.1 booleans such as `off` (read as strings), duplicate keys and unusable values are errors that name the field and line.
+
+**Rationale:** One file keeps a scenario and the variants compared in it together. Ordering overrides by specificity is the rule settings files usually follow. Virtual payloads are what make thousand-peer swarms affordable (D-148); real ones check that the simulator and the core agree on actual bytes.
+
+---
+
+## D-158: Simulated network details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-069 sets a message-level network with fair sharing, but not how capacity is shared, how loss and ordering work, or what counts as a message.
+
+**Options for sharing:** global max-min fairness, recomputed over every flow at each change; processor sharing at each end, recomputed only for the flows at the two ends of the change (chosen); a fixed rate per connection.
+
+**Decision:**
+
+- Each peer has an access link: upload and download capacity, a one-way latency to the core of the network, and a loss rate. Two peers are as far apart as their two latencies added; a message between them is lost if either link loses it.
+- Data and Manifest responses are flows. A flow's rate is the smaller of its sender's upload divided by its sender's flows and its receiver's download divided by its receiver's flows. It arrives one latency after its last byte leaves.
+- Other messages are small and sent ahead of bulk data, as a transport prioritizes control streams: each takes its size ÷ the narrower link, then the latency, without slowing flows. They arrive in the order sent on their connection.
+- Loss never drops a message, since QUIC is reliable: each loss resends it after one round trip plus 25 ms, QUIC's default maximum ACK delay.
+- Message sizes are their protocol encodings. Data's size is computed from the manifest: its framing, proof and payload.
+- A dial takes one round trip; a dial to a peer that isn't there fails after 5 s. Closing a connection stops its transfers both ways.
+
+**Rationale:** Global max-min fairness would recompute thousands of flows on every response in a large swarm. Processor sharing at both ends costs work proportional to two peers' connections, and access links, where it applies, are where home connections are limited. It can leave some capacity unused when a flow is limited at its other end, which is acceptable for comparing strategies and can be revisited when the packet-level mode (D-069) validates it.
+
+---
+
+## D-159: Simulated peers and runs
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-070 lists what the first simulator models; how misbehaving peers, the tracker and a run's randomness and end work was open.
+
+**Decision:**
+
+- **Randomness:** each run has one seed. Separate ChaCha8 streams serve the world (arrival times, session lengths and each session's seed), the network (loss) and the tracker. The world is drawn before the run, the same way whatever the settings, so every variant sees the same arrivals and churn for a seed.
+- **Arrivals:** `at-once`, `steady` (one per interval) or `flash-crowd` (exponential delays after a start). **Churn:** each peer stays for an exponential time with the given mean, then shuts down. A peer whose session stops sharing (D-156) leaves too.
+- **Free riders** answer every chunk Request with a `busy` Reject, so they never upload. **Bad-data peers** send Data that always fails verification (with real payloads, a flipped byte).
+- **Tracker:** a peer announces on arrival and every interval, and gets up to the configured number of present peers chosen at random. Leaving peers are forgotten at once.
+- **A run ends** when every peer that started without the bundle has completed or left, or at the scenario's duration.
+
+**Rationale:** Drawing the world up front makes variants comparable seed by seed, which is what D-073's paired comparisons need. Each behavior is the simplest that exercises the matching defense: snubbing and reciprocity for free riders, banning for bad data.
+
+---
+
+## D-160: The `tempest sim` command
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-124 lists the CLI's verbs but has none for the simulator, which D-083 builds into the `tempest` binary.
+
+**Options:** a separate `tempest-sim` binary; `tempest sim run <scenario.yaml>` (chosen); `tempest simulate <scenario.yaml>`.
+
+**Decision:** `tempest sim run <scenario.yaml>` runs every variant with each of the scenario's seeds, several runs at once, and prints a summary per variant. `--seeds N` and `--seed S` override the seeds; `--jobs` sets how many runs go at once. Further simulator commands, such as viewing results, become siblings under `tempest sim`.
+
+**Rationale:** A noun group keeps simulation commands apart from the client's verbs, and leaves room for more without crowding the top level.

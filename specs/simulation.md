@@ -30,7 +30,7 @@ Protocol-level alternatives, such as a flat-hash variant for comparison with Mer
 
 ## Network model
 
-- **Message-level (first):** each link has bandwidth, latency and loss. A message arrives after `size ÷ available bandwidth + latency`, and links share capacity fairly. It scales to about 10,000 peers on one machine (D-069, D-071).
+- **Message-level (first):** each link has bandwidth, latency and loss. A message arrives after `size ÷ available bandwidth + latency`, and links share capacity fairly. It scales to about 10,000 peers on one machine (D-069, D-071). How capacity is shared, and how loss and ordering work, is in D-158.
 - **Packet-level (later):** real QUIC (`quinn-proto`, itself sans-IO) runs through the simulated network, for small validation scenarios.
 
 ## What the first version models (D-070)
@@ -49,42 +49,25 @@ Protocol-level alternatives, such as a flat-hash variant for comparison with Mer
 
 ## Scenario files (D-072)
 
-One YAML file describes a **scenario** (the world) and the **experiment** run in it (the variants to compare). Illustrative only, since field names are not decided:
+One YAML file describes a **scenario** (the world) and the **experiment** run in it (the variants to compare). The fields are provisional (D-157); the simulator's `scenario` module defines them, and [`crates/sim/scenarios/`](../crates/sim/scenarios/) has examples. In outline:
 
 ```yaml
-name: flash-crowd-small-seed
-duration: 2h
+name: flash-crowd
 seeds: 20
-
-network:
-  latency: { model: geographic, regions: [na, eu, asia] }
-  loss: 0.5%
-
+bundle: { files: [{ size: 4GiB }] }
 peers:
-  - class: home-cable
+  - { class: origin, starts: complete, bandwidth: { up: 50Mbps, down: 1Gbps } }
+  - class: home
     count: 800
-    bandwidth: { down: 200Mbps, up: 20Mbps }
-    nat: { punchable: 70% }
-    churn: { session: weibull(shape=0.6, mean=40m) }
-  - class: free-rider
-    count: 50
-    behavior: never-upload
-  - class: origin
-    count: 1
-    bandwidth: { down: 1Gbps, up: 50Mbps }
-    starts: complete
-
-bundle:
-  files: [{ size: 4GiB }]
-arrivals: { pattern: flash-crowd, peak: 0s, decay: 15m }
-
+    bandwidth: { up: 20Mbps, down: 200Mbps }
+    arrivals: { pattern: flash-crowd, decay: 15m }
 experiment:
   vary:
     strategies.chunk_selection: [rarest-first, random]
     strategies.upload: [bittorrent, propshare, fairtorrent]
 ```
 
-This produces 2 × 3 = 6 variants × 20 seeds = 120 runs. Every run records its seed, the resolved scenario, a hash of the scenario file, and the git commit.
+This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run <scenario.yaml>` runs and summarizes (D-160). Every run records its seed, the resolved scenario, a hash of the scenario file, and the git commit.
 
 ## Results (D-073, D-074, D-075)
 
@@ -125,6 +108,5 @@ From the owner's planning notes and the research (see the research atlas):
 
 ## Open questions
 
-- Exact YAML schema and field names.
 - The latency and bandwidth datasets used for realistic presets.
 - How decision events are structured, so they serve both the UIs and analysis.

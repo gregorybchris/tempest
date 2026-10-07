@@ -1,0 +1,30 @@
+# A flash crowd on one origin, comparing chunk selection and upload strategies.
+name: flash-crowd
+description: 200 home peers arrive within minutes of a release on one origin.
+duration: 2h
+seeds: 3
+
+bundle:
+  files: [{ size: 64MiB }]
+
+network: { latency: 25ms, loss: 0.1% }
+
+peers:
+  - class: origin
+    starts: complete
+    latency: 5ms
+    bandwidth: { up: 50Mbps, down: 1Gbps }
+  - class: home
+    count: 190
+    bandwidth: { up: 10Mbps, down: 100Mbps }
+    arrivals: { pattern: flash-crowd, decay: 2m }
+  - class: free-rider
+    count: 10
+    behavior: free-rider
+    bandwidth: { up: 10Mbps, down: 100Mbps }
+    arrivals: { pattern: flash-crowd, decay: 2m }
+
+experiment:
+  vary:
+    strategies.chunk_selection: [rarest-first, random]
+    strategies.upload: [bittorrent, cooperative]

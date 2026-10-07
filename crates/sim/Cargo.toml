@@ -1,0 +1,26 @@
+[package]
+name = "tempest-sim"
+description = "Tempest's discrete-event simulator: scenarios, a simulated network and experiment runs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tempest-core.workspace = true
+tempest-protocol.workspace = true
+
+rand.workspace = true
+rand_chacha.workspace = true
+serde.workspace = true
+serde-saphyr.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

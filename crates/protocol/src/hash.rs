@@ -18,6 +18,11 @@ pub const NODE_PREFIX: u8 = 0x01;
 /// The prefix of a bundle ID's input.
 pub const MANIFEST_PREFIX: u8 = 0x02;
 
+/// A peer's peer ID: its 32-byte Ed25519 public key (`protocol/connections.md`).
+///
+/// It is not a digest, but it has the same size, encoding and text form as one.
+pub type PeerId = Hash;
+
 /// A 32-byte SHA-256 digest: a root, a tree node, a bundle ID or a peer ID.
 ///
 /// As text, a hash is 64 lowercase hexadecimal characters.

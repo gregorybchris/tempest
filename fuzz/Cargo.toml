@@ -51,3 +51,10 @@ path = "fuzz_targets/link.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "message"
+path = "fuzz_targets/message.rs"
+test = false
+doc = false
+bench = false

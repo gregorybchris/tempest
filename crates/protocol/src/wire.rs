@@ -41,6 +41,9 @@ pub enum DecodeError {
     /// A manifest decoded but broke a rule.
     #[error("invalid manifest: {0}")]
     InvalidManifest(Box<crate::manifest::ManifestError>),
+    /// A message decoded but broke a rule.
+    #[error("invalid message: {0}")]
+    InvalidMessage(#[from] crate::message::MessageError),
     /// A frame had a length of zero, so no message type.
     #[error("frame has no message type")]
     EmptyFrame,

@@ -14,7 +14,7 @@
 //! - [`link`]: `tempest:` links.
 //! - [`range`]: chunk ranges and canonical range lists.
 //! - [`address`]: network addresses.
-//! - [`message`]: peer message types.
+//! - [`message`]: peer messages.
 
 pub mod address;
 pub mod frame;
@@ -29,9 +29,10 @@ pub mod tree;
 pub mod wire;
 
 pub use address::Address;
-pub use hash::Hash;
+pub use hash::{Hash, PeerId};
 pub use layout::ChunkLayout;
 pub use link::Link;
 pub use manifest::{BundleId, Entry, EntryKind, FileInfo, Manifest};
+pub use message::Message;
 pub use range::{ChunkRange, RangeList};
 pub use wire::{Decode, DecodeError, Encode, Reader, Writer};

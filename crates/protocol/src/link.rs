@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::address::Address;
-use crate::hash::Hash;
+use crate::hash::{Hash, PeerId};
 use crate::manifest::BundleId;
 
 const SCHEME: &str = "tempest:";
@@ -19,7 +19,7 @@ pub struct Link {
     /// The bundle ID.
     pub bundle: BundleId,
     /// The sharing peer's peer ID.
-    pub peer: Option<Hash>,
+    pub peer: Option<PeerId>,
     /// The sharing peer's direct addresses. Only meaningful with `peer`.
     pub addrs: Vec<Address>,
     /// The sharing peer's relay address. Only meaningful with `peer`.

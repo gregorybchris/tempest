@@ -1971,3 +1971,49 @@ This replaces the placeholder command names in earlier roadmap text (`make`, `se
 - **List first, detail on demand.** The transfers list is the main surface: full width, with more columns. A transfer's detail opens in a drawer or split only when selected or expanded.
 - **App-level navigation.** A clear navigation covers the app's areas, such as transfers, share, trackers/catalog and settings (limits, queue, categories).
 - **Less at once.** Everyday information comes first. The chunk map, charts, peers and decisions sit one level deeper.
+
+---
+
+## D-132: Testing bar
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Decision:** A milestone counts as done only when its code has:
+
+- **Unit and property tests:** for protocol and core logic, including the spec's test vectors.
+- **Fuzzing:** a `cargo-fuzz` target for every parser of untrusted input, run briefly in CI.
+- **End-to-end tests:** real peers, a relay and a tracker on localhost in CI, covering share → get → verify, including a relayed connection.
+- **Simulation baselines:** golden scenarios run against saved baseline results, to confirm transfer speed isn't regressing. The default run is quick enough to run between milestones. A setting runs them longer for more certainty.
+
+UI screenshot tests are not required.
+
+---
+
+## D-133: Releases
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Decision:**
+
+- `cargo-dist` builds GitHub releases for macOS, Linux and Windows: shell and PowerShell installers, a Homebrew tap, and MSI. No code signing yet.
+- The README gains real installation instructions once a release exists.
+
+---
+
+## D-134: Workflow quality gates
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Decision:**
+
+- After each milestone, an independent review checks the work against the specs and runs the tests and CI checks. Fixes are attempted.
+- Remaining failures are logged and the workflow continues, which maximizes progress.
+- Each milestone is committed and pushed.
+
+---
+
+## D-135: Shipped palettes
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Decision:** All four palettes ship as switchable themes in the TUI and web UIs. Green phosphor is the default.

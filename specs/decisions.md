@@ -1752,7 +1752,7 @@ The full field list is in `protocol/trackers.md`.
 **Guardrails:**
 
 - Pin Leptos 0.8, and move to 0.9 when it is released.
-- No per-item memos subscribed to a shared signal. Instead, use one effect that diffs into per-item signals, `Selector`, or keyed stores. This rule is recorded in `CLAUDE.md`.
+- No per-item memos subscribed to a shared signal. Instead, use one effect that diffs into per-item signals, `Selector`, or keyed stores. This rule is recorded in `specs/interfaces.md` (Leptos guidelines).
 - Keep a performance benchmark of a 1,536-cell live view in CI.
 - Keep UI logic in plain Rust modules so the framework layer stays thin.
 - Revisit if Leptos maintenance visibly stalls, e.g. no 0.9 release by mid-2027.

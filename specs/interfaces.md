@@ -36,6 +36,15 @@ Before heavy implementation, build a small test UI to decide whether Rust can me
 - **Must include:** a transfer list, a chunk map, live speed sparklines and one rich interactive chart, so chart quality is tested, not assumed.
 - **Fallback (D-088):** if Rust can't meet the bar, use a Vite + TypeScript + React frontend. All-Rust is strongly preferred.
 
+## Leptos guidelines
+
+The web UIs use Leptos (D-117). Code written for them, by people or agents, follows these rules:
+
+- Use Leptos 0.8 (pinned). Don't mix in APIs from 0.6 or older.
+- Never create one memo per item that subscribes to a shared signal. Removing a subscriber is O(n) in `reactive_graph`, so this pattern becomes quadratic: 1,536 such memos cost about 55 ms per update in the M0 prototype. Use one effect that diffs into per-item signals, `Selector`, or keyed stores.
+- Keep UI logic in plain Rust modules, and keep components thin.
+- A CI benchmark of a 1,536-cell live view guards against performance regressions.
+
 ## Terminal UI
 
 ratatui, with a k9s/lazygit-style keyboard model (D-090):

@@ -366,3 +366,72 @@ fn the_default_port_is_4773() {
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("[default: 4773]"), "{help}");
 }
+
+/// A running `tempest relay` on 127.0.0.1, killed when dropped.
+struct RelayProcess {
+    child: Child,
+    /// How peers name it: `<key>@127.0.0.1:<port>`.
+    identity: String,
+}
+
+impl RelayProcess {
+    fn start(identity: &Path) -> Self {
+        let mut child = tempest()
+            .args(["relay", "--bind", "127.0.0.1", "--port", "0"])
+            .args(["--public-ip", "127.0.0.1", "--identity"])
+            .arg(identity)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let received = lines(child.stderr.take().unwrap());
+        let identity = loop {
+            let line = received
+                .recv_timeout(STARTUP)
+                .expect("the relay printed no identity");
+            if let Some(identity) = line.strip_prefix("peers name it ") {
+                break identity.to_owned();
+            }
+        };
+        Self { child, identity }
+    }
+}
+
+impl Drop for RelayProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn get_reaches_the_sharer_through_its_relay() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photos");
+    sample_folder(&source);
+    let relay = RelayProcess::start(&dir.path().join("relay.pem"));
+    let sharer = Sharer::start_with(
+        &source,
+        &dir.path().join("sharer.pem"),
+        false,
+        &["--no-lan", "--relay", &relay.identity],
+    );
+    let link: Link = sharer.link.parse().unwrap();
+    let relay_address = link.relay.expect("the link has the relay address");
+    assert!(relay_address.ip().is_loopback());
+
+    // Without its direct addresses, the sharer can only be reached through the relay.
+    let relayed = Link {
+        addrs: Vec::new(),
+        ..link
+    };
+    let output = dir.path().join("downloads");
+    let got = get(
+        &relayed.to_string(),
+        &output,
+        &dir.path().join("getter.pem"),
+        &["--no-lan"],
+    );
+    assert!(got.status.success(), "{}", stderr(&got));
+    assert_same_tree(&source, &output.join("photos"));
+}

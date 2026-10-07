@@ -202,6 +202,7 @@ mod tests {
             download_rate: 0,
             upload_rate: 0,
             connections: 0,
+            relayed: 0,
             peers: 0,
             added: 0,
             completed: None,

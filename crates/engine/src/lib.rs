@@ -71,6 +71,8 @@ pub struct TransferInfo {
     pub upload_rate: u64,
     /// Open or opening connections.
     pub connections: usize,
+    /// How many of the connections go through a relay, which is usually slower.
+    pub relayed: usize,
     /// Peers known, connected or not.
     pub peers: usize,
     /// When it was added, in milliseconds since the Unix epoch.

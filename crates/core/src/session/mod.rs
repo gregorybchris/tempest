@@ -401,6 +401,12 @@ impl Session {
         self.maybe_dial(now);
     }
 
+    /// Sets the relay address this peer advertises from now on, as its home relay lends one or
+    /// it is lost.
+    pub fn set_relay(&mut self, relay: Option<Address>) {
+        self.local.relay = relay;
+    }
+
     /// Reports that a [`Action::Dial`] failed.
     pub fn handle_dial_failed(&mut self, now: Time, peer: PeerId) {
         self.dialing.remove(&peer);

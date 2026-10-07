@@ -4,6 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use tempest_engine::api::server::{ApiServer, TOKEN_FILE};
 use tempest_engine::{Engine, EngineError};
+use tempest_protocol::RelayIdentity;
 
 use crate::engine::EngineArgs;
 
@@ -15,6 +16,10 @@ pub struct DaemonArgs {
     /// `--set api.port=4800`. The value is JSON, or else a string. Repeat for more.
     #[arg(long, value_name = "KEY=VALUE", value_parser = parse_setting)]
     set: Vec<(String, Value)>,
+    /// A relay to pick a home relay from for this run, besides the config's `relays.known`, as
+    /// `<key>@host[:port]`. Repeat for more.
+    #[arg(long, value_name = "RELAY")]
+    relay: Vec<RelayIdentity>,
 }
 
 fn parse_setting(text: &str) -> Result<(String, Value), String> {
@@ -32,6 +37,7 @@ pub fn daemon(args: DaemonArgs) -> Result<()> {
             .set(&key, value)
             .with_context(|| format!("--set {key}"))?;
     }
+    config.relays.known.extend(args.relay);
     let data_dir = config.data_dir()?;
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
     runtime.block_on(async {

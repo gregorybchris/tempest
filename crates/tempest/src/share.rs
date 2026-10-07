@@ -14,7 +14,7 @@ use tempest_protocol::{Link, Manifest};
 
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs};
-use crate::progress::{StatusLine, bytes};
+use crate::progress::{StatusLine, bytes, peers};
 
 #[derive(Debug, clap::Args)]
 pub struct ShareArgs {
@@ -30,7 +30,7 @@ pub struct ShareArgs {
     #[arg(long, default_value = "")]
     comment: String,
     /// Serve it from here even if a daemon is running, as --created, --tracker, --port,
-    /// --identity, --bind, --no-lan and --lan-port also do.
+    /// --identity, --bind, --relay, --no-lan and --lan-port also do.
     #[arg(long)]
     standalone: bool,
     /// The bundle's creation time, in milliseconds since the Unix epoch. Defaults to now.
@@ -142,9 +142,13 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
 
     link.peer = Some(peer.node.endpoint().peer_id());
     link.addrs = peer.addresses.clone();
+    link.relay = peer.home_relay().await;
     println!("peer      {}", peer.node.endpoint().peer_id());
+    if let Some(relay) = link.relay {
+        println!("relay     {relay}");
+    }
     println!("link      {link}");
-    if link.addrs.is_empty() {
+    if link.addrs.is_empty() && link.relay.is_none() {
         eprintln!("warning: no network address to put in the link; pass --bind to choose one");
     }
     eprintln!("sharing; press Ctrl-C to stop");
@@ -166,10 +170,9 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
             _ = tick.tick() => {
                 let status = handle.status.borrow().clone();
                 line.show(&format!(
-                    "{} uploaded · {} {}",
+                    "{} uploaded · {}",
                     bytes(status.uploaded),
-                    status.connections,
-                    if status.connections == 1 { "peer" } else { "peers" },
+                    peers(status.connections, status.relayed),
                 ));
             }
         }

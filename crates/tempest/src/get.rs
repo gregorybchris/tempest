@@ -19,7 +19,7 @@ use tokio::time::Instant;
 
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs};
-use crate::progress::{StatusLine, bytes, duration};
+use crate::progress::{StatusLine, bytes, duration, peers};
 
 #[derive(Debug, clap::Args)]
 pub struct GetArgs {
@@ -36,8 +36,8 @@ pub struct GetArgs {
     /// A tracker to find peers through, besides those the link names. Repeat for more.
     #[arg(long, value_name = "URL")]
     tracker: Vec<String>,
-    /// Download from here even if a daemon is running, as --port, --identity, --bind, --no-lan
-    /// and --lan-port also do.
+    /// Download from here even if a daemon is running, as --port, --identity, --bind, --relay,
+    /// --no-lan and --lan-port also do.
     #[arg(long)]
     standalone: bool,
     /// The UDP port to use, 0 for any, which is the default.
@@ -56,11 +56,11 @@ pub fn get(args: GetArgs) -> Result<()> {
         .with_context(|| format!("not a valid tempest: link: {}", args.link))?;
     let record = link
         .peer
-        .filter(|_| !link.addrs.is_empty())
+        .filter(|_| !link.addrs.is_empty() || link.relay.is_some())
         .map(|peer_id| PeerRecord {
             peer_id,
             addresses: link.addrs.clone(),
-            relay: None,
+            relay: link.relay,
         });
     let mut trackers = link.trackers.clone();
     for tracker in &args.tracker {
@@ -80,7 +80,7 @@ pub fn get(args: GetArgs) -> Result<()> {
     if record.is_none() && trackers.is_empty() && args.peer.no_lan {
         bail!(
             "the link names neither a peer with an address nor a tracker, and LAN discovery is \
-             off (reaching peers through relays is not supported yet)"
+             off"
         );
     }
     runtime.block_on(download(args, link.bundle, record, trackers))
@@ -94,7 +94,9 @@ async fn download(
 ) -> Result<()> {
     let peer = args.peer.start(args.port.unwrap_or(0), false)?;
     let sources = Sources {
-        addresses: record.iter().flat_map(|r| r.addresses.clone()).collect(),
+        addresses: (record.iter())
+            .flat_map(|r| r.addresses.iter().chain(&r.relay).copied())
+            .collect(),
         trackers: trackers.len(),
         lan: peer.lan.is_some(),
     };
@@ -202,17 +204,12 @@ async fn follow(
             bail!("the download was stopped");
         }
         line.show(&format!(
-            "{}  {} of {}  {:.0}%  {} {}",
+            "{}  {} of {}  {:.0}%  {}",
             transfer.name,
             bytes(transfer.downloaded.min(transfer.size.unwrap_or(u64::MAX))),
             transfer.size.map_or("?".to_owned(), bytes),
             (transfer.progress * 100.0).floor(),
-            transfer.connections,
-            if transfer.connections == 1 {
-                "peer"
-            } else {
-                "peers"
-            },
+            peers(transfer.connections, transfer.relayed),
         ));
         tokio::select! {
             _ = tick.tick() => {}
@@ -395,16 +392,11 @@ fn progress(status: &Status) -> String {
         chunks => u64::from(status.have) * 100 / u64::from(chunks),
     };
     format!(
-        "{}  {} of {}  {percent}%  {} {}",
+        "{}  {} of {}  {percent}%  {}",
         manifest.name(),
         bytes(status.downloaded.min(total)),
         bytes(total),
-        status.connections,
-        if status.connections == 1 {
-            "peer"
-        } else {
-            "peers"
-        },
+        peers(status.connections, status.relayed),
     )
 }
 

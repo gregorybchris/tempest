@@ -1,9 +1,10 @@
 //! QUIC endpoints and authenticated connections (`protocol/connections.md`).
 //!
 //! An [`Endpoint`] owns one UDP socket per address family and both dials and accepts on it, so
-//! everything a peer sends from one family leaves from the same address. Every connection it
-//! yields has completed the TLS handshake with the `tempest/1` ALPN identifier, and knows the
-//! other peer's ID.
+//! everything a peer sends from one family leaves from the same address, including its relay
+//! connection (see [`home`](crate::home)). Every connection it yields has completed the TLS
+//! handshake with the `tempest/1` ALPN identifier, and knows the other peer's ID and whether it
+//! goes through a relay.
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
@@ -12,19 +13,25 @@ use std::time::Duration;
 
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{ConnectionError, TransportConfig, VarInt};
-use socket2::{Domain, Protocol, Socket, Type};
-use tempest_core::io::{Closed, Direction};
+use socket2::{Domain, Protocol, Type};
+use tempest_core::io::{Closed, Direction, PathKind};
 use tempest_protocol::message::{GoodbyeReason, MAX_REASON_MESSAGE_LEN};
 use tempest_protocol::{Address, PeerId};
 
+use crate::home::{HomeRelay, RelayChoice};
 use crate::identity::Identity;
 use crate::tls::{self, PEER_ALPN, SERVER_NAME, UnexpectedPeer};
+use crate::wrap::{RelaySocket, is_virtual};
 
 /// The default UDP port for peer connections (D-126).
 pub const DEFAULT_PORT: u16 = 4773;
 
 /// The largest UDP payload sent on a path before path MTU discovery shows it carries more.
 pub const MIN_MTU: u16 = 1200;
+
+/// The longest pause between keep-alives on a connection that may pass through a relay
+/// (`protocol/relays.md`, Forwarding datagrams).
+pub const MAX_KEEP_ALIVE: Duration = Duration::from_secs(60);
 
 /// How an [`Endpoint`] binds its sockets and configures its connections.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +46,8 @@ pub struct EndpointConfig {
     /// How long a connection may go without hearing from the other peer before it is lost.
     pub idle_timeout: Duration,
     /// How often to send something on an otherwise quiet connection, to keep it and the
-    /// routers' mappings for it alive.
+    /// routers' mappings for it alive. At most [`MAX_KEEP_ALIVE`] is used, so a relay's
+    /// forwarding permission never lapses.
     pub keep_alive: Duration,
 }
 
@@ -71,7 +79,7 @@ impl EndpointConfig {
             .min_mtu(MIN_MTU)
             .max_concurrent_bidi_streams(VarInt::from_u32(self.max_open_requests.saturating_add(1)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
-            .keep_alive_interval(Some(self.keep_alive))
+            .keep_alive_interval(Some(self.keep_alive.min(MAX_KEEP_ALIVE)))
             .max_idle_timeout(Some(
                 self.idle_timeout
                     .try_into()
@@ -121,9 +129,17 @@ pub enum HandshakeError {
 #[derive(Debug, Clone)]
 pub struct Endpoint {
     identity: Identity,
-    ipv4: Option<quinn::Endpoint>,
-    ipv6: Option<quinn::Endpoint>,
+    ipv4: Option<Socket>,
+    ipv6: Option<Socket>,
     transport: Arc<TransportConfig>,
+    home: HomeRelay,
+}
+
+/// One address family's socket: quinn's endpoint over the wrapping layer.
+#[derive(Debug, Clone)]
+pub(crate) struct Socket {
+    pub quic: quinn::Endpoint,
+    pub wrap: Arc<RelaySocket>,
 }
 
 impl Endpoint {
@@ -140,13 +156,19 @@ impl Endpoint {
         server.transport_config(transport.clone());
         let server = Arc::new(server);
 
-        let bind = |addr: SocketAddr| -> io::Result<quinn::Endpoint> {
-            quinn::Endpoint::new(
+        let bind = |addr: SocketAddr| -> io::Result<Socket> {
+            let runtime = quinn::TokioRuntime;
+            let wrap = Arc::new(RelaySocket::new(quinn::Runtime::wrap_udp_socket(
+                &runtime,
+                udp_socket(addr)?,
+            )?)?);
+            let quic = quinn::Endpoint::new_with_abstract_socket(
                 quinn::EndpointConfig::default(),
                 Some(server.as_ref().clone()),
-                udp_socket(addr)?,
-                Arc::new(quinn::TokioRuntime),
-            )
+                wrap.clone(),
+                Arc::new(runtime),
+            )?;
+            Ok(Socket { quic, wrap })
         };
         let ipv4 = config.ipv4.map(|addr| bind(addr.into())).transpose()?;
         let ipv6 = match config.ipv6.map(|addr| bind(addr.into())) {
@@ -164,6 +186,7 @@ impl Endpoint {
             ipv4,
             ipv6,
             transport,
+            home: HomeRelay::default(),
         })
     }
 
@@ -180,7 +203,34 @@ impl Endpoint {
     }
 
     fn sockets(&self) -> impl Iterator<Item = &quinn::Endpoint> {
-        self.ipv4.iter().chain(&self.ipv6)
+        self.ipv4
+            .iter()
+            .chain(&self.ipv6)
+            .map(|socket| &socket.quic)
+    }
+
+    /// The socket for `addr`'s family.
+    pub(crate) fn socket(&self, addr: SocketAddr) -> Option<&Socket> {
+        match addr {
+            SocketAddr::V4(_) => self.ipv4.as_ref(),
+            SocketAddr::V6(_) => self.ipv6.as_ref(),
+        }
+    }
+
+    /// The home relay: its status and this peer's relay address.
+    pub fn home_relay(&self) -> &HomeRelay {
+        &self.home
+    }
+
+    /// This peer's relay address, while registered with a home relay.
+    pub fn relay_address(&self) -> Option<Address> {
+        self.home.address()
+    }
+
+    /// Sets the relays to pick a home relay from, and registers with the one that answers
+    /// fastest. With none, any home relay is left. Must be called within a tokio runtime.
+    pub fn set_relays(&self, choice: RelayChoice) {
+        self.home.choose(self, choice);
     }
 
     /// Dials a peer, accepting only `expected` if given.
@@ -189,30 +239,44 @@ impl Endpoint {
         addr: SocketAddr,
         expected: Option<PeerId>,
     ) -> Result<Connection, HandshakeError> {
-        self.connect(addr, PEER_ALPN, expected).await
+        self.connect(addr, PEER_ALPN, expected, self.transport.clone())
+            .await
     }
 
-    /// Dials with any ALPN identifier, as for a relay, from the same socket peers are dialed from.
+    /// Dials another peer's relay address, accepting only `expected` if given. The connection
+    /// is marked relayed.
+    pub async fn dial_relayed(
+        &self,
+        addr: SocketAddr,
+        expected: Option<PeerId>,
+    ) -> Result<Connection, HandshakeError> {
+        let mut connection = self.dial(addr, expected).await?;
+        connection.path = PathKind::Relayed;
+        Ok(connection)
+    }
+
+    /// Dials with any ALPN identifier and transport settings, as for a relay, from the same
+    /// socket peers are dialed from.
     pub(crate) async fn connect(
         &self,
         addr: SocketAddr,
         alpn: &[u8],
         expected: Option<PeerId>,
+        transport: Arc<TransportConfig>,
     ) -> Result<Connection, HandshakeError> {
         // A dual-stack caller may hand over an IPv4 address in IPv6-mapped form.
         let addr = Address::from(addr).socket_addr();
-        let socket = match addr {
-            SocketAddr::V4(_) => self.ipv4.as_ref(),
-            SocketAddr::V6(_) => self.ipv6.as_ref(),
-        }
-        .ok_or(HandshakeError::NoSocket(addr))?;
+        let socket = &self
+            .socket(addr)
+            .ok_or(HandshakeError::NoSocket(addr))?
+            .quic;
         let verifier = Arc::new(tls::RawKeyVerifier::new(&tls::provider(), expected));
         let crypto = tls::client_config_with(&self.identity, alpn, verifier.clone());
         let mut client = quinn::ClientConfig::new(Arc::new(
             QuicClientConfig::try_from(crypto)
                 .expect("the ring provider has QUIC's initial cipher suite"),
         ));
-        client.transport_config(self.transport.clone());
+        client.transport_config(transport);
         let conn = socket
             .connect_with(client, addr, SERVER_NAME)?
             .await
@@ -228,17 +292,19 @@ impl Endpoint {
     pub async fn accept(&self) -> Option<Incoming> {
         let incoming = match (&self.ipv4, &self.ipv6) {
             (Some(v4), Some(v6)) => tokio::select! {
-                incoming = v4.accept() => incoming,
-                incoming = v6.accept() => incoming,
+                incoming = v4.quic.accept() => incoming,
+                incoming = v6.quic.accept() => incoming,
             },
-            (Some(socket), None) | (None, Some(socket)) => socket.accept().await,
+            (Some(socket), None) | (None, Some(socket)) => socket.quic.accept().await,
             (None, None) => None,
         };
         incoming.map(Incoming)
     }
 
-    /// Closes every connection with a Goodbye and stops accepting.
+    /// Closes every connection with a Goodbye, including the relay connection, and stops
+    /// accepting.
     pub fn close(&self, reason: GoodbyeReason, message: &str) {
+        self.home.stop();
         for socket in self.sockets() {
             socket.close(VarInt::from_u32(reason as u32), reason_phrase(message));
         }
@@ -255,7 +321,7 @@ impl Endpoint {
 /// Opens a UDP socket bound to `addr`. An IPv6 socket carries only IPv6.
 fn udp_socket(addr: SocketAddr) -> io::Result<UdpSocket> {
     let domain = Domain::for_address(addr);
-    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
+    let socket = socket2::Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
     if addr.is_ipv6() {
         socket.set_only_v6(true)?;
     }
@@ -268,7 +334,8 @@ fn udp_socket(addr: SocketAddr) -> io::Result<UdpSocket> {
 pub struct Incoming(quinn::Incoming);
 
 impl Incoming {
-    /// The address the attempt came from.
+    /// The address the attempt came from: a virtual address if it came through the home
+    /// relay.
     pub fn remote_address(&self) -> SocketAddr {
         self.0.remote_address()
     }
@@ -276,7 +343,11 @@ impl Incoming {
     /// Completes the handshake.
     pub async fn accept(self) -> Result<Connection, HandshakeError> {
         let conn = self.0.await?;
-        Connection::new(conn, Direction::Accepted, PEER_ALPN)
+        let mut connection = Connection::new(conn, Direction::Accepted, PEER_ALPN)?;
+        if is_virtual(connection.remote_address()) {
+            connection.path = PathKind::Relayed;
+        }
+        Ok(connection)
     }
 
     /// Turns the attempt away without a handshake, as when at the connection limit.
@@ -291,6 +362,7 @@ pub struct Connection {
     inner: quinn::Connection,
     peer: PeerId,
     direction: Direction,
+    path: PathKind,
 }
 
 impl Connection {
@@ -316,6 +388,7 @@ impl Connection {
             inner,
             peer,
             direction,
+            path: PathKind::Direct,
         })
     }
 
@@ -329,7 +402,14 @@ impl Connection {
         self.direction
     }
 
-    /// The other peer's address.
+    /// Whether the connection goes through a relay: this peer's home relay or the other
+    /// peer's.
+    pub fn path(&self) -> PathKind {
+        self.path
+    }
+
+    /// The other peer's address, or a virtual address for a connection through this peer's
+    /// home relay.
     pub fn remote_address(&self) -> SocketAddr {
         self.inner.remote_address()
     }
@@ -419,7 +499,10 @@ mod tests {
             let incoming = server.accept().await.unwrap();
             incoming.accept().await
         });
-        let dial = client.connect(addr, b"tempest-relay/1", None).await;
+        let transport = client.transport.clone();
+        let dial = client
+            .connect(addr, b"tempest-relay/1", None, transport)
+            .await;
         assert!(dial.is_err());
         assert!(accept.await.unwrap().is_err());
     }

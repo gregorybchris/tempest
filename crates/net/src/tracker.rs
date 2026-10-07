@@ -20,6 +20,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::driver::{BundleHandle, PeerSink, Status};
+use crate::home::HomeRelay;
 
 /// The largest response body read from a tracker.
 pub const MAX_RESPONSE: usize = 1 << 20;
@@ -183,10 +184,9 @@ pub struct AnnounceConfig {
     pub peer: PeerId,
     /// The UDP port of this peer's QUIC endpoint.
     pub port: u16,
-    /// Direct addresses beyond the one the tracker observes. See [`public_addresses`].
+    /// Direct addresses beyond the one the tracker observes. See [`public_addresses`]. The
+    /// relay address comes from the bundle's [home relay](BundleHandle::home_relay).
     pub addrs: Vec<Address>,
-    /// This peer's relay address, if it has one.
-    pub relay: Option<Address>,
     /// How many peers to ask for.
     pub num_want: u32,
     /// The shortest interval obeyed, whatever a tracker asks for.
@@ -205,7 +205,6 @@ impl AnnounceConfig {
             peer,
             port,
             addrs: Vec::new(),
-            relay: None,
             num_want: tracker::DEFAULT_NUM_WANT,
             min_interval: Duration::from_secs(30),
             retry: Duration::from_secs(15),
@@ -257,6 +256,7 @@ impl Announcer {
             bundle: bundle.bundle_id(),
             status: bundle.status.clone(),
             peers: bundle.peer_sink(),
+            home_relay: bundle.home_relay().clone(),
             state,
         };
         Self {
@@ -292,6 +292,8 @@ struct Schedule {
     not_before: Instant,
     /// Failures in a row.
     failures: u32,
+    /// When the tracker last accepted an announce.
+    succeeded_at: Option<Instant>,
 }
 
 impl Schedule {
@@ -302,6 +304,7 @@ impl Schedule {
             next_update: now,
             not_before: now,
             failures: 0,
+            succeeded_at: None,
         }
     }
 
@@ -322,6 +325,7 @@ impl Schedule {
         self.started |= self.pending == Some(AnnounceEvent::Started);
         self.pending = None;
         self.failures = 0;
+        self.succeeded_at = Some(now);
         self.next_update = now + interval;
         self.not_before = now;
     }
@@ -337,6 +341,13 @@ impl Schedule {
         let wait = retry_after.unwrap_or_else(backoff);
         self.failures += 1;
         self.not_before = now + wait;
+    }
+
+    /// This peer's relay address changed: the tracker should hear it with the next update,
+    /// as soon as `min_interval` since the last announce allows.
+    fn address_changed(&mut self, now: Instant, min_interval: Duration) {
+        let earliest = self.succeeded_at.map_or(now, |at| at + min_interval);
+        self.next_update = self.next_update.min(earliest.max(now));
     }
 
     /// The bundle became complete. A `started` still waiting will say so itself.
@@ -361,6 +372,7 @@ struct AnnounceTask {
     bundle: BundleId,
     status: watch::Receiver<Status>,
     peers: PeerSink,
+    home_relay: HomeRelay,
     state: watch::Sender<TrackerState>,
 }
 
@@ -368,6 +380,8 @@ impl AnnounceTask {
     async fn run(mut self, mut stop: watch::Receiver<bool>) {
         let mut schedule = Schedule::new(Instant::now());
         let mut complete = self.status.borrow_and_update().complete;
+        let mut relay = self.home_relay.subscribe();
+        let mut relay_address = relay.borrow_and_update().relay_address();
         loop {
             tokio::select! {
                 () = tokio::time::sleep_until(schedule.due()) => {
@@ -387,6 +401,13 @@ impl AnnounceTask {
                     if self.status.borrow_and_update().complete && !complete {
                         complete = true;
                         schedule.completed();
+                    }
+                }
+                Ok(()) = relay.changed() => {
+                    let address = relay.borrow_and_update().relay_address();
+                    if address != relay_address {
+                        relay_address = address;
+                        schedule.address_changed(Instant::now(), self.config.min_interval);
                     }
                 }
                 // Asked to stop, or the announcer was dropped.
@@ -410,7 +431,7 @@ impl AnnounceTask {
             peer: self.config.peer,
             port: self.config.port,
             addrs: self.config.addrs.clone(),
-            relay: self.config.relay,
+            relay: self.home_relay.address(),
             event,
             complete,
             num_want: self.config.num_want,
@@ -424,6 +445,7 @@ impl AnnounceTask {
                 return Err(retry_after);
             }
         };
+        self.home_relay.recommend(&response.relays);
         self.state.send_modify(|state| {
             state.announces += 1;
             state.complete = response.complete;
@@ -506,6 +528,20 @@ mod tests {
         assert_eq!(s.due(), t);
         s.succeeded(later, Duration::from_secs(300));
         assert_eq!(s.event(), AnnounceEvent::Update);
+    }
+
+    #[test]
+    fn a_new_relay_address_is_announced_soon() {
+        let t = Instant::now();
+        let min_interval = Duration::from_secs(30);
+        let mut s = Schedule::new(t);
+        s.succeeded(t, Duration::from_secs(1800));
+        s.address_changed(t + Duration::from_secs(5), min_interval);
+        assert_eq!(s.due(), t + min_interval);
+        s.succeeded(t + min_interval, Duration::from_secs(1800));
+        let later = t + Duration::from_secs(600);
+        s.address_changed(later, min_interval);
+        assert_eq!(s.due(), later);
     }
 
     #[test]

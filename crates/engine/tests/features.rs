@@ -1,17 +1,22 @@
 //! The engine's v1 features beyond the basic controls: speed and sharing limits, rechecking,
-//! moving storage and notifications.
+//! moving storage, notifications and a home relay.
 
 mod common;
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tempest_engine::{
     AddOptions, Engine, EngineError, EngineEvent, ShareOptions, Status, Subscription, TransferInfo,
 };
+use tempest_net::{Identity, RelayStatus};
+use tempest_protocol::relay::RelayHost;
+use tempest_protocol::{Link, RelayIdentity};
+use tempest_relay::{Relay, RelayConfig};
 
 use common::{config, contents, wait_for};
 
@@ -272,6 +277,67 @@ async fn notifications_run_on_completion_and_on_error() {
         "{text}"
     );
 
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+/// Waits until `engine`'s home relay status satisfies `done`.
+async fn wait_for_relay(engine: &Engine, done: impl Fn(&RelayStatus) -> bool) -> RelayStatus {
+    let wait = async {
+        loop {
+            let status = engine.relay();
+            if done(&status) {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(common::LIMIT, wait).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_configured_relay_lends_the_address_in_share_links() {
+    let root = tempfile::tempdir().unwrap();
+    let (source, files) = album(root.path());
+    let identity = Identity::generate().unwrap();
+    let relay = Arc::new(Relay::bind(&identity, RelayConfig::localhost()).unwrap());
+    let serving = relay.clone();
+    let (_stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        serving
+            .serve(async {
+                let _ = stopped.await;
+            })
+            .await;
+    });
+    let relay_addr = relay.local_addr().unwrap();
+    let relay_identity = RelayIdentity {
+        key: relay.key(),
+        host: RelayHost::Ip(relay_addr.ip()),
+        port: relay_addr.port(),
+    };
+
+    let mut a_config = config(&root.path().join("a"));
+    a_config.relays.known = vec![relay_identity];
+    let a = Engine::open(a_config).await.unwrap();
+    let b = Engine::open(config(&root.path().join("b"))).await.unwrap();
+    let registered = |s: &RelayStatus| matches!(s, RelayStatus::Registered { .. });
+    let relay_address = wait_for_relay(&a, registered).await.relay_address();
+    assert!(relay_address.is_some());
+    assert_eq!(b.relay(), RelayStatus::Off);
+
+    let (share, done) = share_and_download(&a, &b, &source).await;
+    let link: Link = share.link.parse().unwrap();
+    assert_eq!(link.relay, relay_address);
+    assert_files(done.content_dir.as_ref().unwrap(), &files);
+
+    // Without relays the home relay is left, and links lose the relay address.
+    let none = BTreeMap::from([("relays.known".to_owned(), json!([]))]);
+    a.change_settings(none).await.unwrap();
+    wait_for_relay(&a, |s| *s == RelayStatus::Off).await;
+    let info = a.get(share.id).await.unwrap();
+    let link: Link = info.link.parse().unwrap();
+    assert_eq!(link.relay, None);
     a.shutdown().await;
     b.shutdown().await;
 }

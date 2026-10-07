@@ -35,6 +35,7 @@ use tokio::task::JoinHandle;
 
 use self::bundle::{BundleTask, Outputs, Report, Start};
 use crate::endpoint::{Connection, Endpoint, Incoming};
+use crate::home::HomeRelay;
 use crate::limit::{SpeedLimits, Throttle};
 use crate::storage::{Checkpoint, Storage, StorageConfig, StorageError};
 use crate::stream::read_message;
@@ -47,7 +48,8 @@ pub struct NodeConfig {
     pub session: Config,
     /// Every bundle's storage settings.
     pub storage: StorageConfig,
-    /// The addresses this peer tells others to reach it at, in Hello and Candidates.
+    /// The direct addresses this peer tells others to reach it at, in Hello and Candidates. The
+    /// relay address comes from the endpoint's home relay.
     pub addresses: Vec<Address>,
     /// How long a dial may take, per address.
     pub dial_timeout: Duration,
@@ -160,6 +162,8 @@ pub struct Status {
     pub uploaded: u64,
     /// The number of connections, open or opening.
     pub connections: usize,
+    /// How many of them go through a relay.
+    pub relayed: usize,
     /// The number of peers known, connected or not.
     pub known_peers: usize,
     /// Every chunk is stored and synced to disk.
@@ -189,6 +193,7 @@ pub struct BundleHandle {
     bundle_id: BundleId,
     peers: PeerSink,
     limits: SpeedLimits,
+    home_relay: HomeRelay,
     shutdown: Arc<watch::Sender<bool>>,
     task: JoinHandle<Result<Summary, DriverError>>,
 }
@@ -215,6 +220,11 @@ impl BundleHandle {
         let (reply, storage) = oneshot::channel();
         self.peers.0.send(Report::Storage(reply)).await.ok()?;
         storage.await.ok().flatten()
+    }
+
+    /// The home relay of the node's endpoint, whose relay address trackers are told.
+    pub fn home_relay(&self) -> &HomeRelay {
+        &self.home_relay
     }
 
     /// Somewhere for discovery to deliver peers to, apart from the handle.
@@ -431,6 +441,7 @@ impl Node {
             bundle_id,
             peers: PeerSink(inbox),
             limits,
+            home_relay: self.endpoint.home_relay().clone(),
             shutdown,
             task,
         })

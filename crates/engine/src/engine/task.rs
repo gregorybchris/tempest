@@ -493,8 +493,9 @@ impl EngineTask {
         self.save_folder = config.save_folder()?;
         self.config = config;
         self.changes = changes;
-        // New queue and speed limits apply now, new trackers to shares' links.
+        // New queue and speed limits and relays apply now, new trackers to shares' links.
         self.apply_speed_limits();
+        self.apply_relays();
         self.refresh_runs();
         self.reschedule().await;
         self.emit_changes();
@@ -659,11 +660,21 @@ impl EngineTask {
         Ok(self.info(&id).expect("just inserted"))
     }
 
+    /// Picks a home relay from the configured relays. A held engine runs no transfers, so
+    /// nobody needs to reach it.
+    pub(super) fn apply_relays(&self) {
+        if !self.hold {
+            let endpoint = self.node.endpoint();
+            endpoint.set_relays(self.config.relays.choice());
+        }
+    }
+
     /// A share's link: the bundle, this peer and its addresses, and the config's trackers.
     fn share_link(&self, link: &Link) -> Link {
         let mut link = link.clone();
         link.peer = Some(self.peer_id);
         link.addrs = self.addresses.clone();
+        link.relay = self.node.endpoint().relay_address();
         link.trackers = self.config.trackers.clone();
         link
     }
@@ -798,6 +809,7 @@ impl EngineTask {
                 download_rate: run.map_or(0, |run| run.download_rate),
                 upload_rate: run.map_or(0, |run| run.upload_rate),
                 connections: net.as_ref().map_or(0, |s| s.connections),
+                relayed: net.as_ref().map_or(0, |s| s.relayed),
                 peers: net.as_ref().map_or(0, |s| s.known_peers),
                 added: row.added,
                 completed: row.completed,

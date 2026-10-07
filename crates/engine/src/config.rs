@@ -11,6 +11,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use tempest_core::Config;
 use tempest_core::config::Settings;
+use tempest_net::RelayChoice;
+use tempest_protocol::RelayIdentity;
 
 use crate::schedule::{LocalTime, Schedule};
 
@@ -41,6 +43,8 @@ pub struct EngineConfig {
     pub queue: QueueSettings,
     /// Trackers to announce every transfer to, besides those its link names.
     pub trackers: Vec<String>,
+    /// Relays to pick a home relay from (D-029: none by default).
+    pub relays: RelaySettings,
     /// Speed limits over every transfer together.
     pub limits: SpeedLimitSettings,
     /// When a complete transfer stops sharing. A transfer can override them.
@@ -201,6 +205,61 @@ mod optional_duration {
                 tempest_core::config::parse_duration(&text).map_err(serde::de::Error::custom)
             })
             .transpose()
+    }
+}
+
+/// The relays to pick a home relay from: the one that answers fastest, which lends this peer a
+/// relay address for peers that can't reach it directly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RelaySettings {
+    /// Relays as `<key>@host:port`.
+    #[serde(with = "relay_identities")]
+    pub known: Vec<RelayIdentity>,
+    /// Also pick from the relays that trackers recommend.
+    pub from_trackers: bool,
+}
+
+impl Default for RelaySettings {
+    fn default() -> Self {
+        Self {
+            known: Vec::new(),
+            from_trackers: true,
+        }
+    }
+}
+
+impl RelaySettings {
+    /// The relays as the endpoint takes them.
+    pub fn choice(&self) -> RelayChoice {
+        RelayChoice {
+            known: self.known.clone(),
+            from_trackers: self.from_trackers,
+        }
+    }
+}
+
+/// Relay identities as text.
+mod relay_identities {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(
+        relays: &[RelayIdentity],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(relays.iter().map(ToString::to_string))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<RelayIdentity>, D::Error> {
+        Vec::<String>::deserialize(deserializer)?
+            .iter()
+            .map(|text| {
+                text.parse()
+                    .map_err(|e| serde::de::Error::custom(format!("{text:?}: {e}")))
+            })
+            .collect()
     }
 }
 
@@ -689,6 +748,32 @@ trackers: [https://tracker.example.org]
         assert_eq!(EngineConfig::load(&path).unwrap(), EngineConfig::default());
         config.save(&path).unwrap();
         assert_eq!(EngineConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn relays_are_identities_and_none_ship_by_default() {
+        let default = EngineConfig::default().relays;
+        assert!(default.known.is_empty());
+        assert!(default.from_trackers);
+
+        let key = "ab".repeat(32);
+        let text =
+            format!("relays: {{ known: [\"{key}@relay.example.org\"], from_trackers: false }}");
+        let config = EngineConfig::from_yaml(&text).unwrap();
+        assert_eq!(config.relays.known[0].port, 4775);
+        assert!(!config.relays.from_trackers);
+        let yaml = config.to_yaml();
+        assert!(
+            yaml.contains(&format!("{key}@relay.example.org:4775")),
+            "{yaml}"
+        );
+        assert_eq!(EngineConfig::from_yaml(&yaml).unwrap(), config);
+
+        let mut config = EngineConfig::default();
+        let error = config
+            .set("relays.known", json!(["relay.example.org"]))
+            .unwrap_err();
+        assert!(error.to_string().starts_with("relays.known: "), "{error}");
     }
 
     #[test]

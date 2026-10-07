@@ -28,6 +28,15 @@ pub fn duration(elapsed: Duration) -> String {
     }
 }
 
+/// The number of peers connected, and how many of them through a relay.
+pub fn peers(connections: usize, relayed: usize) -> String {
+    let noun = if connections == 1 { "peer" } else { "peers" };
+    match relayed {
+        0 => format!("{connections} {noun}"),
+        relayed => format!("{connections} {noun} ({relayed} through relays)"),
+    }
+}
+
 /// A line on stderr that each update replaces. It shows nothing unless stderr is a terminal.
 pub struct StatusLine {
     enabled: bool,
@@ -73,6 +82,12 @@ mod tests {
         assert_eq!(bytes(1024), "1.0 KiB");
         assert_eq!(bytes(1536 * 1024), "1.5 MiB");
         assert_eq!(bytes(u64::MAX), "16.0 EiB");
+    }
+
+    #[test]
+    fn relayed_peers_are_counted_apart() {
+        assert_eq!(peers(1, 0), "1 peer");
+        assert_eq!(peers(3, 2), "3 peers (2 through relays)");
     }
 
     #[test]

@@ -1,0 +1,381 @@
+//! Nodes reaching each other through a relay on localhost: the seeder registers with its home
+//! relay, and the downloader knows only the seeder's relay address.
+
+use std::collections::HashSet;
+use std::fs;
+use std::future::Future;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tempest_core::io::PathKind;
+use tempest_core::{Event, EventKind};
+use tempest_net::{
+    AnnounceConfig, Announcer, BundleHandle, Destination, Endpoint, EndpointConfig, Identity, Node,
+    NodeConfig, RelayChoice, RelayError, RelayStatus, Storage, StorageConfig, TrackerClient,
+};
+use tempest_protocol::message::PeerRecord;
+use tempest_protocol::relay::{RelayHost, RelayRejectReason};
+use tempest_protocol::tracker::{AnnounceEvent, AnnounceRequest};
+use tempest_protocol::tree::{self, CHUNK_SIZE};
+use tempest_protocol::{Address, Entry, FileInfo, Manifest, PeerId, RelayIdentity};
+use tempest_relay::{Relay, RelayConfig};
+use tempest_tracker::{Tracker, TrackerConfig};
+use tokio::net::TcpListener;
+use tokio::sync::{broadcast, oneshot};
+
+/// How long any step may take before it counts as hung.
+const TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn within<T>(future: impl Future<Output = T>) -> T {
+    tokio::time::timeout(TIMEOUT, future)
+        .await
+        .expect("timed out")
+}
+
+/// A relay serving in the background until dropped.
+struct TestRelay {
+    relay: Arc<Relay>,
+    _stop: oneshot::Sender<()>,
+}
+
+impl TestRelay {
+    fn start(config: RelayConfig) -> Self {
+        let relay = Arc::new(Relay::bind(&Identity::generate().unwrap(), config).unwrap());
+        let (stop, stopped) = oneshot::channel();
+        let serving = relay.clone();
+        tokio::spawn(async move {
+            serving
+                .serve(async {
+                    let _ = stopped.await;
+                })
+                .await;
+        });
+        Self { relay, _stop: stop }
+    }
+
+    fn identity(&self) -> RelayIdentity {
+        let addr = self.relay.local_addr().unwrap();
+        RelayIdentity {
+            key: self.relay.key(),
+            host: RelayHost::Ip(addr.ip()),
+            port: addr.port(),
+        }
+    }
+}
+
+fn start_node(identity: Identity) -> Node {
+    let config = NodeConfig::default();
+    let endpoint_config = EndpointConfig {
+        max_open_requests: config.session.upload.max_open_requests,
+        ..EndpointConfig::localhost()
+    };
+    Node::start(Endpoint::bind(identity, &endpoint_config).unwrap(), config)
+}
+
+/// Gives `node` `relay` as its only relay, and waits until the home relay settles.
+async fn use_relay(node: &Node, relay: &TestRelay) -> RelayStatus {
+    let home = node.endpoint().home_relay();
+    let mut status = home.subscribe();
+    node.endpoint().set_relays(RelayChoice {
+        known: vec![relay.identity()],
+        from_trackers: false,
+    });
+    let settled = status.wait_for(|status| {
+        matches!(
+            status,
+            RelayStatus::Registered { .. } | RelayStatus::Unavailable { .. }
+        )
+    });
+    within(settled).await.unwrap().clone()
+}
+
+/// A bundle of two files, one larger than a maximal Request.
+fn sample_bundle(dir: &Path) -> Arc<Manifest> {
+    let files = [
+        ("small.txt", b"through the relay\n".to_vec()),
+        (
+            "big.bin",
+            (0..CHUNK_SIZE * 80 + 77).map(|i| i as u8).collect(),
+        ),
+    ];
+    let entries = files
+        .iter()
+        .map(|(path, data)| {
+            fs::write(dir.join(path), data).unwrap();
+            let info = FileInfo {
+                size: data.len() as u64,
+                root: tree::root(data),
+                executable: false,
+                modified: 1_700_000_000_000,
+            };
+            Entry::file(*path, info)
+        })
+        .collect();
+    Arc::new(Manifest::new("bundle", "", 0, "test", entries).unwrap())
+}
+
+async fn share(node: &Node, dir: &Path) -> BundleHandle {
+    let manifest = sample_bundle(dir);
+    let storage = Storage::open_shared(dir, manifest, StorageConfig::default())
+        .await
+        .unwrap();
+    node.share(storage).await.unwrap()
+}
+
+/// Downloads from `seeder` and checks the files arrived intact.
+async fn download(node: &Node, seeder: &BundleHandle, source: &Path, record: PeerRecord) {
+    let out = tempfile::tempdir().unwrap();
+    let handle = node
+        .download(
+            seeder.bundle_id(),
+            Destination::Dir(out.path().into()),
+            vec![record],
+        )
+        .await
+        .unwrap();
+    let mut status = handle.status.clone();
+    within(status.wait_for(|status| status.complete))
+        .await
+        .unwrap();
+    handle.shutdown();
+    let summary = within(handle.finished()).await.unwrap();
+    assert!(summary.complete);
+    for name in ["small.txt", "big.bin"] {
+        let want = fs::read(source.join(name)).unwrap();
+        assert!(fs::read(out.path().join(name)).unwrap() == want, "{name}");
+    }
+}
+
+/// The paths of the connections opened so far, from the events that announced them.
+fn paths(events: &mut broadcast::Receiver<Event>) -> HashSet<PathKind> {
+    let mut paths = HashSet::new();
+    while let Ok(event) = events.try_recv() {
+        if let EventKind::Connected { path, .. } = event.kind {
+            paths.insert(path);
+        }
+    }
+    paths
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_bundle_transfers_through_the_seeders_relay() {
+    let relay = TestRelay::start(RelayConfig::localhost());
+    // The seeder advertises no direct address: the relay is the only way in.
+    let seeder = start_node(Identity::generate().unwrap());
+    let RelayStatus::Registered {
+        relay: home,
+        relay_address,
+        observed_address,
+    } = use_relay(&seeder, &relay).await
+    else {
+        panic!("the seeder did not register");
+    };
+    assert_eq!(home, relay.identity());
+    assert_eq!(seeder.endpoint().relay_address(), Some(relay_address));
+    assert_eq!(
+        observed_address,
+        Address::from(seeder.endpoint().local_addrs()[0])
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let shared = share(&seeder, dir.path()).await;
+    let mut seeder_events = shared.events.resubscribe();
+    let downloader = start_node(Identity::generate().unwrap());
+    let record = PeerRecord {
+        peer_id: seeder.endpoint().peer_id(),
+        addresses: Vec::new(),
+        relay: Some(relay_address),
+    };
+    download(&downloader, &shared, dir.path(), record).await;
+
+    // The seeder accepted the connection on a virtual address through its relay.
+    assert_eq!(
+        paths(&mut seeder_events),
+        HashSet::from([PathKind::Relayed])
+    );
+    downloader.shutdown().await;
+    seeder.shutdown().await;
+    assert_eq!(seeder.endpoint().home_relay().status(), RelayStatus::Off);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_downloader_marks_its_connection_relayed() {
+    let relay = TestRelay::start(RelayConfig::localhost());
+    let seeder = start_node(Identity::generate().unwrap());
+    let relay_address = use_relay(&seeder, &relay).await.relay_address().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let shared = share(&seeder, dir.path()).await;
+
+    let downloader = start_node(Identity::generate().unwrap());
+    let out = tempfile::tempdir().unwrap();
+    let record = PeerRecord {
+        peer_id: seeder.endpoint().peer_id(),
+        addresses: Vec::new(),
+        relay: Some(relay_address),
+    };
+    let mut handle = downloader
+        .download(
+            shared.bundle_id(),
+            Destination::Dir(out.path().into()),
+            vec![record],
+        )
+        .await
+        .unwrap();
+    let mut status = handle.status.clone();
+    within(status.wait_for(|status| status.relayed == 1 && status.connections == 1))
+        .await
+        .unwrap();
+    within(status.wait_for(|status| status.complete))
+        .await
+        .unwrap();
+    assert_eq!(
+        paths(&mut handle.events),
+        HashSet::from([PathKind::Relayed])
+    );
+    downloader.shutdown().await;
+    seeder.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refusal_is_reported_and_the_node_works_without_a_relay() {
+    let others = HashSet::from([PeerId::new([7; 32])]);
+    let relay = TestRelay::start(RelayConfig {
+        allowlist: Some(others),
+        ..RelayConfig::localhost()
+    });
+    let seeder = start_node(Identity::generate().unwrap());
+    let RelayStatus::Unavailable { failures } = use_relay(&seeder, &relay).await else {
+        panic!("the relay did not refuse");
+    };
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].relay, relay.identity());
+    assert!(matches!(
+        failures[0].error,
+        RelayError::Rejected {
+            reason: RelayRejectReason::NotAllowed,
+            ..
+        }
+    ));
+    assert_eq!(seeder.endpoint().relay_address(), None);
+
+    // Direct connections still work.
+    let dir = tempfile::tempdir().unwrap();
+    let shared = share(&seeder, dir.path()).await;
+    let downloader = start_node(Identity::generate().unwrap());
+    let record = PeerRecord {
+        peer_id: seeder.endpoint().peer_id(),
+        addresses: seeder
+            .endpoint()
+            .local_addrs()
+            .into_iter()
+            .map(Address::from)
+            .collect(),
+        relay: None,
+    };
+    download(&downloader, &shared, dir.path(), record).await;
+    downloader.shutdown().await;
+    seeder.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relay_with_the_wrong_key_is_not_used() {
+    let relay = TestRelay::start(RelayConfig::localhost());
+    let node = start_node(Identity::generate().unwrap());
+    let mut status = node.endpoint().home_relay().subscribe();
+    let impostor = RelayIdentity {
+        key: PeerId::new([9; 32]),
+        ..relay.identity()
+    };
+    node.endpoint().set_relays(RelayChoice {
+        known: vec![impostor],
+        from_trackers: false,
+    });
+    let settled = within(status.wait_for(|s| matches!(s, RelayStatus::Unavailable { .. })))
+        .await
+        .unwrap()
+        .clone();
+    let RelayStatus::Unavailable { failures } = settled else {
+        unreachable!()
+    };
+    assert!(
+        matches!(failures[0].error, RelayError::Connect(_)),
+        "{failures:?}"
+    );
+    assert_eq!(relay.relay.registrations(), 0);
+    node.shutdown().await;
+}
+
+/// A tracker on localhost that recommends `relays`. Returns its URL and what stops it.
+async fn start_tracker(relays: Vec<RelayIdentity>) -> (String, oneshot::Sender<()>) {
+    let config = TrackerConfig {
+        interval: Duration::from_secs(1),
+        min_interval: Duration::ZERO,
+        relays,
+        ..TrackerConfig::default()
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = oneshot::channel::<()>();
+    tokio::spawn(Tracker::new(config).unwrap().serve(listener, async {
+        let _ = stopped.await;
+    }));
+    (url, stop)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relay_a_tracker_recommends_becomes_home_and_is_announced() {
+    let relay = TestRelay::start(RelayConfig::localhost());
+    let (tracker, _stop) = start_tracker(vec![relay.identity()]).await;
+    let seeder = start_node(Identity::generate().unwrap());
+    let mut status = seeder.endpoint().home_relay().subscribe();
+    seeder.endpoint().set_relays(RelayChoice {
+        known: Vec::new(),
+        from_trackers: true,
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let shared = share(&seeder, dir.path()).await;
+    let port = seeder.endpoint().local_addrs()[0].port();
+    let config = AnnounceConfig {
+        min_interval: Duration::ZERO,
+        ..AnnounceConfig::new(seeder.endpoint().peer_id(), port)
+    };
+    let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
+    let announcer = Announcer::spawn(client.clone(), tracker.clone(), config, &shared);
+
+    // The first announce brings the recommendation; the home relay registers with it.
+    let registered = within(status.wait_for(|s| matches!(s, RelayStatus::Registered { .. })))
+        .await
+        .unwrap()
+        .clone();
+    let relay_address = registered.relay_address().unwrap();
+
+    // The announcer tells the tracker the new relay address, which other peers then hear.
+    let request = AnnounceRequest {
+        bundle: shared.bundle_id(),
+        peer: PeerId::new([3; 32]),
+        port: 9,
+        addrs: Vec::new(),
+        relay: None,
+        event: AnnounceEvent::Started,
+        complete: false,
+        num_want: 50,
+    };
+    let heard = async {
+        loop {
+            let response = client.announce(&tracker, &request).await.unwrap();
+            assert_eq!(response.relays, [relay.identity()]);
+            let seeder_entry = response
+                .peers
+                .iter()
+                .find(|entry| entry.peer == seeder.endpoint().peer_id());
+            if seeder_entry.is_some_and(|entry| entry.relay == Some(relay_address)) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    within(heard).await;
+    announcer.stop().await;
+    seeder.shutdown().await;
+}

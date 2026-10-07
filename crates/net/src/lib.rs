@@ -5,6 +5,8 @@
 //! - [`tls`]: TLS 1.3 with raw public keys, so the key is the peer's identity (D-020).
 //! - [`endpoint`]: QUIC endpoints with one UDP socket per address family, and authenticated
 //!   connections (D-018).
+//! - [`home`]: registering with a home relay, which lends this peer a relay address.
+//! - [`wrap`]: the layer beneath QUIC that carries packets through the home relay.
 //! - [`stream`]: framed messages on QUIC streams.
 //! - [`storage`]: a bundle's chunks on disk, read and written by a storage task (D-086).
 //! - [`driver`]: a [`Node`] running `tempest-core` sessions over those connections and storage.
@@ -18,6 +20,7 @@
 pub mod addresses;
 pub mod driver;
 pub mod endpoint;
+pub mod home;
 pub mod identity;
 pub mod lan;
 pub mod limit;
@@ -25,6 +28,7 @@ pub mod storage;
 pub mod stream;
 pub mod tls;
 pub mod tracker;
+pub mod wrap;
 
 pub use addresses::direct_addresses;
 pub use driver::{
@@ -33,6 +37,7 @@ pub use driver::{
 pub use endpoint::{
     Connection, DEFAULT_PORT, Endpoint, EndpointConfig, HandshakeError, Incoming, closed_cause,
 };
+pub use home::{HomeRelay, RelayChoice, RelayError, RelayFailure, RelayStatus};
 pub use identity::{Identity, IdentityError};
 pub use lan::{Lan, LanConfig};
 pub use limit::{RateLimit, SpeedLimits};

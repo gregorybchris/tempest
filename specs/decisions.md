@@ -2902,3 +2902,26 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `tempest tracker --run-relay` runs a relay beside the tracker. Given the relay's public IP, the tracker recommends its own relay.
 
 **Rationale:** Depending on `net` keeps one implementation of the handshake rules. Replacing an old registration lets a peer whose network changed get its address back at once instead of waiting for a timeout. Keeping the socket bound makes stable addresses a guarantee rather than a hope that the port stays free.
+
+---
+
+## D-186: Client relay support
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** M6 lets a peer register with a home relay and be reached through it (`protocol/relays.md`). The protocol leaves the client's side open: how relayed packets reach QUIC, how the home relay is picked, where tracker-recommended relays fit, and when the relay address is published.
+
+**Options for the wrapping layer:** a second quinn endpoint for relayed traffic; a custom socket beneath the one endpoint that maps each relayed sender to a made-up local address (chosen), as the implementer note suggests. **For the made-up addresses:** a lookup table only; ranges that never carry real traffic, `240.0.0.0/8` on IPv4 sockets and the discard prefix `100::/64` (RFC 6666) on IPv6 ones (chosen). **For picking the home relay:** ping each relay first; open handshakes with all candidates at once and register with the first to finish (chosen). **For tracker-recommended relays:** ignore them; use them by default, with a setting to turn that off (chosen). **For when to publish the relay address:** at once; after path MTU discovery makes room for a wrapped 1,200-byte packet, or after a few seconds (chosen).
+
+**Decision:**
+
+- The wrapping layer is a quinn socket around each real UDP socket. Forwarded packets enter quinn from a virtual address per relay and sender; quinn's packets to a virtual address leave as Forward datagrams, one per GSO segment. A virtual address is recognized by its range alone, so direct traffic never waits on the layer. The table of virtual addresses is bounded, and the least recently used one is forgotten first.
+- A connection accepted from a virtual address, or dialed to a peer's relay address, is relayed. Status counts relayed connections, and the session's events carry each connection's path.
+- Dialing a peer tries its direct addresses in turn and its relay address alongside, and keeps whichever opens first.
+- The engine config's `relays.known` lists relay identities (empty by default, D-029); `relays.from_trackers` (on by default) adds the relays trackers recommend. The relays apply at once when changed. `share`, `get` and `daemon` take `--relay`.
+- The home relay is the first relay to complete a handshake, which approximates the lowest latency. If it refuses, the next to finish is tried. A lost or failed registration is retried after 2 s, doubling to 5 minutes; a registration that lasted a minute resets the pause.
+- The relay connection uses the peer socket, the relay ALPN, keep-alives every 15 s and a 45 s idle timeout. Peer connections keep alive at least every 60 s, whatever the endpoint's setting.
+- Hello takes the relay address current when a connection opens. Announcers send the current relay address and announce again when it changes, within the minimum interval.
+
+**Rationale:** One endpoint keeps one socket per family, as the protocol requires, and lets duplicate resolution compare relayed and direct connections by path. Racing handshakes measures latency with the connection that will be used anyway. Using recommended relays by default is what makes relays work without configuration, since none ship. Waiting for MTU discovery avoids advertising an address whose first packets would be dropped.
+

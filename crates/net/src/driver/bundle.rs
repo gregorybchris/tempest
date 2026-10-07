@@ -91,6 +91,7 @@ pub(super) struct Outputs {
 /// A connection the session knows about.
 struct Conn {
     connection: Connection,
+    path: PathKind,
     /// Messages for the control stream.
     control: mpsc::Sender<Message>,
 }
@@ -132,7 +133,7 @@ impl BundleTask {
         let local = LocalPeer {
             peer_id: endpoint.peer_id(),
             addresses: config.addresses.clone(),
-            relay: None,
+            relay: endpoint.relay_address(),
         };
         let settings = config.session.clone();
         let (session, storage, destination) = match start {
@@ -248,6 +249,9 @@ impl BundleTask {
             downloaded: session.downloaded(),
             uploaded: session.uploaded(),
             connections: session.connection_count(),
+            relayed: (self.conns.values())
+                .filter(|conn| conn.path == PathKind::Relayed)
+                .count(),
             known_peers: session.known_peer_count(),
             complete: session.is_complete(),
         };
@@ -345,6 +349,7 @@ impl BundleTask {
             conn,
             Conn {
                 connection: connection.clone(),
+                path: connection.path(),
                 control,
             },
         );
@@ -353,8 +358,10 @@ impl BundleTask {
         let info = ConnInfo {
             peer: connection.peer(),
             direction: connection.direction(),
-            path: PathKind::Direct,
+            path: connection.path(),
         };
+        // Hello carries the relay address the home relay lends now.
+        self.session.set_relay(self.endpoint.relay_address());
         self.session.handle_connected(now, conn, info);
         if let Some(hello) = hello {
             debug_assert_eq!(info.direction, Direction::Accepted);

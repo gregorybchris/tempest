@@ -21,6 +21,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tempest_net::RelayStatus;
 use tempest_protocol::{Address, BundleId};
 
 pub use self::access::Access;
@@ -38,8 +39,14 @@ pub struct EngineInfo {
     pub version: String,
     /// This peer's ID.
     pub peer_id: String,
-    /// The addresses this peer advertises.
+    /// The direct addresses this peer advertises.
     pub addresses: Vec<String>,
+    /// The home relay: `off`, `connecting`, `registered` or `unavailable`.
+    pub relay: String,
+    /// The relay address this peer advertises, while registered with a home relay.
+    pub relay_address: Option<String>,
+    /// Why no relay would register this peer, while unavailable.
+    pub relay_errors: Vec<String>,
 }
 
 /// `POST /v1/transfers`: a download from a link, or a share of a local file or folder.
@@ -217,10 +224,23 @@ fn bundle_id(id: &str) -> Result<BundleId> {
 
 async fn engine_info(State(engine): State<Engine>) -> Result {
     let display = |address: &Address| address.to_string();
+    let relay = engine.relay();
+    let (state, relay_errors) = match &relay {
+        RelayStatus::Off => ("off", Vec::new()),
+        RelayStatus::Connecting => ("connecting", Vec::new()),
+        RelayStatus::Registered { .. } => ("registered", Vec::new()),
+        RelayStatus::Unavailable { failures } => (
+            "unavailable",
+            failures.iter().map(ToString::to_string).collect(),
+        ),
+    };
     ok(&EngineInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         peer_id: engine.peer_id().to_string(),
         addresses: engine.addresses().iter().map(display).collect(),
+        relay: state.to_owned(),
+        relay_address: relay.relay_address().as_ref().map(display),
+        relay_errors,
     })
 }
 

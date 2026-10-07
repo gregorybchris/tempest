@@ -7,13 +7,16 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, Identity, Lan, LanConfig,
-    Node, NodeConfig, TrackerClient,
+    Node, NodeConfig, RelayChoice, RelayStatus, TrackerClient,
 };
-use tempest_protocol::Address;
 use tempest_protocol::lan::LAN_PORT;
+use tempest_protocol::{Address, RelayIdentity};
 
 /// How long a tracker request may take.
 const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long to wait for the home relay before going on without it.
+const RELAY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The environment variable that overrides where the identity is stored.
 pub const IDENTITY_ENV: &str = "TEMPEST_IDENTITY";
@@ -29,6 +32,11 @@ pub struct PeerArgs {
     /// both families.
     #[arg(long, value_name = "IP")]
     pub bind: Vec<IpAddr>,
+    /// A relay to pick a home relay from, as `<key>@host[:port]`, so peers that can't reach
+    /// this one directly can reach it through the relay. Repeat for more; the one that answers
+    /// fastest is used. Trackers may recommend more.
+    #[arg(long, value_name = "RELAY")]
+    pub relay: Vec<RelayIdentity>,
     /// Neither look for peers on the local network nor announce this one there.
     #[arg(long)]
     pub no_lan: bool,
@@ -45,6 +53,8 @@ pub struct Peer {
     pub addresses: Vec<Address>,
     /// LAN discovery, unless it is off or could not start.
     pub lan: Option<Lan>,
+    /// Whether relays were given to pick a home relay from.
+    relays_given: bool,
 }
 
 impl Peer {
@@ -73,6 +83,28 @@ impl Peer {
         Ok(announcers)
     }
 
+    /// Waits for the home relay to register, if relays were given, and returns the relay
+    /// address. Warns if no relay would register this peer.
+    pub async fn home_relay(&self) -> Option<Address> {
+        if !self.relays_given {
+            return None;
+        }
+        let mut status = self.node.endpoint().home_relay().subscribe();
+        let settled =
+            status.wait_for(|status| !matches!(status, RelayStatus::Off | RelayStatus::Connecting));
+        let status = match tokio::time::timeout(RELAY_TIMEOUT, settled).await {
+            Ok(Ok(status)) => status.clone(),
+            // Still connecting: the link goes out without it.
+            _ => return None,
+        };
+        if let RelayStatus::Unavailable { failures } = &status {
+            for failure in failures {
+                eprintln!("warning: relay {failure}");
+            }
+        }
+        status.relay_address()
+    }
+
     /// Shuts the node down, waiting a moment for its Goodbyes to arrive. Connections that never
     /// finished their handshake, such as dials to an unreachable address, take seconds to
     /// drain, and nobody is waiting for their Goodbye.
@@ -92,7 +124,11 @@ impl PeerArgs {
     /// Whether any option is given, each of which asks to run standalone rather than through
     /// the daemon.
     pub fn any_given(&self) -> bool {
-        self.identity.is_some() || !self.bind.is_empty() || self.no_lan || self.lan_port.is_some()
+        self.identity.is_some()
+            || !self.bind.is_empty()
+            || !self.relay.is_empty()
+            || self.no_lan
+            || self.lan_port.is_some()
     }
 
     /// Loads the identity and starts a node on `port` (0 for any), advertising its direct
@@ -119,6 +155,10 @@ impl PeerArgs {
             Vec::new()
         };
         config.addresses = addresses.clone();
+        endpoint.set_relays(RelayChoice {
+            known: self.relay.clone(),
+            from_trackers: true,
+        });
         let lan = if self.no_lan {
             None
         } else {
@@ -134,6 +174,7 @@ impl PeerArgs {
             node: Node::start(endpoint, config),
             addresses,
             lan,
+            relays_given: !self.relay.is_empty(),
         })
     }
 

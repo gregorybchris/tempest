@@ -18,6 +18,9 @@ tokio.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+tempest-core.workspace = true
+tempest-tracker.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]

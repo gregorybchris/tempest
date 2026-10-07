@@ -21,7 +21,7 @@ The settings are under `api` in the config file.
 
 | Method and path | Body | Answer |
 | --- | --- | --- |
-| `GET /v1/engine` | | The engine's version, peer ID and advertised addresses |
+| `GET /v1/engine` | | The engine's version, peer ID, advertised addresses and home relay |
 | `GET /v1/transfers` | | Every transfer, in queue order |
 | `POST /v1/transfers` | `link`, or an absolute `path` to share; optionally `category`, `tags`; for a link `save_folder`, `stopped`; for a path `name`, `comment` | 201 and the transfer |
 | `GET /v1/transfers/{id}` | | The transfer |
@@ -46,7 +46,7 @@ The settings are under `api` in the config file.
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link and dates.
 
-Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications and trackers apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
+Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers and relays apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
 
 ## Events
 

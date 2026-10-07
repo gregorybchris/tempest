@@ -28,8 +28,9 @@ use std::time::{Duration, SystemTime};
 
 use tempest_core::Event;
 use tempest_net::{
-    AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, Identity, IdentityError,
-    Lan, LanConfig, Node, NodeConfig, Storage, StorageError, Summary, TrackerClient,
+    AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, HomeRelay, Identity,
+    IdentityError, Lan, LanConfig, Node, NodeConfig, RelayStatus, Storage, StorageError, Summary,
+    TrackerClient,
 };
 use tempest_protocol::link::ParseLinkError;
 use tempest_protocol::{Address, BundleId, Link, Manifest, PeerId};
@@ -177,6 +178,7 @@ pub struct Engine {
     commands: mpsc::Sender<Command>,
     peer_id: PeerId,
     addresses: Vec<Address>,
+    home_relay: HomeRelay,
 }
 
 type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
@@ -268,6 +270,10 @@ impl Engine {
                     source,
                 }
             })?;
+        let home_relay = endpoint.home_relay().clone();
+        if !hold {
+            endpoint.set_relays(config.relays.choice());
+        }
         let lan = match config.lan.enabled && !hold {
             true => {
                 let lan_config = LanConfig {
@@ -325,6 +331,7 @@ impl Engine {
             commands,
             peer_id,
             addresses,
+            home_relay,
         })
     }
 
@@ -333,9 +340,14 @@ impl Engine {
         self.peer_id
     }
 
-    /// The addresses this peer advertises.
+    /// The direct addresses this peer advertises.
     pub fn addresses(&self) -> &[Address] {
         &self.addresses
+    }
+
+    /// What the home relay is doing, and the relay address it lends while registered.
+    pub fn relay(&self) -> RelayStatus {
+        self.home_relay.status()
     }
 
     async fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> Option<T> {

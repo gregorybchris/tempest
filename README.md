@@ -28,9 +28,12 @@ tempest get '<link>'     # downloads the bundle into ./<its name>
 
 tempest tracker                                   # runs a tracker
 tempest share --tracker http://host:4777 ./photos # announces the bundle to it
+
+tempest daemon           # runs the engine, which keeps transfers going and serves its API
+tempest list             # shows its transfers; start, stop and remove control them
 ```
 
-Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. `tempest <command> --help` lists each command's options.
+While a daemon runs, `share` and `get` hand their transfers to it. Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. `tempest <command> --help` lists each command's options. The engine's API is described in [`specs/api.md`](specs/api.md).
 
 ## Repository
 

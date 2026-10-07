@@ -60,6 +60,13 @@ tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 hex = "0.4"
 proptest = "1"
 tempfile = "3"
+# HTTPS for the engine API's remote access (D-125): a self-signed certificate when none is
+# configured, and TLS over tokio, both on ring.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# Streams for the engine API's server-sent events.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
 # Calls an axum router directly in tests, without a socket.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 

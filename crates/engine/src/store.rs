@@ -418,18 +418,19 @@ impl Store {
         Ok(())
     }
 
-    /// A setting changed at run time, by key.
-    pub fn setting(&self, key: &str) -> Result<Option<Value>, StoreError> {
-        let text: Option<String> = self
-            .conn
-            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        text.map(|text| {
-            serde_json::from_str(&text).map_err(|e| StoreError::Corrupt(format!("{key}: {e}")))
+    /// The settings changed at run time, by dotted key.
+    pub fn settings(&self) -> Result<BTreeMap<String, Value>, StoreError> {
+        let mut statement = self.conn.prepare("SELECT key, value FROM settings")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.map(|row| {
+            let (key, text) = row?;
+            let value = serde_json::from_str(&text)
+                .map_err(|e| StoreError::Corrupt(format!("setting {key}: {e}")))?;
+            Ok((key, value))
         })
-        .transpose()
+        .collect()
     }
 
     /// Saves a setting changed at run time.
@@ -439,6 +440,13 @@ impl Store {
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             params![key, value.to_string()],
         )?;
+        Ok(())
+    }
+
+    /// Forgets a setting changed at run time.
+    pub fn remove_setting(&mut self, key: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
         Ok(())
     }
 }
@@ -595,9 +603,19 @@ mod tests {
         assert_eq!(store.categories().unwrap().len(), 1);
         assert_eq!(store.transfers().unwrap()[0].category, None);
 
-        assert_eq!(store.setting("alt_limits").unwrap(), None);
-        store.set_setting("alt_limits", &json!(true)).unwrap();
-        assert_eq!(store.setting("alt_limits").unwrap(), Some(json!(true)));
+        assert!(store.settings().unwrap().is_empty());
+        store
+            .set_setting("queue.max_active_uploads", &json!(2))
+            .unwrap();
+        store.set_setting("lan.enabled", &json!(false)).unwrap();
+        store
+            .set_setting("queue.max_active_uploads", &json!(3))
+            .unwrap();
+        store.remove_setting("lan.enabled").unwrap();
+        assert_eq!(
+            store.settings().unwrap(),
+            BTreeMap::from([("queue.max_active_uploads".to_owned(), json!(3))])
+        );
 
         let peer = |seed: u8, port: u16| PeerRecord {
             peer_id: Hash::new([seed; 32]),

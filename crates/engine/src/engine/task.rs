@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use serde_json::Value;
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Lan, Node,
     Storage, StorageConfig, Summary, TrackerClient,
@@ -18,7 +19,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use super::supervisor::Supervisor;
 use super::{
     AddOptions, CHECKPOINT_INTERVAL, Command, EVENT_BUFFER, EngineError, GOODBYE_TIMEOUT, Internal,
-    NewShare, Reply, TICK,
+    NewShare, Reply, SettingsView, TICK,
 };
 use crate::TransferInfo;
 use crate::config::EngineConfig;
@@ -30,7 +31,18 @@ use crate::store::{Kind, Store, TransferRow};
 
 /// What the engine task starts with.
 pub(super) struct Parts {
+    /// The config file's settings.
+    pub base: EngineConfig,
+    /// The settings changed through the engine, by dotted key.
+    pub changes: BTreeMap<String, Value>,
+    /// The settings in effect: the file's with the changes.
     pub config: EngineConfig,
+    /// The settings the engine started with.
+    pub running: EngineConfig,
+    /// Run no transfers.
+    pub hold: bool,
+    /// The data directory's lock.
+    pub lock: std::fs::File,
     pub save_folder: PathBuf,
     pub store: Store,
     pub node: Node,
@@ -97,7 +109,12 @@ struct Files {
 
 /// The engine task's state.
 pub(super) struct EngineTask {
+    base: EngineConfig,
+    changes: BTreeMap<String, Value>,
     config: EngineConfig,
+    running: EngineConfig,
+    hold: bool,
+    _lock: std::fs::File,
     save_folder: PathBuf,
     store: Store,
     node: Node,
@@ -142,7 +159,12 @@ fn checked_tags(tags: BTreeSet<String>) -> Result<BTreeSet<String>, EngineError>
 impl EngineTask {
     pub fn new(parts: Parts) -> Self {
         let Parts {
+            base,
+            changes,
             config,
+            running,
+            hold,
+            lock,
             save_folder,
             store,
             node,
@@ -154,7 +176,12 @@ impl EngineTask {
             internal,
         } = parts;
         Self {
+            base,
+            changes,
             config,
+            running,
+            hold,
+            _lock: lock,
             save_folder,
             store,
             node,
@@ -222,7 +249,10 @@ impl EngineTask {
             }
         }
         let _ = tokio::time::timeout(GOODBYE_TIMEOUT, self.node.shutdown()).await;
-        for done in self.shutting_down.take().into_iter().flatten() {
+        let waiting = self.shutting_down.take();
+        // Closes the database and releases the data directory before anyone hears it's done.
+        drop(self);
+        for done in waiting.into_iter().flatten() {
             let _ = done.send(());
         }
     }
@@ -367,11 +397,73 @@ impl EngineTask {
                 self.emit_changes();
                 let _ = reply.send(result);
             }
+            Command::Settings(reply) => {
+                let _ = reply.send(self.settings_view());
+            }
+            Command::ChangeSettings(changes, reply) => {
+                let result = self.change_settings(changes).await;
+                let _ = reply.send(result);
+            }
+            Command::ResetSetting(key, reply) => {
+                let result = self.reset_setting(key).await;
+                let _ = reply.send(result);
+            }
             Command::Subscribe(after, reply) => {
                 let _ = reply.send(self.events.subscribe(after));
             }
             Command::Shutdown(done) => self.begin_shutdown(Some(done)),
         }
+    }
+
+    fn settings_view(&self) -> SettingsView {
+        SettingsView {
+            settings: self.config.clone(),
+            changed: self.changes.clone(),
+            restart_required: (self.config.restart_required(&self.running).iter())
+                .map(|group| (*group).to_owned())
+                .collect(),
+        }
+    }
+
+    async fn change_settings(
+        &mut self,
+        changes: BTreeMap<String, Value>,
+    ) -> Result<SettingsView, EngineError> {
+        if let Some(key) = changes.keys().find(|key| key.as_str() == "data_dir") {
+            return Err(EngineError::Fixed(key.clone()));
+        }
+        let mut all = self.changes.clone();
+        all.extend(changes.clone());
+        self.apply_settings(all).await?;
+        for (key, value) in &changes {
+            self.store.set_setting(key, value)?;
+        }
+        Ok(self.settings_view())
+    }
+
+    async fn reset_setting(&mut self, key: String) -> Result<SettingsView, EngineError> {
+        let mut all = self.changes.clone();
+        if all.remove(&key).is_some() {
+            self.apply_settings(all).await?;
+            self.store.remove_setting(&key)?;
+        }
+        Ok(self.settings_view())
+    }
+
+    /// Makes `changes` over the config file the settings in effect, if they are valid.
+    async fn apply_settings(
+        &mut self,
+        changes: BTreeMap<String, Value>,
+    ) -> Result<(), EngineError> {
+        let config = self.base.with_changes(&changes)?;
+        config.validate()?;
+        self.save_folder = config.save_folder()?;
+        self.config = config;
+        self.changes = changes;
+        // New queue limits apply now, new trackers to shares' links.
+        self.reschedule().await;
+        self.emit_changes();
+        Ok(())
     }
 
     /// Changes a transfer's record with `edit`, saves it, emits its new state, and lets the
@@ -634,34 +726,41 @@ impl EngineTask {
             .or_else(|| t.manifest.as_ref().map(|m| m.name().to_owned()))
             .or_else(|| t.link.name.clone())
             .unwrap_or_else(|| id.to_string());
+        // A held engine's addresses are nobody's to dial.
         let link = match row.kind {
-            Kind::Share => self.share_link(&t.link).to_string(),
-            Kind::Download => row.link.clone(),
+            Kind::Share if !self.hold => self.share_link(&t.link).to_string(),
+            Kind::Share | Kind::Download => row.link.clone(),
         };
-        Some(TransferInfo {
-            id: *id,
-            name,
-            kind: row.kind,
-            status,
-            size: t.manifest.as_ref().map(|m| m.total_size()),
-            have: row.have,
-            chunks: row.chunks,
-            downloaded: row.downloaded,
-            uploaded: row.uploaded,
-            download_rate: run.map_or(0, |run| run.download_rate),
-            upload_rate: run.map_or(0, |run| run.upload_rate),
-            connections: net.as_ref().map_or(0, |s| s.connections),
-            peers: net.as_ref().map_or(0, |s| s.known_peers),
-            added: row.added,
-            completed: row.completed,
-            queue_position: row.queue_position,
-            forced: row.forced,
-            tags: row.tags.clone(),
-            category: row.category.clone(),
-            save_folder: row.save_folder.clone(),
-            content_dir: row.content_dir.clone(),
-            link,
-        })
+        Some(
+            TransferInfo {
+                id: *id,
+                name,
+                kind: row.kind,
+                status,
+                size: t.manifest.as_ref().map(|m| m.total_size()),
+                have: row.have,
+                chunks: row.chunks,
+                progress: 0.0,
+                eta: None,
+                ratio: None,
+                downloaded: row.downloaded,
+                uploaded: row.uploaded,
+                download_rate: run.map_or(0, |run| run.download_rate),
+                upload_rate: run.map_or(0, |run| run.upload_rate),
+                connections: net.as_ref().map_or(0, |s| s.connections),
+                peers: net.as_ref().map_or(0, |s| s.known_peers),
+                added: row.added,
+                completed: row.completed,
+                queue_position: row.queue_position,
+                forced: row.forced,
+                tags: row.tags.clone(),
+                category: row.category.clone(),
+                save_folder: row.save_folder.clone(),
+                content_dir: row.content_dir.clone(),
+                link,
+            }
+            .with_derived(),
+        )
     }
 
     /// Emits a snapshot of every transfer that changed since its last one.
@@ -672,14 +771,14 @@ impl EngineTask {
             let t = self.transfers.get_mut(&id).expect("listed above");
             if t.shown.as_ref() != Some(&info) {
                 t.shown = Some(info.clone());
-                self.events.push(EngineEvent::Transfer(info));
+                self.events.push(EngineEvent::Transfer(Box::new(info)));
             }
         }
     }
 
     /// Starts the transfers the queue says should run, and stops those it says shouldn't.
     async fn reschedule(&mut self) {
-        if self.shutting_down.is_some() {
+        if self.shutting_down.is_some() || self.hold {
             return;
         }
         let candidates: Vec<_> = self

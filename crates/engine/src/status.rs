@@ -3,10 +3,10 @@
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// What a transfer is doing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Status {
     /// Running and receiving data, or about to.
@@ -74,6 +74,21 @@ pub(crate) struct StatusInput<'a> {
 }
 
 impl Status {
+    /// The status's name, as the API's `state` field gives it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Downloading => "downloading",
+            Self::Sharing => "sharing",
+            Self::Stalled { .. } => "stalled",
+            Self::Queued => "queued",
+            Self::Stopped => "stopped",
+            Self::Completed => "completed",
+            Self::Errored { .. } => "errored",
+            Self::Checking => "checking",
+            Self::Moving => "moving",
+        }
+    }
+
     /// The status of a transfer in the state `input` describes.
     pub(crate) fn of(input: StatusInput<'_>) -> Self {
         if let Some(reason) = input.error {
@@ -194,6 +209,25 @@ mod tests {
             ..running()
         };
         assert_eq!(Status::of(stopping), Status::Stopped);
+    }
+
+    #[test]
+    fn names_match_the_serialized_state() {
+        let reason = || "why".to_owned();
+        for status in [
+            Status::Downloading,
+            Status::Sharing,
+            Status::Stalled { reason: reason() },
+            Status::Queued,
+            Status::Stopped,
+            Status::Completed,
+            Status::Errored { reason: reason() },
+            Status::Checking,
+            Status::Moving,
+        ] {
+            let json = serde_json::to_value(&status).unwrap();
+            assert_eq!(json["state"], status.name());
+        }
     }
 
     #[test]

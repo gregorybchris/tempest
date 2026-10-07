@@ -78,14 +78,23 @@ impl Default for LanSettings {
     }
 }
 
-/// Where the API listens.
+/// Where the API listens, and who may use it (D-125).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ApiSettings {
-    /// The address to bind: loopback, since remote access is opt-in (D-125).
+    /// The address to bind. Only loopback unless remote access is on.
     pub bind: IpAddr,
     /// The TCP port (D-126), 0 for any.
     pub port: u16,
+    /// Remote access: serve HTTPS and require the access token on every request.
+    pub remote: bool,
+    /// The HTTPS certificate chain, as PEM, for remote access. Without it the engine makes a
+    /// self-signed certificate in the data directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_cert: Option<PathBuf>,
+    /// The certificate's private key, as PEM.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_key: Option<PathBuf>,
 }
 
 /// The engine API's default TCP port (D-126).
@@ -96,6 +105,9 @@ impl Default for ApiSettings {
         Self {
             bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port: DEFAULT_API_PORT,
+            remote: false,
+            tls_cert: None,
+            tls_key: None,
         }
     }
 }
@@ -206,20 +218,52 @@ impl EngineConfig {
             }
             _ => {
                 let mut tree = serde_json::to_value(&changed).expect("every config serializes");
-                let mut slot = &mut tree;
-                for part in key.split('.') {
-                    slot = slot
-                        .as_object_mut()
-                        .and_then(|object| object.get_mut(part))
-                        .ok_or_else(|| invalid(key, "there is no such setting"))?;
+                let no_such = || invalid(key, "there is no such setting");
+                let (parents, last) = match key.rsplit_once('.') {
+                    Some((parents, last)) => (Some(parents), last),
+                    None => (None, key),
+                };
+                let mut object = tree.as_object_mut().expect("a config is an object");
+                for part in parents.into_iter().flat_map(|p| p.split('.')) {
+                    object = object
+                        .get_mut(part)
+                        .and_then(Value::as_object_mut)
+                        .ok_or_else(no_such)?;
                 }
-                *slot = value;
+                // Unset optional settings are left out of the tree; unknown ones fail to parse.
+                object.insert(last.to_owned(), value);
                 changed = serde_json::from_value(tree).map_err(|e| invalid(key, e.to_string()))?;
             }
         }
         changed.validate()?;
         *self = changed;
         Ok(())
+    }
+
+    /// The config with `changes`, by dotted key, applied in key order, as [`set`](Self::set)
+    /// would.
+    pub fn with_changes(&self, changes: &BTreeMap<String, Value>) -> Result<Self, ConfigError> {
+        let mut config = self.clone();
+        for (key, value) in changes {
+            config.set(key, value.clone())?;
+        }
+        Ok(config)
+    }
+
+    /// The groups of settings that differ from `running`'s and take effect only when the
+    /// engine restarts: `peers`, `lan` and `api`.
+    pub fn restart_required(&self, running: &Self) -> Vec<&'static str> {
+        let mut groups = Vec::new();
+        if self.peers != running.peers {
+            groups.push("peers");
+        }
+        if self.lan != running.lan {
+            groups.push("lan");
+        }
+        if self.api != running.api {
+            groups.push("api");
+        }
+        groups
     }
 
     /// Checks every setting.
@@ -235,15 +279,23 @@ impl EngineConfig {
                 ));
             }
         }
-        if !self.api.bind.is_loopback() {
+        if !self.api.bind.is_loopback() && !self.api.remote {
             return Err(invalid(
                 "api.bind",
-                "must be a loopback address; remote access is not available yet",
+                "must be a loopback address unless api.remote is on",
+            ));
+        }
+        if self.api.tls_cert.is_some() != self.api.tls_key.is_some() {
+            return Err(invalid(
+                "api.tls_cert",
+                "api.tls_cert and api.tls_key go together",
             ));
         }
         for (key, path) in [
             ("data_dir", &self.data_dir),
             ("save_folder", &self.save_folder),
+            ("api.tls_cert", &self.api.tls_cert),
+            ("api.tls_key", &self.api.tls_key),
         ] {
             if path.as_ref().is_some_and(|path| !path.is_absolute()) {
                 return Err(invalid(key, "must be an absolute path"));
@@ -417,6 +469,18 @@ trackers: [https://tracker.example.org]
         assert_eq!(config.session().unwrap().upload.reciprocal_slots, 3);
         assert_eq!(config.settings.profile, Profile::Classic);
         assert_eq!(config.queue.max_active_uploads, Some(1));
+
+        // Unset optional settings can be set too.
+        config.set("save_folder", json!("/srv/downloads")).unwrap();
+        assert_eq!(config.save_folder, Some(PathBuf::from("/srv/downloads")));
+
+        let changes = BTreeMap::from([
+            ("api.port".to_owned(), json!(5000)),
+            ("queue.max_active_downloads".to_owned(), json!(null)),
+        ]);
+        let changed = config.with_changes(&changes).unwrap();
+        assert_eq!(changed.queue.max_active_downloads, None);
+        assert_eq!(changed.restart_required(&config), ["api"]);
     }
 
     #[test]
@@ -429,6 +493,8 @@ trackers: [https://tracker.example.org]
         assert!(error("peers: { prt: 1 }").contains("prt"));
         assert!(error("peers: { bind: [127.0.0.1, 10.0.0.1] }").contains("peers.bind"));
         assert!(error("api: { bind: 0.0.0.0 }").contains("api.bind"));
+        assert!(EngineConfig::from_yaml("api: { bind: 0.0.0.0, remote: true }").is_ok());
+        assert!(error("api: { tls_cert: /etc/cert.pem }").contains("api.tls_key"));
         assert!(error("data_dir: relative/path").contains("data_dir"));
         assert!(error("queue: { max_active_downloads: 0 }").contains("max_active_downloads"));
         assert!(error("trackers: [ftp://example.org]").contains("trackers"));

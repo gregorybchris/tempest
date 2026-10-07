@@ -32,9 +32,10 @@ pub struct PeerArgs {
     /// Neither look for peers on the local network nor announce this one there.
     #[arg(long)]
     pub no_lan: bool,
-    /// The UDP port of LAN discovery's multicast groups.
-    #[arg(long, default_value_t = LAN_PORT, value_name = "PORT")]
-    pub lan_port: u16,
+    #[arg(long, value_name = "PORT", help = format!(
+        "The UDP port of LAN discovery's multicast groups [default: {LAN_PORT}]"
+    ))]
+    pub lan_port: Option<u16>,
 }
 
 /// A running node and what it needs to tell others about itself.
@@ -88,6 +89,12 @@ impl Peer {
 }
 
 impl PeerArgs {
+    /// Whether any option is given, each of which asks to run standalone rather than through
+    /// the daemon.
+    pub fn any_given(&self) -> bool {
+        self.identity.is_some() || !self.bind.is_empty() || self.no_lan || self.lan_port.is_some()
+    }
+
     /// Loads the identity and starts a node on `port` (0 for any), advertising its direct
     /// addresses if `advertise` is set. Must be called within a tokio runtime.
     pub fn start(&self, port: u16, advertise: bool) -> Result<Peer> {
@@ -116,7 +123,7 @@ impl PeerArgs {
             None
         } else {
             let config = LanConfig {
-                port: self.lan_port,
+                port: self.lan_port.unwrap_or(LAN_PORT),
                 ..LanConfig::default()
             };
             Lan::start(&endpoint, config)

@@ -15,7 +15,7 @@ use crate::TransferInfo;
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
     /// A transfer was added or changed: its new state.
-    Transfer(TransferInfo),
+    Transfer(Box<TransferInfo>),
     /// A transfer was removed.
     Removed {
         /// The transfer.

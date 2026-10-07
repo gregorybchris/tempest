@@ -106,9 +106,28 @@ pub enum EngineError {
     /// A path must be absolute and valid UTF-8.
     #[error("{} must be an absolute path in UTF-8", .0.display())]
     InvalidPath(PathBuf),
+    /// Another engine is using the data directory.
+    #[error("another Tempest engine is using {}", .0.display())]
+    Busy(PathBuf),
+    /// The setting can't be changed while the engine runs.
+    #[error("{0} can only be set in the config file")]
+    Fixed(String),
     /// The engine has shut down.
     #[error("the engine has shut down")]
     Stopped,
+}
+
+/// The engine's settings: the config file's, with the changes made through the engine applied.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SettingsView {
+    /// Every setting, as in effect.
+    pub settings: EngineConfig,
+    /// The settings changed through the engine rather than the config file, by dotted key.
+    /// They are saved in the state database and apply over the file.
+    pub changed: BTreeMap<String, serde_json::Value>,
+    /// The groups of settings changed since the engine started that apply only once it
+    /// restarts.
+    pub restart_required: Vec<String>,
 }
 
 /// How to add a transfer from a link.
@@ -169,6 +188,9 @@ enum Command {
     Categories(oneshot::Sender<BTreeMap<String, PathBuf>>),
     SetCategoryFolder(String, PathBuf, Reply<()>),
     RemoveCategory(String, Reply<()>),
+    Settings(oneshot::Sender<SettingsView>),
+    ChangeSettings(BTreeMap<String, serde_json::Value>, Reply<SettingsView>),
+    ResetSetting(String, Reply<SettingsView>),
     Subscribe(Option<u64>, oneshot::Sender<Subscription>),
     Shutdown(oneshot::Sender<()>),
 }
@@ -184,21 +206,44 @@ impl Engine {
     /// Starts the engine: opens its state, binds its peer port, and resumes the transfers that
     /// were running. Must be called within a tokio runtime.
     pub async fn open(config: EngineConfig) -> Result<Self, EngineError> {
-        config.validate()?;
-        let data_dir = config.data_dir()?;
+        Self::launch(config, false).await
+    }
+
+    /// Opens the engine's state without running any transfer, to read and change it, as the
+    /// CLI does when no daemon is running. It binds a loopback peer port the system picks, and
+    /// leaves LAN discovery off. Must be called within a tokio runtime.
+    pub async fn open_held(config: EngineConfig) -> Result<Self, EngineError> {
+        Self::launch(config, true).await
+    }
+
+    async fn launch(base: EngineConfig, hold: bool) -> Result<Self, EngineError> {
+        base.validate()?;
+        let data_dir = base.data_dir()?;
         std::fs::create_dir_all(&data_dir).map_err(|source| EngineError::Io {
             path: data_dir.clone(),
             source,
         })?;
-        let store = Store::open(&data_dir.join("state.db"))?;
+        let lock = lock(&data_dir)?;
+        let mut store = Store::open(&data_dir.join("state.db"))?;
+        let (config, changes) = apply_saved_changes(&base, &mut store)?;
         let identity = Identity::load_or_create(&data_dir.join("identity.pem"))?;
         let session = config.session()?;
 
         let endpoint_config = EndpointConfig {
             max_open_requests: session.upload.max_open_requests,
-            ..endpoint_config(&config)
+            ..match hold {
+                false => endpoint_config(&config),
+                true => EndpointConfig {
+                    ipv4: Some(std::net::SocketAddrV4::new(
+                        std::net::Ipv4Addr::LOCALHOST,
+                        0,
+                    )),
+                    ipv6: None,
+                    ..EndpointConfig::default()
+                },
+            }
         };
-        let port = config.peers.port;
+        let port = if hold { 0 } else { config.peers.port };
         let endpoint = Endpoint::bind(identity, &endpoint_config)
             .map_err(|source| EngineError::Bind { port, source })?;
         let addresses =
@@ -208,7 +253,7 @@ impl Engine {
                     source,
                 }
             })?;
-        let lan = match config.lan.enabled {
+        let lan = match config.lan.enabled && !hold {
             true => {
                 let lan_config = LanConfig {
                     port: config.lan.port,
@@ -243,7 +288,12 @@ impl Engine {
         let (internal, internal_receiver) = mpsc::channel(256);
         let mut task = EngineTask::new(task::Parts {
             save_folder: config.save_folder()?,
+            running: config.clone(),
+            base,
+            changes,
             config,
+            hold,
+            lock,
             store,
             node,
             lan,
@@ -429,6 +479,32 @@ impl Engine {
             .await
     }
 
+    /// The settings in effect, and which were changed through the engine.
+    pub async fn settings(&self) -> Result<SettingsView, EngineError> {
+        self.ask(Command::Settings)
+            .await
+            .ok_or(EngineError::Stopped)
+    }
+
+    /// Changes settings by dotted key, as [`EngineConfig::set`] does, all or none. The changes
+    /// are saved in the state database and apply over the config file, now where they can:
+    /// session settings when a transfer next starts, and `peers`, `lan` and `api` when the
+    /// engine restarts. `data_dir` can only be set in the file.
+    pub async fn change_settings(
+        &self,
+        changes: BTreeMap<String, serde_json::Value>,
+    ) -> Result<SettingsView, EngineError> {
+        self.call(|reply| Command::ChangeSettings(changes, reply))
+            .await
+    }
+
+    /// Forgets the change to a setting made through the engine, so the config file's value
+    /// applies again.
+    pub async fn reset_setting(&self, key: &str) -> Result<SettingsView, EngineError> {
+        let key = key.to_owned();
+        self.call(|reply| Command::ResetSetting(key, reply)).await
+    }
+
     /// Subscribes to the engine's events: those after event `after` that are still buffered,
     /// then new ones. With `None`, only new ones.
     pub async fn subscribe(&self, after: Option<u64>) -> Result<Subscription, EngineError> {
@@ -442,6 +518,48 @@ impl Engine {
     pub async fn shutdown(&self) {
         let _ = self.ask(Command::Shutdown).await;
     }
+}
+
+/// Takes the data directory's lock, held while the engine runs, so that only one engine uses
+/// its state.
+fn lock(data_dir: &Path) -> Result<std::fs::File, EngineError> {
+    let path = data_dir.join("engine.lock");
+    let io_error = |source| EngineError::Io {
+        path: path.clone(),
+        source,
+    };
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(io_error)?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(EngineError::Busy(data_dir.to_owned())),
+        Err(std::fs::TryLockError::Error(source)) => Err(io_error(source)),
+    }
+}
+
+/// The config with the changes saved in `store` applied. A saved change that no longer fits
+/// the config file, which may have changed since, is dropped.
+fn apply_saved_changes(
+    base: &EngineConfig,
+    store: &mut Store,
+) -> Result<(EngineConfig, BTreeMap<String, serde_json::Value>), EngineError> {
+    let mut config = base.clone();
+    let mut changes = BTreeMap::new();
+    for (key, value) in store.settings()? {
+        let mut changed = config.clone();
+        match key != "data_dir" && changed.set(&key, value.clone()).is_ok() {
+            true => {
+                config = changed;
+                changes.insert(key, value);
+            }
+            false => store.remove_setting(&key)?,
+        }
+    }
+    Ok((config, changes))
 }
 
 fn endpoint_config(config: &EngineConfig) -> EndpointConfig {

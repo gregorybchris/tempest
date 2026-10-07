@@ -2803,3 +2803,44 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - The config file is YAML with `settings` (a profile and overrides, as in scenarios), `peers`, `lan`, `api`, `data_dir`, `save_folder`, `queue` and `trackers`. A transfer's own overrides apply after the config's. The state database and the identity live in the data directory.
 
 **Rationale:** One owner keeps every change to a transfer in one place, in order, and makes the store's writes simple. Separate limits match how qBittorrent and Transmission users think about slots, since finished transfers cost little. Telling "stopped" from "completed" says whether the user or the swarm rule ended a transfer. Numbering events per run is enough for SSE resume, since a restarted engine's subscribers must refresh their view anyway.
+
+---
+
+## D-181: Engine API details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-080, D-125 and D-126 fix an HTTP + JSON API with resumable server-sent events, on loopback TCP 4776 by default, with remote access behind a token and HTTPS. M5 needs the routes, the error shape, how resuming works, how access is checked, how local clients find the API, and where settings changed through it live.
+
+**Options for routes:** one `PATCH` per transfer for every field; an action or sub-resource per control (chosen), so each request is one engine command that succeeds or fails whole. **For resuming too late:** replay what is left; send an explicit `reset` with every transfer (chosen), also used as the first event of a new stream. **For local access:** no checks; checking `Host` and `Origin` and requiring JSON bodies (chosen). **For remote access:** a separate HTTPS listener beside the loopback one; one listener that switches to HTTPS and a token for every request (chosen). **For the token and certificate:** in the config file; generated into the data directory unless a certificate is configured (chosen). **For finding the API:** the config's address; a file the engine writes in its data directory while serving (chosen). **For settings changed through the API:** rewrite the config file; keep them in the state database over the file (chosen).
+
+**Decision:**
+
+- Routes are under `/v1`, as `specs/api.md` lists. Every error body is `{"error", "message"}` with a stable code. Bodies must be `application/json`.
+- Events are numbered per engine run (D-180). `Last-Event-ID` resumes after an event the engine still keeps; otherwise the stream starts with `reset`, carrying every transfer. A new stream starts with `snapshot`, the same shape. Neither is numbered. A subscriber that lags gets `reset` and carries on.
+- Without remote access, requests must name a loopback host and, if from a browser, come from a page on one.
+- With `api.remote` on, the one listener serves HTTPS (rustls on ring, through tokio-rustls) and every request needs `Authorization: Bearer <token>`. The token is 32 random bytes in hex, made on first use and kept, readable only by its owner, in the data directory. The certificate is `api.tls_cert`/`api.tls_key`, or a self-signed one (rcgen) kept there. The daemon prints its fingerprint. A non-loopback `api.bind` requires remote access.
+- While serving, the engine writes a discovery file in the data directory with the API's URL and certificate. Local clients read it and the token from there, trust exactly that certificate, and treat a URL that doesn't answer as no daemon.
+- `PATCH /v1/settings` applies dotted keys all or none and saves them in the state database, which apply over the config file on every start. A saved change the file no longer allows is dropped. The engine never writes the config file. `data_dir` can't be changed this way. The response says which of `peers`, `lan` and `api` differ from what the engine started with.
+- One engine uses a data directory at a time: it holds a lock file there while it runs.
+- Transfers gain derived fields for UIs: progress, time left while downloading, and ratio (uploaded per byte downloaded, or per byte of the bundle when nothing was downloaded).
+
+**Rationale:** One command per request keeps each answer exact and needs no partial-failure rules. A full snapshot is the simplest correct recovery when events are gone, and a client starting from nothing needs the same thing. Checking `Host` and `Origin` closes the classic attacks on local HTTP services (cross-site requests and DNS rebinding) at no cost to `curl` or local UIs. A token on every request, loopback included, means a reverse proxy or port forward on the same machine can't bypass it. Keeping secrets out of the config file lets the file be shared or committed. A discovery file works with any port, including the ephemeral ones tests use. Never rewriting the config file keeps the user's comments and layout.
+
+---
+
+## D-182: The CLI and the daemon
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-079 says the CLI talks to the engine's API and can start an embedded engine when none is running. D-175 made `share` and `get` standalone processes before the engine existed. A one-shot command can't run transfers for long, and `share` can't bind the peer port the daemon holds.
+
+**Options for commands without a daemon:** fail; run an embedded engine with its transfers until Ctrl-C; open the engine's state without running transfers, make the change, and say so (chosen). **For `share` and `get` with a daemon:** stay standalone; always use the daemon; use it unless an option asks for a process of its own (chosen).
+
+**Decision:**
+
+- `tempest daemon` runs the engine and its API with `--config` and `--data-dir` (or `TEMPEST_CONFIG`, `TEMPEST_DATA_DIR`). The config file defaults to `config.yaml` in the data directory. `--set key=value` overrides a setting for one run. Ctrl-C or SIGTERM stops every transfer (telling peers and trackers) and saves state before the API closes.
+- `tempest list`, `start`, `stop` and `remove` use the daemon's API if it answers. Otherwise they open the engine's state held: no transfer runs, the peer endpoint binds a loopback port the system picks, and LAN discovery is off. They then note that no daemon is running. Transfers are named by bundle ID, a unique prefix of at least four characters, or name.
+- `tempest share` and `tempest get` hand their transfer to a daemon that answers. `share` prints the link and returns; `get` follows the download until it completes, fails or makes no progress for `--timeout`, and Ctrl-C leaves it to the daemon. `--standalone`, or any option only a process of its own can honor (`--port`, `--bind`, `--identity`, `--no-lan`, `--lan-port`, and for `share` `--created` and `--tracker`), runs them standalone as in D-175.
+
+**Rationale:** A held engine makes `start` and `stop` mean the same thing with or without a daemon, and the note keeps anyone from expecting progress that nothing will make. Handing transfers to a running daemon avoids two processes competing for the peer port, while explicit options keep scripts and tests that want a process of their own working unchanged.

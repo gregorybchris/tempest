@@ -352,3 +352,100 @@ async fn removing_with_files_deletes_only_the_bundle() {
     downloader.shutdown().await;
     sharer.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_engine_at_a_time_uses_a_data_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    for second in [
+        Engine::open(config(root.path())).await,
+        Engine::open_held(config(root.path())).await,
+    ] {
+        assert!(matches!(second, Err(EngineError::Busy(_))), "{second:?}");
+    }
+    engine.shutdown().await;
+    // Shutting down releases the directory.
+    Engine::open_held(config(root.path()))
+        .await
+        .unwrap()
+        .shutdown()
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_engine_changes_state_but_runs_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let held = Engine::open_held(config(root.path())).await.unwrap();
+    let added = held
+        .add_link(&nobodys_link(1), AddOptions::default())
+        .await
+        .unwrap();
+    let id = added.id;
+    // It wants to run, but waits for an engine that runs transfers.
+    assert_eq!(added.status, Status::Queued);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(held.get(id).await.unwrap().status, Status::Queued);
+    held.shutdown().await;
+
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    wait_for(&engine, id, "running", |t| {
+        matches!(t.status, Status::Downloading | Status::Stalled { .. })
+    })
+    .await;
+    engine.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_changed_through_the_engine_persist_over_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    for seed in 1..=3 {
+        engine
+            .add_link(&nobodys_link(seed), AddOptions::default())
+            .await
+            .unwrap();
+    }
+    let running =
+        |list: Vec<TransferInfo>| list.iter().filter(|t| t.status != Status::Queued).count();
+    assert_eq!(running(engine.list().await), 3);
+
+    // A new queue limit applies at once.
+    let changes = BTreeMap::from([
+        ("queue.max_active_downloads".to_owned(), json!(1)),
+        ("lan.port".to_owned(), json!(5555)),
+    ]);
+    let view = engine.change_settings(changes).await.unwrap();
+    assert_eq!(view.settings.queue.max_active_downloads, Some(1));
+    assert_eq!(view.restart_required, ["lan"]);
+    assert_eq!(running(engine.list().await), 1);
+
+    // Invalid changes change nothing, and the data directory is the file's alone.
+    for bad in [
+        ("queue.max_active_downloads", json!(0)),
+        ("peers.nope", json!(1)),
+        ("data_dir", json!("/elsewhere")),
+    ] {
+        let changes = BTreeMap::from([(bad.0.to_owned(), bad.1.clone())]);
+        assert!(engine.change_settings(changes).await.is_err(), "{bad:?}");
+    }
+    assert_eq!(engine.settings().await.unwrap(), view);
+    engine.shutdown().await;
+
+    // They outlive a restart, and resetting one brings back the file's value.
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    let view = engine.settings().await.unwrap();
+    assert_eq!(view.settings.lan.port, 5555);
+    assert!(view.restart_required.is_empty());
+    assert_eq!(running(engine.list().await), 1);
+    let view = engine
+        .reset_setting("queue.max_active_downloads")
+        .await
+        .unwrap();
+    assert_eq!(view.settings.queue.max_active_downloads, Some(3));
+    assert_eq!(
+        view.changed,
+        BTreeMap::from([("lan.port".to_owned(), json!(5555))])
+    );
+    assert_eq!(running(engine.list().await), 3);
+    engine.shutdown().await;
+}

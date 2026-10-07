@@ -12,17 +12,27 @@ tempest-core.workspace = true
 tempest-net.workspace = true
 tempest-protocol.workspace = true
 
+axum = { workspace = true, features = ["query"] }
+futures-util.workspace = true
+getrandom.workspace = true
+rcgen.workspace = true
+reqwest.workspace = true
 rusqlite.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr = { workspace = true, features = ["serialize"] }
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 unicode-normalization.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+tower.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]

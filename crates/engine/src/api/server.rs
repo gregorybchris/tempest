@@ -97,6 +97,7 @@ pub struct ApiServer {
     access: Access,
     url: String,
     fingerprint: Option<String>,
+    ui: Option<axum::Router>,
     _recorded: Recorded,
 }
 
@@ -162,6 +163,7 @@ impl ApiServer {
                 _recorded: record(&url, None)?,
                 url,
                 fingerprint: None,
+                ui: None,
             });
         }
         let token = load_or_create_token(&data_dir.join(TOKEN_FILE))?;
@@ -194,6 +196,7 @@ impl ApiServer {
             _recorded: record(&url, Some(cert_path))?,
             url,
             fingerprint: Some(fingerprint),
+            ui: None,
         })
     }
 
@@ -212,6 +215,13 @@ impl ApiServer {
         &self.access
     }
 
+    /// Serves `ui`'s routes beside the API's, without the API's access checks. Every path it
+    /// doesn't route stays the API's.
+    pub fn with_ui(mut self, ui: axum::Router) -> Self {
+        self.ui = Some(ui);
+        self
+    }
+
     /// Serves `engine` until `shutdown` completes and every response has ended. Event streams
     /// end when the engine stops, so `shutdown` should stop it.
     pub async fn serve(
@@ -219,7 +229,10 @@ impl ApiServer {
         engine: Engine,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), ServeError> {
-        let app = router(engine, self.access.clone());
+        let mut app = router(engine, self.access.clone());
+        if let Some(ui) = self.ui {
+            app = app.merge(ui);
+        }
         let result = match self.listener {
             Listener::Plain(listener) => {
                 axum::serve(listener, app)

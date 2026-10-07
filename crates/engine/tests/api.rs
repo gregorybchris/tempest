@@ -528,7 +528,11 @@ struct Sse {
 
 impl SseReader {
     async fn open(app: &Router, last_event_id: Option<u64>) -> Self {
-        let mut builder = Request::builder().uri("/v1/events");
+        Self::open_at(app, "/v1/events", last_event_id).await
+    }
+
+    async fn open_at(app: &Router, uri: &str, last_event_id: Option<u64>) -> Self {
+        let mut builder = Request::builder().uri(uri);
         if let Some(id) = last_event_id {
             builder = builder.header("last-event-id", id.to_string());
         }
@@ -642,6 +646,10 @@ async fn the_event_stream_resumes_after_the_last_event_seen() {
     }
     assert_eq!(names.first().map(String::as_str), Some("transfer"));
 
+    // Browsers, which can't set the header on a new stream, resume with a query instead.
+    let mut queried = SseReader::open_at(&app, &format!("/v1/events?after={seen}"), None).await;
+    assert_eq!(queried.next().await.id, Some(seen + 1));
+
     // A client whose last event is gone, such as one from before the engine restarted, is
     // told to start over.
     let mut stale = SseReader::open(&app, Some(1_000_000)).await;
@@ -652,6 +660,16 @@ async fn the_event_stream_resumes_after_the_last_event_seen() {
     let bad = Request::builder()
         .uri("/v1/events")
         .header("last-event-id", "yesterday")
+        .body(Body::empty())
+        .unwrap();
+    assert_error(
+        call(&app, bad).await,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
+
+    let bad = Request::builder()
+        .uri("/v1/events?after=soon")
         .body(Body::empty())
         .unwrap();
     assert_error(

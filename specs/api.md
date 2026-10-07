@@ -1,6 +1,6 @@
 # Engine API
 
-The engine (D-079) serves an HTTP + JSON API with a stream of server-sent events (D-080). The web UI, the TUI and the CLI are its clients. This file is the API's contract; the request and response types are in `tempest-engine`'s `api` module, and a transfer's fields are documented on `TransferInfo`.
+The engine (D-079) serves an HTTP + JSON API with a stream of server-sent events (D-080). The web UI, the TUI and the CLI are its clients. This file is the API's contract; the request and response types are in the `tempest-api` crate, and a transfer's fields are documented on `TransferInfo`.
 
 ## Access
 
@@ -9,6 +9,8 @@ The engine (D-079) serves an HTTP + JSON API with a stream of server-sent events
 - While the API runs, the engine records its URL, and its certificate when remote access is on, in a file in the data directory. Local clients find the API there, whatever its port, and trust exactly that certificate.
 
 The settings are under `api` in the config file.
+
+The `tempest` binary's engine also serves the client web UI at `/` and its files beside it, without the access token, since they hold no data; every path the UI doesn't use belongs to the API.
 
 ## Requests and errors
 
@@ -45,7 +47,7 @@ The settings are under `api` in the config file.
 | `GET /v1/categories` | | Each category's save folder, by name |
 | `PUT /v1/categories/{name}` | `{"save_folder": "..."}` | The category |
 | `DELETE /v1/categories/{name}` | | 204; transfers in it have none |
-| `GET /v1/events` | | The event stream |
+| `GET /v1/events?after=N` | | The event stream |
 
 A chunk map's cells cover consecutive chunks in order, their sizes differing by at most one, so its size stays bounded however large the bundle. A cell's availability is the fewest connected peers holding any one of its chunks. A transfer that isn't running has nothing in flight and every availability 0, and says so with `"running": false` (D-193).
 
@@ -66,7 +68,7 @@ Settings changed through the API are kept in the state database and apply over t
 | `snapshot` | `{"transfers": [...]}`: every transfer, first on a new stream |
 | `reset` | As `snapshot`, when the events a client asked for are gone |
 
-- Every event but `snapshot` and `reset` has an `id:`, increasing by one per event. A client that reconnects with `Last-Event-ID` gets every event after that one. If the engine no longer has them all, or has restarted since, the stream starts with `reset`, and the client should replace its view.
+- Every event but `snapshot` and `reset` has an `id:`, increasing by one per event. A client that reconnects with `Last-Event-ID`, or `?after=` where it can't set headers as a browser's `EventSource` can't, gets every event after that one; the header wins if both are given. If the engine no longer has them all, or has restarted since, the stream starts with `reset`, and the client should replace its view.
 - `snapshot` and `reset` have no ID, so a client that reconnects resumes from the last numbered event it saw.
 - A client that falls too far behind gets `reset` and carries on.
 - Comments keep idle connections open. The stream ends when the engine stops.

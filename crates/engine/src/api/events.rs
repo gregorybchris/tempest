@@ -1,8 +1,9 @@
-//! `GET /v1/events`: the engine's events as server-sent events, resumable with `Last-Event-ID`.
+//! `GET /v1/events`: the engine's events as server-sent events, resumable with `Last-Event-ID`
+//! or, for browsers, whose `EventSource` can't set it on a new stream, `?after=`.
 
 use std::convert::Infallible;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use futures_util::Stream;
@@ -28,12 +29,20 @@ struct EventStream {
     intro: Intro,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub(super) struct EventsQuery {
+    after: Option<u64>,
+}
+
 pub(super) async fn events(
     State(engine): State<Engine>,
     headers: HeaderMap,
+    query: Result<Query<EventsQuery>, axum::extract::rejection::QueryRejection>,
 ) -> Result<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>, ApiError> {
+    let Query(query) = query.map_err(|_| ApiError::invalid("after must be an event's number"))?;
+    // The header, which a browser's own reconnection sends, wins over the query.
     let after = match headers.get("last-event-id") {
-        None => None,
+        None => query.after,
         Some(value) => Some(
             value
                 .to_str()

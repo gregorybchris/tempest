@@ -2630,3 +2630,25 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Initial and minimum MTU are 1,200 bytes with path MTU discovery on. Peers may open `max_open_requests` + 1 bidirectional streams and no unidirectional ones. Connections time out after 30 s of silence and send keep-alives every 10 s.
 
 **Rationale:** PEM PKCS#8 is the standard, inspectable format for keys. ring builds everywhere without extra tools. Separate sockets per family make "one socket per address family" literal and avoid platforms without dual-stack sockets. Without resumption every connection proves both keys, so a connection's peer ID is always from this handshake. Failing in the verifier closes the connection with a TLS alert, the earliest possible point. Keep-alives every 10 s stay inside routers' usual UDP mapping timeouts at negligible cost.
+
+---
+
+## D-173: Bundle storage details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-086 fixes positioned I/O on a thread pool with batched syncs. M4 needs the rest: which task owns the files, how proofs are built, how syncs are batched, how a download is laid out, and what happens to files already on disk.
+
+**Options for ownership:** one disk task for every bundle; one storage task per bundle (chosen). **For proofs:** rebuild a range's proof from disk on each request; keep each file's chunk tree in memory (chosen), learning a download's nodes from the leaves and proofs of the Data it stores. **For verification:** the bundle task verifies, then storage writes; storage verifies on the blocking pool before writing (chosen). **For resume:** chunk-level, which needs verified chunks recorded across runs; file-level, keeping existing files whose contents hash to their roots (chosen for now); none.
+
+**Decision:**
+
+- Each bundle has a storage task. It owns the open files, the known nodes of each file's chunk tree and the set of chunks present, and runs reads, writes and syncs on tokio's blocking pool, a configurable number at a time. Its command channel is bounded.
+- Sharing opens the files read-only and hashes each one, refusing files that are missing or no longer match the manifest.
+- Data is verified against the manifest before it is written. Data for chunks already present is verified but not written again.
+- Writes are synced once a configurable number of bytes or a configurable time has passed since the last sync, on every flush and close, and when the last chunk is stored. The write that completes a download returns after that sync and after the files' modification times are restored.
+- A download creates its directories, its files at full size with their executable bits, and then its symlinks. It never follows or replaces anything else already in the destination: files are opened without following symlinks, and a symlink, or anything else in the way of an entry, is an error.
+- Resume is per file: an existing file of the right size whose contents hash to its root counts as complete, and any other existing file is resized and downloaded again. Chunk-level resume waits for the client state store (D-082).
+- Encoded manifests are saved by writing a temporary file, syncing it and renaming it over the old one, and checked against the bundle ID when loaded.
+
+**Rationale:** A task per bundle keeps each task's state small and lets the bundle task own its storage handle, so a slow disk under one bundle doesn't stall another's reads. A tree in memory costs about 0.4% of a bundle's size, and makes every proof a lookup. A downloader learns enough to prove any range it holds, because the Data that brought a range also brought the siblings of its ancestors. Verifying in storage puts hashing on the blocking pool and makes unverified writes impossible. Restoring modification times only at completion keeps later writes from changing them. Per-file resume is simple and needs no stored state, while trusting a partial file's chunks needs a record of which ones were verified.

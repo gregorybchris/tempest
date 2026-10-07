@@ -1703,7 +1703,9 @@ dependencies = [
 name = "tempest-net"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "pem-rfc7468",
+ "proptest",
  "quinn",
  "ring",
  "rustls",

@@ -31,6 +31,8 @@ sha2 = "0.10"
 thiserror = "2"
 unicode-normalization = "0.1"
 
+# For O_NOFOLLOW when opening downloaded files.
+libc = "0.2"
 pem-rfc7468 = { version = "1", features = ["std"] }
 # QUIC over tokio with rustls on ring (D-018, D-084); no platform certificate verifier, since
 # peers authenticate with raw public keys (D-020).

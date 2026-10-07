@@ -33,8 +33,9 @@ use tempest_protocol::{Address, BundleId, Manifest, Message};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
-use self::bundle::{BundleTask, Report, Start};
+use self::bundle::{BundleTask, Outputs, Report, Start};
 use crate::endpoint::{Connection, Endpoint, Incoming};
+use crate::limit::{SpeedLimits, Throttle};
 use crate::storage::{Checkpoint, Storage, StorageConfig, StorageError};
 use crate::stream::read_message;
 
@@ -187,6 +188,7 @@ pub struct BundleHandle {
     pub status: watch::Receiver<Status>,
     bundle_id: BundleId,
     peers: PeerSink,
+    limits: SpeedLimits,
     shutdown: Arc<watch::Sender<bool>>,
     task: JoinHandle<Result<Summary, DriverError>>,
 }
@@ -195,6 +197,11 @@ impl BundleHandle {
     /// The bundle's ID.
     pub fn bundle_id(&self) -> BundleId {
         self.bundle_id
+    }
+
+    /// The bundle's own speed limits, none at first. They apply on top of the node's.
+    pub fn limits(&self) -> &SpeedLimits {
+        &self.limits
     }
 
     /// Adds peers the session may dial, such as from a link or a tracker.
@@ -275,6 +282,7 @@ enum Route {
 pub struct Node {
     endpoint: Endpoint,
     config: Arc<NodeConfig>,
+    limits: SpeedLimits,
     commands: mpsc::Sender<Command>,
 }
 
@@ -294,6 +302,7 @@ impl Node {
         Self {
             endpoint,
             config,
+            limits: SpeedLimits::default(),
             commands,
         }
     }
@@ -301,6 +310,12 @@ impl Node {
     /// The endpoint the node runs on.
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
+    }
+
+    /// The speed limits over every bundle together, none at first. Clones of the node share
+    /// them.
+    pub fn limits(&self) -> &SpeedLimits {
+        &self.limits
     }
 
     /// Runs a bundle from `storage`, with the chunks it holds: shares it, and downloads the rest
@@ -381,14 +396,19 @@ impl Node {
 
         let (events, events_receiver) = broadcast::channel(config.events.max(1));
         let (status, status_receiver) = watch::channel(Status::default());
+        let limits = SpeedLimits::default();
+        let throttle = Throttle {
+            bundle: limits.clone(),
+            node: self.limits.clone(),
+        };
         let task = BundleTask::new(
             bundle_id,
             start,
             self.endpoint.clone(),
             config,
+            throttle,
             inbox.clone(),
-            events,
-            status,
+            Outputs { events, status },
         );
         let task = match task {
             // Discovery reads the first status to learn whether the bundle starts complete.
@@ -410,6 +430,7 @@ impl Node {
             status: status_receiver,
             bundle_id,
             peers: PeerSink(inbox),
+            limits,
             shutdown,
             task,
         })

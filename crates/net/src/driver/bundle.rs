@@ -19,6 +19,7 @@ use super::conn::{self, ConnTask};
 use super::request::{self, Answer};
 use super::{Destination, DriverError, NodeConfig, Status, Summary};
 use crate::endpoint::{Connection, Endpoint};
+use crate::limit::Throttle;
 use crate::storage::{Storage, StorageError};
 
 /// How a bundle task starts.
@@ -79,6 +80,14 @@ pub(crate) enum Report {
     Storage(oneshot::Sender<Option<Storage>>),
 }
 
+/// Where a bundle task publishes what it does.
+pub(super) struct Outputs {
+    /// Decision events.
+    pub events: broadcast::Sender<Event>,
+    /// The bundle's progress.
+    pub status: watch::Sender<Status>,
+}
+
 /// A connection the session knows about.
 struct Conn {
     connection: Connection,
@@ -92,6 +101,7 @@ pub(super) struct BundleTask {
     epoch: Instant,
     endpoint: Endpoint,
     config: Arc<NodeConfig>,
+    throttle: Throttle,
     storage: Option<Storage>,
     /// Where to download to, until the manifest arrives and storage is laid out there.
     destination: Option<Destination>,
@@ -114,10 +124,11 @@ impl BundleTask {
         start: Start,
         endpoint: Endpoint,
         config: Arc<NodeConfig>,
+        throttle: Throttle,
         inbox: mpsc::Sender<Report>,
-        events: broadcast::Sender<Event>,
-        status: watch::Sender<Status>,
+        outputs: Outputs,
     ) -> Result<Self, DriverError> {
+        let Outputs { events, status } = outputs;
         let local = LocalPeer {
             peer_id: endpoint.peer_id(),
             addresses: config.addresses.clone(),
@@ -140,6 +151,7 @@ impl BundleTask {
             epoch: Instant::now(),
             endpoint,
             config,
+            throttle,
             storage,
             destination,
             inbox,
@@ -326,6 +338,7 @@ impl BundleTask {
             connection: connection.clone(),
             inbox: self.inbox.clone(),
             rtt_interval: self.config.rtt_interval,
+            throttle: self.throttle.clone(),
         };
         tokio::spawn(task.run(send, recv, outbox));
         self.conns.insert(
@@ -397,6 +410,7 @@ impl BundleTask {
                     message,
                     connection: entry.connection.clone(),
                     storage: self.storage.clone(),
+                    throttle: self.throttle.clone(),
                     inbox: self.inbox.clone(),
                 };
                 tokio::spawn(task.run(cancelled));

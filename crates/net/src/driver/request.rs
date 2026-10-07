@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::bundle::Report;
 use crate::endpoint::Connection;
+use crate::limit::Throttle;
 use crate::storage::{Storage, StorageError};
 use crate::stream::{ReadMessageError, read_message, read_message_within, write_message};
 
@@ -35,6 +36,8 @@ pub(super) struct Outgoing {
     pub connection: Connection,
     /// Where verified chunks go. Present whenever the session requests chunks.
     pub storage: Option<Storage>,
+    /// What Data received draws from.
+    pub throttle: Throttle,
     pub inbox: mpsc::Sender<Report>,
 }
 
@@ -93,13 +96,15 @@ impl Outgoing {
         let _ = self.inbox.send(report).await;
     }
 
-    /// What the session hears for `message`. Data is verified, and stored if it passes.
+    /// What the session hears for `message`. Data waits for the speed limits, then is
+    /// verified, and stored if it passes.
     async fn response(&self, message: Message) -> Result<Response, StorageError> {
         Ok(match (self.message, message) {
             (OutRequest::Chunks { start, count }, Message::Data(data)) => {
                 let Some(storage) = &self.storage else {
                     return Err(StorageError::Stopped);
                 };
+                self.throttle.download(data.chunks.len() as u64).await;
                 match storage.write(start, count, data).await {
                     Ok(_) => Response::Data(Ok(())),
                     Err(StorageError::Verify(error)) => Response::Data(Err(error)),
@@ -149,6 +154,8 @@ async fn exchange(
 pub(super) struct Incoming {
     pub conn: ConnId,
     pub stream: StreamId,
+    /// What Data sent draws from.
+    pub throttle: Throttle,
     pub inbox: mpsc::Sender<Report>,
 }
 
@@ -207,7 +214,14 @@ impl Incoming {
                     read = storage.read(start, count) => read,
                 };
                 match read {
-                    Ok(data) => (Message::Data(data), true),
+                    Ok(data) => {
+                        tokio::select! {
+                            biased;
+                            _ = &mut stopped => return self.abandon(&mut send).await,
+                            () = self.throttle.upload(data.chunks.len() as u64) => {}
+                        }
+                        (Message::Data(data), true)
+                    }
                     Err(error) => {
                         // Storage can't back what the session promised: refuse, and free the
                         // upload slot without counting the bytes as sent.

@@ -13,6 +13,7 @@ use tokio::time::MissedTickBehavior;
 use super::bundle::Report;
 use super::request::Incoming;
 use crate::endpoint::{Connection, Endpoint, closed_cause};
+use crate::limit::Throttle;
 use crate::stream::{ReadMessageError, read_message, write_message};
 
 /// Dials `record`'s addresses in turn, accepting only its peer ID, and opens the control
@@ -67,6 +68,8 @@ pub(super) struct ConnTask {
     pub connection: Connection,
     pub inbox: mpsc::Sender<Report>,
     pub rtt_interval: Duration,
+    /// What Data sent on request streams draws from.
+    pub throttle: Throttle,
 }
 
 impl ConnTask {
@@ -136,6 +139,7 @@ impl ConnTask {
             let task = Incoming {
                 conn: self.conn,
                 stream: StreamId(recv.id().into()),
+                throttle: self.throttle.clone(),
                 inbox: self.inbox.clone(),
             };
             tokio::spawn(task.run(send, recv));

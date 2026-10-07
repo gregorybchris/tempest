@@ -8,6 +8,7 @@
 //! - [`stream`]: framed messages on QUIC streams.
 //! - [`storage`]: a bundle's chunks on disk, read and written by a storage task (D-086).
 //! - [`driver`]: a [`Node`] running `tempest-core` sessions over those connections and storage.
+//! - [`limit`]: speed limits for a node and for each bundle.
 //! - [`tracker`]: finding a bundle's peers through trackers.
 //! - [`lan`]: finding peers on the local network through multicast.
 //!
@@ -19,6 +20,7 @@ pub mod driver;
 pub mod endpoint;
 pub mod identity;
 pub mod lan;
+pub mod limit;
 pub mod storage;
 pub mod stream;
 pub mod tls;
@@ -33,6 +35,7 @@ pub use endpoint::{
 };
 pub use identity::{Identity, IdentityError};
 pub use lan::{Lan, LanConfig};
+pub use limit::{RateLimit, SpeedLimits};
 pub use storage::{
     Checkpoint, CheckpointError, Storage, StorageConfig, StorageError, StorageStats, Written,
 };

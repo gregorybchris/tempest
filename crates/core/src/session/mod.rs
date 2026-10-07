@@ -35,6 +35,7 @@ use crate::Rng;
 use crate::chunks::ChunkSet;
 use crate::config::{Config, ConfigError, WhenComplete};
 use crate::event::{CloseCause, Event, EventKind};
+use crate::inspect::{self, ChunkCell, ChunkState, PeerStatus};
 use crate::io::{
     Action, Closed, ConnId, ConnInfo, Direction, Inbound, OutRequest, PathKind, RequestId, StreamId,
 };
@@ -282,6 +283,53 @@ impl Session {
     /// The number of peers this session may dial.
     pub fn known_peer_count(&self) -> usize {
         self.known.len()
+    }
+
+    /// Every connection, open or opening, with its rates over the window ending at `now`.
+    pub fn peers(&mut self, now: Time) -> Vec<PeerStatus> {
+        self.conns
+            .iter_mut()
+            .map(|(&id, conn)| PeerStatus {
+                conn: id,
+                peer: conn.peer(),
+                direction: conn.info.direction,
+                path: conn.info.path,
+                open: conn.is_open(),
+                progress: match &conn.holdings {
+                    Holdings::Known(chunks) if chunks.capacity() > 0 => {
+                        Some(f64::from(chunks.len()) / f64::from(chunks.capacity()))
+                    }
+                    Holdings::Known(_) | Holdings::Pending { .. } => None,
+                },
+                we_want: conn.we_want,
+                they_want: conn.they_want,
+                serving_us: conn.serving_us,
+                we_serve: conn.we_serve,
+                snubbed: conn.snubbed,
+                download_rate: conn.received.rate(now),
+                upload_rate: conn.sent.rate(now),
+                downloaded: conn.received.total(),
+                uploaded: conn.sent.total(),
+                rtt: conn.rtt.get(),
+            })
+            .collect()
+    }
+
+    /// The bundle's chunks in at most `cells` cells (see [`inspect::chunk_map`]), once the
+    /// manifest is known.
+    pub fn chunk_map(&self, cells: u32) -> Option<Vec<ChunkCell>> {
+        let bundle = self.bundle.as_ref()?;
+        let state = |chunk: u32| {
+            let state = if bundle.have.contains(chunk) {
+                ChunkState::Have
+            } else if bundle.requests[chunk as usize] > 0 {
+                ChunkState::InFlight
+            } else {
+                ChunkState::Missing
+            };
+            (state, bundle.availability.count(chunk))
+        };
+        Some(inspect::chunk_map(bundle.have.capacity(), cells, state))
     }
 
     /// The request this peer sent as `request` on `conn`, if it is still open.

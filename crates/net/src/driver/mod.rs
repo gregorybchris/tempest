@@ -22,14 +22,15 @@ mod conn;
 mod request;
 
 use std::collections::{HashMap, hash_map};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use quinn::{RecvStream, SendStream};
-use tempest_core::{Config, Event};
+use tempest_core::{ChunkCell, Config, Event, PeerStatus};
 use tempest_protocol::message::{GoodbyeReason, Hello, PeerRecord};
-use tempest_protocol::{Address, BundleId, Manifest, Message};
+use tempest_protocol::{Address, BundleId, Manifest, Message, RangeList};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
@@ -243,6 +244,11 @@ impl BundleHandle {
         self.peers.clone()
     }
 
+    /// A way to look into the running bundle, apart from the handle.
+    pub fn inspector(&self) -> Inspector {
+        Inspector(self.peers.0.clone())
+    }
+
     /// Asks the session to close its connections with `shutting_down` and stop.
     pub fn shutdown(&self) {
         self.shutdown.send_replace(true);
@@ -263,6 +269,46 @@ impl PeerSink {
     /// Adds peers the session may dial. Returns false once the bundle has stopped.
     pub async fn add_peers(&self, peers: Vec<PeerRecord>) -> bool {
         self.0.send(Report::AddPeers(peers)).await.is_ok()
+    }
+}
+
+/// One connection of a running bundle, as a UI shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeerDetail {
+    /// The other peer's address, or a virtual address for a connection through this peer's
+    /// home relay.
+    pub address: SocketAddr,
+    /// What the session knows of the connection.
+    pub status: PeerStatus,
+}
+
+/// Looks into a running bundle for a UI. Every answer is `None` once the bundle has stopped.
+#[derive(Debug, Clone)]
+pub struct Inspector(mpsc::Sender<Report>);
+
+impl Inspector {
+    async fn ask<T>(&self, report: impl FnOnce(oneshot::Sender<T>) -> Report) -> Option<T> {
+        let (reply, answer) = oneshot::channel();
+        self.0.send(report(reply)).await.ok()?;
+        answer.await.ok()
+    }
+
+    /// Every connection, open or opening.
+    pub async fn peers(&self) -> Option<Vec<PeerDetail>> {
+        self.ask(Report::Peers).await
+    }
+
+    /// The bundle's chunks in at most `cells` cells (see [`tempest_core::inspect::chunk_map`]),
+    /// once the manifest is known.
+    pub async fn chunk_map(&self, cells: u32) -> Option<Vec<ChunkCell>> {
+        self.ask(|reply| Report::ChunkMap(cells, reply))
+            .await
+            .flatten()
+    }
+
+    /// The chunks stored, once the manifest is known.
+    pub async fn have(&self) -> Option<RangeList> {
+        self.ask(Report::Have).await.flatten()
     }
 }
 

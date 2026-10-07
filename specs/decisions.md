@@ -3034,3 +3034,22 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - "Peers" sorts by open connections, the closest the API comes to "peers serving us".
 
 **Rationale:** Natural directions put what users look for first (the fastest, the biggest, the nearly done). Keeping unknowns last stops reversing from filling the top of the list with dashes.
+
+---
+
+## D-193: The API's view inside a transfer
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The detail views (D-137) need a transfer's files, peers and chunks, which the API didn't expose. Chunks are 16 KiB, so a large bundle has hundreds of thousands of them.
+
+**Options for chunks:** every chunk's state; run-length ranges of have and in flight plus availability; the chunks summarized into a number of cells the client asks for (chosen). **For fetching:** push changes on the event stream; poll routes while a view is open (chosen).
+
+**Decision:**
+
+- Three routes under a transfer: `files`, `peers` and `chunks?cells=N`, described in `specs/api.md`.
+- The session summarizes its chunks into cells of near-equal runs. Each cell counts chunks stored, in flight and missing, and its availability is that of its rarest chunk. The answer is capped at 65,536 cells, encoded as arrays to keep it small.
+- Peers come only from a running transfer. A stopped transfer's files and map come from its saved checkpoint.
+- Clients poll these routes while a view shows them. The event stream stays about transfers as a whole.
+
+**Rationale:** The client knows how many cells it can draw, so it asks for that many and the answer stays bounded. Run-length encoding is small for a nearly done download but not for a swarm's scattered chunks. Pushing peer and chunk changes would flood the stream for every client to show views few have open.

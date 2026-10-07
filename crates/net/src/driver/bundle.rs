@@ -9,7 +9,8 @@ use quinn::{RecvStream, SendStream};
 use ring::rand::{SecureRandom, SystemRandom};
 use tempest_core::io::{Closed, ConnInfo, Direction, PathKind};
 use tempest_core::{
-    Action, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response, Session, StreamId, Time,
+    Action, ChunkCell, ChunkSet, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response,
+    Session, StreamId, Time,
 };
 use tempest_protocol::message::{Hello, ManifestMessage, PeerRecord, Reject, RejectReason};
 use tempest_protocol::{Address, BundleId, Message, PeerId, RangeList};
@@ -19,7 +20,7 @@ use tokio::time::Instant;
 
 use super::conn::{self, ConnTask};
 use super::request::{self, Answer};
-use super::{Destination, DriverError, NodeConfig, Status, Summary};
+use super::{Destination, DriverError, NodeConfig, PeerDetail, Status, Summary};
 use crate::endpoint::{Connection, Endpoint};
 use crate::limit::Throttle;
 use crate::storage::{Storage, StorageError};
@@ -80,6 +81,12 @@ pub(crate) enum Report {
     AddPeers(Vec<PeerRecord>),
     /// Asks for a handle to storage, once laid out.
     Storage(oneshot::Sender<Option<Storage>>),
+    /// Asks for every connection's state.
+    Peers(oneshot::Sender<Vec<PeerDetail>>),
+    /// Asks for the chunk map in at most this many cells, once the manifest is known.
+    ChunkMap(u32, oneshot::Sender<Option<Vec<ChunkCell>>>),
+    /// Asks for the chunks stored, once the manifest is known.
+    Have(oneshot::Sender<Option<RangeList>>),
 }
 
 /// Where a bundle task publishes what it does.
@@ -326,6 +333,20 @@ impl BundleTask {
             Report::AddPeers(peers) => session.add_peers(now, peers),
             Report::Storage(reply) => {
                 let _ = reply.send(self.storage.clone());
+            }
+            Report::Peers(reply) => {
+                let peers = session.peers(now).into_iter().filter_map(|status| {
+                    let conn = self.conns.get(&status.conn)?;
+                    let address = conn.connection.remote_address();
+                    Some(PeerDetail { address, status })
+                });
+                let _ = reply.send(peers.collect());
+            }
+            Report::ChunkMap(cells, reply) => {
+                let _ = reply.send(session.chunk_map(cells));
+            }
+            Report::Have(reply) => {
+                let _ = reply.send(session.have().map(ChunkSet::to_ranges));
             }
         }
     }

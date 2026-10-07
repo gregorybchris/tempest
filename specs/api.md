@@ -26,6 +26,9 @@ The settings are under `api` in the config file.
 | `POST /v1/transfers` | `link`, or an absolute `path` to share; optionally `category`, `tags`; for a link `save_folder`, `stopped`; for a path `name`, `comment` | 201 and the transfer |
 | `GET /v1/transfers/{id}` | | The transfer |
 | `DELETE /v1/transfers/{id}?delete_files=true` | | 204, once removed (and its files deleted, if asked) |
+| `GET /v1/transfers/{id}/files` | | Each file's path, size, chunks and chunks stored; none before the manifest arrives |
+| `GET /v1/transfers/{id}/peers` | | Each connection of a running transfer: peer ID, address, direct or relayed, Want and Serving both ways, rates and totals, the peer's progress and round-trip time; none while it isn't running |
+| `GET /v1/transfers/{id}/chunks?cells=N` | | The chunk map: runs of chunks in at most `N` cells (1024 by default, 65,536 at most), each `[have, in_flight, missing, availability]` |
 | `POST /v1/transfers/{id}/start` | | The transfer, started through the queue |
 | `POST /v1/transfers/{id}/force-start` | | The transfer, started regardless of the queue |
 | `POST /v1/transfers/{id}/stop` | | The transfer |
@@ -43,6 +46,8 @@ The settings are under `api` in the config file.
 | `PUT /v1/categories/{name}` | `{"save_folder": "..."}` | The category |
 | `DELETE /v1/categories/{name}` | | 204; transfers in it have none |
 | `GET /v1/events` | | The event stream |
+
+A chunk map's cells cover consecutive chunks in order, their sizes differing by at most one, so its size stays bounded however large the bundle. A cell's availability is the fewest connected peers holding any one of its chunks. A transfer that isn't running has nothing in flight and every availability 0, and says so with `"running": false` (D-193).
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link and dates.
 

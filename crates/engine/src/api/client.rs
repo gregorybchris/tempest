@@ -23,6 +23,7 @@ use super::{
     MoveRequest, NameRequest, PREFIX, QueuePlace, QueueRequest, RemovedInfo, SnapshotInfo,
     TagsRequest,
 };
+use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use crate::{SettingsView, TransferInfo};
 
 /// Why a request to the API failed.
@@ -186,6 +187,22 @@ impl ApiClient {
     /// One transfer.
     pub async fn transfer(&self, id: BundleId) -> Result<TransferInfo, ClientError> {
         self.get(&format!("/transfers/{id}")).await
+    }
+
+    /// A transfer's files and how much of each is stored.
+    pub async fn files(&self, id: BundleId) -> Result<Vec<FileInfo>, ClientError> {
+        self.get(&format!("/transfers/{id}/files")).await
+    }
+
+    /// A running transfer's connections.
+    pub async fn peers(&self, id: BundleId) -> Result<Vec<PeerInfo>, ClientError> {
+        self.get(&format!("/transfers/{id}/peers")).await
+    }
+
+    /// A transfer's chunks in at most `cells` cells.
+    pub async fn chunk_map(&self, id: BundleId, cells: u32) -> Result<ChunkMapInfo, ClientError> {
+        self.get(&format!("/transfers/{id}/chunks?cells={cells}"))
+            .await
     }
 
     /// Adds a download or a share.

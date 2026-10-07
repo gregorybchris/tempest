@@ -34,7 +34,8 @@ pub mod wrap;
 
 pub use addresses::direct_addresses;
 pub use driver::{
-    BundleHandle, Destination, DriverError, Node, NodeConfig, PeerSink, Status, Summary,
+    BundleHandle, Destination, DriverError, Inspector, Node, NodeConfig, PeerDetail, PeerSink,
+    Status, Summary,
 };
 pub use endpoint::{
     Connection, DEFAULT_PORT, Endpoint, EndpointConfig, HandshakeError, Incoming, closed_cause,

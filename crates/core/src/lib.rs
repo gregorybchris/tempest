@@ -12,6 +12,7 @@
 //! - [`pipeline`]: how many requests to keep open with each provider.
 //! - [`upload`]: upload strategies.
 //! - [`event`]: decision events with their reasons (D-006).
+//! - [`inspect`]: what a session shows a UI: its connections and a map of its chunks.
 //! - [`content`]: an in-memory bundle store for tests and simulation.
 
 pub mod availability;
@@ -19,6 +20,7 @@ pub mod chunks;
 pub mod config;
 pub mod content;
 pub mod event;
+pub mod inspect;
 pub mod io;
 pub mod meter;
 pub mod pipeline;
@@ -30,6 +32,7 @@ pub mod upload;
 pub use chunks::ChunkSet;
 pub use config::{Config, Profile, Settings};
 pub use event::{Event, EventKind};
+pub use inspect::{ChunkCell, ChunkState, PeerStatus};
 pub use io::{Action, ConnId, ConnInfo, Inbound, Reply, RequestId, Response, StreamId};
 pub use session::{LocalPeer, Session, SessionError};
 pub use time::Time;

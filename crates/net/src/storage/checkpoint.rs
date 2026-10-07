@@ -5,7 +5,7 @@ use std::time::UNIX_EPOCH;
 
 use tempest_protocol::tree::TreeNode;
 use tempest_protocol::wire::{Decode, DecodeError, Encode, Reader, Writer};
-use tempest_protocol::{ChunkRange, Hash, RangeList};
+use tempest_protocol::{ChunkLayout, ChunkRange, Hash, RangeList};
 
 /// The encoding's version, so a future change can tell old checkpoints apart.
 const VERSION: u8 = 1;
@@ -40,6 +40,27 @@ impl Checkpoint {
     /// The number of chunks stored.
     pub fn chunks_stored(&self) -> u64 {
         self.files.iter().map(|file| file.have.chunk_count()).sum()
+    }
+
+    /// The chunks stored, numbered across the bundle laid out as `layout`. Files the checkpoint
+    /// doesn't cover, or chunks past a file's end, count as missing.
+    pub fn have(&self, layout: &ChunkLayout) -> RangeList {
+        let mut ranges: Vec<ChunkRange> = Vec::new();
+        for (file, span) in self.files.iter().zip(layout.files()) {
+            for range in file.have.ranges() {
+                let end = range.end.min(span.chunk_count);
+                if range.start >= end {
+                    break;
+                }
+                let (start, end) = (span.first_chunk + range.start, span.first_chunk + end);
+                match ranges.last_mut() {
+                    // A file's last chunk and the next file's first join up.
+                    Some(last) if last.end == start => last.end = end,
+                    _ => ranges.push(ChunkRange { start, end }),
+                }
+            }
+        }
+        RangeList::from_ranges(ranges).expect("ranges built in order, apart and nonempty")
     }
 
     /// Encodes the checkpoint for saving.
@@ -165,6 +186,16 @@ mod tests {
 
     use super::*;
 
+    fn file_entry(path: &str, size: u64) -> tempest_protocol::manifest::Entry {
+        let info = tempest_protocol::manifest::FileInfo {
+            size,
+            root: leaf_hash(path.as_bytes()),
+            executable: false,
+            modified: 0,
+        };
+        tempest_protocol::manifest::Entry::file(path, info)
+    }
+
     fn state(seed: u8) -> FileState {
         FileState {
             size: 40_000,
@@ -175,6 +206,35 @@ mod tests {
                 (TreeNode { level: 1, index: 1 }, leaf_hash(&[seed, 1])),
             ],
         }
+    }
+
+    #[test]
+    fn have_numbers_chunks_across_the_bundle() {
+        let manifest = tempest_protocol::Manifest::new(
+            "bundle",
+            "",
+            0,
+            "",
+            vec![
+                file_entry("a", 3 * 16384),
+                file_entry("b", 2 * 16384),
+                file_entry("c", 4 * 16384),
+            ],
+        )
+        .unwrap();
+        let layout = ChunkLayout::new(&manifest);
+        let with = |have: &[u32]| FileState {
+            have: RangeList::from_chunks(have.iter().copied()),
+            ..state(0)
+        };
+        let checkpoint = Checkpoint {
+            // The second file's chunk 5 is past its end, and the third file isn't covered.
+            files: vec![with(&[1, 2]), with(&[0, 1, 5])],
+        };
+        assert_eq!(
+            checkpoint.have(&layout),
+            RangeList::from_chunks([1, 2, 3, 4])
+        );
     }
 
     #[test]

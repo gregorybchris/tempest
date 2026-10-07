@@ -7,12 +7,14 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 use tempest_net::{
-    AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Lan, Node,
-    SpeedLimits, Storage, StorageConfig, Summary, TrackerClient,
+    AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Inspector, Lan,
+    Node, SpeedLimits, Storage, StorageConfig, Summary, TrackerClient,
 };
 use tempest_protocol::message::PeerRecord;
 use tempest_protocol::wire::{Decode, Encode};
-use tempest_protocol::{Address, BundleId, ChunkLayout, Link, Manifest, PeerId};
+use tempest_protocol::{
+    Address, BundleId, ChunkLayout, ChunkRange, Link, Manifest, PeerId, RangeList,
+};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior};
 
@@ -20,8 +22,8 @@ use super::notify::{self, Notice};
 use super::relocate::{self, Item};
 use super::supervisor::Supervisor;
 use super::{
-    AddOptions, CHECKPOINT_INTERVAL, Command, EVENT_BUFFER, EngineError, GOODBYE_TIMEOUT, Internal,
-    NewShare, Reply, SettingsView, TICK,
+    AddOptions, CHECKPOINT_INTERVAL, Command, EVENT_BUFFER, EngineError, GOODBYE_TIMEOUT, Inside,
+    Internal, NewShare, Reply, SettingsView, TICK,
 };
 use crate::TransferInfo;
 use crate::config::{EngineConfig, SharingAction, SharingLimits};
@@ -112,6 +114,8 @@ struct Run {
     limits: SpeedLimits,
     /// When it stops sharing.
     sharing: SharingLimits,
+    /// For looking into the bundle.
+    inspector: Inspector,
 }
 
 /// A removed transfer whose bundle is still stopping.
@@ -309,6 +313,9 @@ impl EngineTask {
         match command {
             Command::List(reply) => {
                 let _ = reply.send(self.list());
+            }
+            Command::Inside(id, reply) => {
+                let _ = reply.send(self.inside(id));
             }
             Command::AddLink(link, options, reply) => {
                 let result = self.add_link(link, options).await;
@@ -768,6 +775,44 @@ impl EngineTask {
         list
     }
 
+    /// What it takes to look inside a transfer, without waiting on its bundle here.
+    fn inside(&self, id: BundleId) -> Result<Inside, EngineError> {
+        let t = self.transfers.get(&id).ok_or(EngineError::NotFound(id))?;
+        // A stopping bundle is left out: it is about to go.
+        let running = match &t.live {
+            Live::Running(run) => Some(run.inspector.clone()),
+            Live::Stopping(_) | Live::Idle | Live::Opening { .. } | Live::Moving { .. } => None,
+        };
+        let stored = match (&t.manifest, &running) {
+            (Some(manifest), None) => Some(self.stored_chunks(id, &t.row, manifest)),
+            _ => None,
+        };
+        Ok(Inside {
+            manifest: t.manifest.clone(),
+            running,
+            stored,
+        })
+    }
+
+    /// The chunks a transfer that isn't running has stored: as of its checkpoint, or all of
+    /// them once complete.
+    fn stored_chunks(&self, id: BundleId, row: &TransferRow, manifest: &Manifest) -> RangeList {
+        let layout = ChunkLayout::new(manifest);
+        let checkpoint = (self.store.checkpoint(&id).ok().flatten())
+            .and_then(|bytes| Checkpoint::from_bytes(&bytes).ok());
+        match checkpoint {
+            Some(checkpoint) => checkpoint.have(&layout),
+            None if row.is_complete() && layout.chunk_count() > 0 => {
+                let all = ChunkRange {
+                    start: 0,
+                    end: layout.chunk_count(),
+                };
+                RangeList::from_ranges(vec![all]).expect("one nonempty range")
+            }
+            None => RangeList::new(),
+        }
+    }
+
     fn info(&self, id: &BundleId) -> Option<TransferInfo> {
         let t = self.transfers.get(id)?;
         let row = &t.row;
@@ -1069,6 +1114,7 @@ impl EngineTask {
             last_tick: now,
             limits,
             sharing,
+            inspector: handle.inspector(),
         });
         let supervisor = Supervisor {
             id,

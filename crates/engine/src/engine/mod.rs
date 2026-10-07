@@ -24,22 +24,24 @@ mod task;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use tempest_core::Event;
 use tempest_net::{
     AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, HomeRelay, Identity,
-    IdentityError, Lan, LanConfig, Node, NodeConfig, PortMapping, PortMappingStatus, RelayStatus,
-    Storage, StorageError, Summary, TrackerClient,
+    IdentityError, Inspector, Lan, LanConfig, Node, NodeConfig, PortMapping, PortMappingStatus,
+    RelayStatus, Storage, StorageError, Summary, TrackerClient,
 };
 use tempest_protocol::link::ParseLinkError;
-use tempest_protocol::{Address, BundleId, Link, Manifest, PeerId};
+use tempest_protocol::{Address, BundleId, ChunkLayout, Link, Manifest, PeerId, RangeList};
 use tokio::sync::{mpsc, oneshot};
 
 use self::task::EngineTask;
 use crate::TransferInfo;
 use crate::config::{ConfigError, EngineConfig};
 use crate::events::Subscription;
+use crate::inspect::{self, CellInfo, ChunkMapInfo, FileInfo, PeerInfo};
 use crate::manifest::{BuildError, BundleInfo, base_dir, build_manifest, unix_millis};
 use crate::queue::QueueMove;
 use crate::store::{Store, StoreError};
@@ -187,6 +189,7 @@ type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
 /// What the engine is asked to do.
 enum Command {
     List(oneshot::Sender<Vec<TransferInfo>>),
+    Inside(BundleId, Reply<Inside>),
     AddLink(Link, AddOptions, Reply<TransferInfo>),
     AddShare(Box<NewShare>, Reply<TransferInfo>),
     Start(BundleId, bool, Reply<TransferInfo>),
@@ -211,6 +214,16 @@ enum Command {
     ResetSetting(String, Reply<SettingsView>),
     Subscribe(Option<u64>, oneshot::Sender<Subscription>),
     Shutdown(oneshot::Sender<()>),
+}
+
+/// What it takes to look inside a transfer. The engine task hands it out, so that waiting on
+/// the bundle happens outside the task.
+struct Inside {
+    manifest: Option<Arc<Manifest>>,
+    /// The running bundle.
+    running: Option<Inspector>,
+    /// The chunks stored, while it isn't running and its manifest is known.
+    stored: Option<RangeList>,
 }
 
 /// A share whose manifest has been built.
@@ -378,6 +391,51 @@ impl Engine {
     /// One transfer.
     pub async fn get(&self, id: BundleId) -> Option<TransferInfo> {
         self.list().await.into_iter().find(|t| t.id == id)
+    }
+
+    /// A transfer's files and how much of each is stored; none before the manifest is known.
+    pub async fn files(&self, id: BundleId) -> Result<Vec<FileInfo>, EngineError> {
+        let inside = self.call(|reply| Command::Inside(id, reply)).await?;
+        let Some(manifest) = inside.manifest else {
+            return Ok(Vec::new());
+        };
+        let running = match &inside.running {
+            Some(inspector) => inspector.have().await,
+            None => None,
+        };
+        let have = running.or(inside.stored).unwrap_or_default();
+        Ok(inspect::files(&manifest, &have))
+    }
+
+    /// A running transfer's connections, open or opening; none while it isn't running.
+    pub async fn peers(&self, id: BundleId) -> Result<Vec<PeerInfo>, EngineError> {
+        let inside = self.call(|reply| Command::Inside(id, reply)).await?;
+        let Some(inspector) = inside.running else {
+            return Ok(Vec::new());
+        };
+        let peers = inspector.peers().await.unwrap_or_default();
+        Ok(peers.into_iter().map(inspect::peer).collect())
+    }
+
+    /// A transfer's chunks in at most `cells` cells, and no more than
+    /// [`MAX_CELLS`](inspect::MAX_CELLS); none before the manifest is known.
+    pub async fn chunk_map(&self, id: BundleId, cells: u32) -> Result<ChunkMapInfo, EngineError> {
+        let inside = self.call(|reply| Command::Inside(id, reply)).await?;
+        let cells = cells.min(inspect::MAX_CELLS);
+        let chunks = (inside.manifest.as_ref())
+            .map_or(0, |manifest| ChunkLayout::new(manifest).chunk_count());
+        if let Some(inspector) = &inside.running {
+            let map = inspector.chunk_map(cells).await.unwrap_or_default();
+            // The session may know the manifest a moment before the engine task does.
+            let mapped = map.iter().map(|cell| cell.chunks()).sum();
+            return Ok(ChunkMapInfo {
+                chunks: chunks.max(mapped),
+                running: true,
+                cells: map.into_iter().map(CellInfo::from).collect(),
+            });
+        }
+        let stored = inside.stored.unwrap_or_default();
+        Ok(inspect::stored_chunk_map(chunks, &stored, cells))
     }
 
     /// Adds a download from a `tempest:` link. It starts once the queue lets it, unless added

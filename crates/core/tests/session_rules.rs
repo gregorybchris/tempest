@@ -782,3 +782,41 @@ fn a_peer_no_longer_served_loses_its_waiting_requests() {
     assert!(replies(&session.poll_actions()).is_empty());
     assert_eq!(session.uploaded(), CHUNK as u64);
 }
+
+#[test]
+fn a_session_shows_its_peers_and_chunk_map() {
+    let content = content();
+    let have = ranges(0..20);
+    let mut session = Session::with_manifest(
+        Config::default(),
+        local(5),
+        content.manifest().clone(),
+        &have,
+        0,
+    )
+    .unwrap();
+    open(&mut session, ranges(0..40));
+    control(&mut session, C, Message::Serving(Serving { serving: true }));
+    session.poll_actions();
+
+    let peers = session.peers(Time::ZERO);
+    assert_eq!(peers.len(), 1);
+    let peer = &peers[0];
+    assert_eq!(
+        (peer.conn, peer.peer, peer.path),
+        (C, peer_id(9), PathKind::Direct)
+    );
+    assert!(peer.open && peer.we_want && peer.serving_us && !peer.they_want);
+    assert_eq!(peer.progress, Some(1.0));
+
+    // Two cells of 20 chunks: the first stored, the second requested in part. Peer 9 holds
+    // every chunk.
+    let map = session.chunk_map(2).unwrap();
+    assert_eq!((map[0].have, map[0].availability), (20, 1));
+    assert_eq!(map[1].have, 0);
+    assert!(map[1].in_flight > 0, "{map:?}");
+    assert_eq!(map[1].in_flight + map[1].missing, 20);
+
+    // Before the manifest there is no map.
+    assert!(fresh(content.manifest().bundle_id()).chunk_map(2).is_none());
+}

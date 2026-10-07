@@ -6,6 +6,7 @@
 //! - [`Engine`]: a handle to the engine task, which owns one [`Node`](tempest_net::Node), LAN
 //!   discovery and a tracker client, and runs transfers through the queue.
 //! - [`events`]: status snapshots and decision events as a numbered, resumable stream.
+//! - [`inspect`]: what the UIs show inside a transfer: files, peers and a chunk map.
 //! - [`manifest`]: building a bundle from a file or folder.
 //! - [`api`]: the HTTP API over an [`Engine`] (D-080), and a client for it.
 //! - [`schedule`]: the weekly schedule for alternative speed limits.
@@ -14,6 +15,7 @@ pub mod api;
 pub mod config;
 mod engine;
 pub mod events;
+pub mod inspect;
 pub mod manifest;
 mod queue;
 pub mod schedule;

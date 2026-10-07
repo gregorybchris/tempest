@@ -214,6 +214,19 @@ pub struct SnapshotInfo {
 }
 
 #[derive(Debug, Deserialize)]
+struct ChunksQuery {
+    #[serde(default = "default_cells")]
+    cells: u32,
+}
+
+/// How many cells a chunk map has when the request doesn't say.
+const DEFAULT_CELLS: u32 = 1024;
+
+fn default_cells() -> u32 {
+    DEFAULT_CELLS
+}
+
+#[derive(Debug, Deserialize)]
 struct RemoveQuery {
     #[serde(default)]
     delete_files: bool,
@@ -229,6 +242,9 @@ pub fn router(engine: Engine, access: Access) -> Router {
             get(list_transfers).post(add_transfer),
         )
         .route(&transfer(""), get(get_transfer).delete(remove_transfer))
+        .route(&transfer("/files"), get(files))
+        .route(&transfer("/peers"), get(peers))
+        .route(&transfer("/chunks"), get(chunks))
         .route(&transfer("/start"), post(start))
         .route(&transfer("/force-start"), post(force_start))
         .route(&transfer("/stop"), post(stop))
@@ -364,6 +380,23 @@ async fn get_transfer(State(engine): State<Engine>, Path(id): Path<String>) -> R
         Some(info) => ok(&info),
         None => Err(crate::EngineError::NotFound(id).into()),
     }
+}
+
+async fn files(State(engine): State<Engine>, Path(id): Path<String>) -> Result {
+    ok(&engine.files(bundle_id(&id)?).await?)
+}
+
+async fn peers(State(engine): State<Engine>, Path(id): Path<String>) -> Result {
+    ok(&engine.peers(bundle_id(&id)?).await?)
+}
+
+async fn chunks(
+    State(engine): State<Engine>,
+    Path(id): Path<String>,
+    query: std::result::Result<Query<ChunksQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result {
+    let Query(query) = query.map_err(|rejection| ApiError::invalid(rejection.body_text()))?;
+    ok(&engine.chunk_map(bundle_id(&id)?, query.cells).await?)
 }
 
 async fn remove_transfer(

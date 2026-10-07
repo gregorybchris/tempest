@@ -69,6 +69,18 @@ The web UIs use Leptos (D-117). Code written for them, by people or agents, foll
 - Keep UI logic in plain Rust modules, and keep components thin.
 - A CI benchmark of a 1,536-cell live view guards against performance regressions.
 
+## Terminal UI and web UI together
+
+The TUI and the client web UI are designed together, not as copies. They share:
+- the feature set (D-118)
+- the vocabulary and statuses
+- the plain-language explanations of state
+- the information hierarchy, so the same things matter at a glance in both
+
+Layout decisions, including the planned layout rethink, apply to both where they make sense. Each interface keeps its own affordances. The TUI is keyboard-first and dense; the web UI can use pointer interactions, richer charts and wider layouts. Full parity is not a goal.
+
+The dummy TUI in `prototypes/tui/` was well received as a starting point (D-119).
+
 ## Terminal UI
 
 ratatui, with a k9s/lazygit-style keyboard model (D-090):
@@ -92,6 +104,6 @@ These come from the research, to try in the prototype:
 
 ## Open questions
 
-- Which palette (or palettes, as themes) ships, and a rethought client layout for M8.
+- Which palette (or palettes, as themes) ships, and a rethought client layout, shared by the TUI (M7) and web UI (M8).
 - CLI command names and output style.
 - Onboarding flow for first-time users (e.g. one big "drop or paste anything" target).

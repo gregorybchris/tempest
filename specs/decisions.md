@@ -1795,3 +1795,18 @@ The full field list is in `protocol/trackers.md`.
 - **Automation:** run a command on completion, start on login and tray icon, keep awake, battery and metered awareness.
 
 **Statuses:** downloading, sharing, stalled, queued, stopped, completed, errored, plus checking (recheck) and moving (move storage).
+
+---
+
+## D-119: TUI and web UI are designed together
+
+**Date:** 2026-10-06 · **Status:** Decided
+
+**Context:** The owner reviewed the dummy TUI (`prototypes/tui/`) and found it "really great", with little specific feedback.
+
+**Decision:**
+
+- The TUI and the client web UI share a feature set (D-118), vocabulary, statuses, state explanations and information hierarchy.
+- Feedback on one, starting with the planned layout rethink, is considered for the other wherever it makes sense.
+- Full parity is not a goal. Each keeps its natural affordances: the TUI is keyboard-first and dense, and the web UI has pointer interactions and richer charts.
+- The client layout rethink happens before M7, so the TUI and web UI start from the same layout thinking.

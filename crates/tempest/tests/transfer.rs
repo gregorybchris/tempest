@@ -29,10 +29,11 @@ struct Sharer {
 }
 
 impl Sharer {
-    /// Shares `path` on 127.0.0.1 with a port the system picks, and waits for its link. The
-    /// identity file is passed with `--identity`, or in the environment if `by_env` is set.
+    /// Shares `path` on 127.0.0.1 with a port the system picks and LAN discovery off, and waits
+    /// for its link. The identity file is passed with `--identity`, or in the environment if
+    /// `by_env` is set.
     fn start(path: &Path, identity: &Path, by_env: bool) -> Self {
-        Self::start_with(path, identity, by_env, &[])
+        Self::start_with(path, identity, by_env, &["--no-lan"])
     }
 
     /// [`Sharer::start`] with `extra` arguments.
@@ -190,7 +191,7 @@ fn get_downloads_what_share_serves() {
 
     let output = dir.path().join("downloads");
     let getter = dir.path().join("getter.pem");
-    let got = get(&sharer.link, &output, &getter, &[]);
+    let got = get(&sharer.link, &output, &getter, &["--no-lan"]);
     assert!(got.status.success(), "{}", stderr(&got));
     let folder = output.join("photos");
     assert_eq!(
@@ -200,7 +201,7 @@ fn get_downloads_what_share_serves() {
     assert_same_tree(&source, &folder);
 
     // A second download refuses to write into the first one's folder.
-    let again = get(&sharer.link, &output, &getter, &[]);
+    let again = get(&sharer.link, &output, &getter, &["--no-lan"]);
     assert!(!again.status.success());
     assert!(stderr(&again).contains("photos"), "{}", stderr(&again));
 }
@@ -212,7 +213,12 @@ fn get_finds_the_sharer_through_a_tracker() {
     sample_folder(&source);
     let tracker = TrackerProcess::start();
     let identity = dir.path().join("sharer.pem");
-    let sharer = Sharer::start_with(&source, &identity, false, &["--tracker", &tracker.url]);
+    let sharer = Sharer::start_with(
+        &source,
+        &identity,
+        false,
+        &["--tracker", &tracker.url, "--no-lan"],
+    );
     let link: Link = sharer.link.parse().unwrap();
     assert_eq!(link.trackers, std::slice::from_ref(&tracker.url));
 
@@ -224,8 +230,37 @@ fn get_finds_the_sharer_through_a_tracker() {
         &bare.to_string(),
         &output,
         &dir.path().join("getter.pem"),
-        &[],
+        &["--no-lan"],
     );
+    assert!(got.status.success(), "{}", stderr(&got));
+    assert_same_tree(&source, &output.join("photos"));
+}
+
+/// A port of the test's own for LAN discovery, so concurrent tests don't hear each other.
+fn lan_port() -> String {
+    UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+        .to_string()
+}
+
+#[test]
+fn get_finds_the_sharer_on_the_local_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photos");
+    sample_folder(&source);
+    let lan_port = lan_port();
+    let identity = dir.path().join("sharer.pem");
+    let sharer = Sharer::start_with(&source, &identity, false, &["--lan-port", &lan_port]);
+
+    // Only the bundle: the sharer is found through LAN discovery, on loopback.
+    let bare = Link::new(sharer.link.parse::<Link>().unwrap().bundle);
+    let output = dir.path().join("downloads");
+    let getter = dir.path().join("getter.pem");
+    let extra = ["--bind", "127.0.0.1", "--lan-port", &lan_port];
+    let got = get(&bare.to_string(), &output, &getter, &extra);
     assert!(got.status.success(), "{}", stderr(&got));
     assert_same_tree(&source, &output.join("photos"));
 }
@@ -248,7 +283,7 @@ fn the_identity_persists_and_can_be_set_by_environment() {
 }
 
 #[test]
-fn get_needs_a_peer_with_an_address_or_a_tracker() {
+fn get_needs_a_peer_with_an_address_a_tracker_or_lan_discovery() {
     let dir = tempfile::tempdir().unwrap();
     let identity = dir.path().join("identity.pem");
     let bundle = "207855f013f5a4066c9987ee3fa4b0ae63c8eeee02035634587286457cf5b85a";
@@ -266,7 +301,7 @@ fn get_needs_a_peer_with_an_address_or_a_tracker() {
         ),
     ];
     for (link, message) in cases {
-        let output = get(&link, dir.path(), &identity, &[]);
+        let output = get(&link, dir.path(), &identity, &["--no-lan"]);
         assert!(!output.status.success());
         assert!(stderr(&output).contains(message), "{}", stderr(&output));
     }
@@ -286,13 +321,41 @@ fn get_gives_up_on_an_unreachable_sharer() {
     let link = format!("tempest:?bundle={bundle}&peer={peer}&addr=127.0.0.1:{port}");
 
     let identity = dir.path().join("identity.pem");
-    let output = get(&link, dir.path(), &identity, &["--timeout", "1"]);
+    let output = get(
+        &link,
+        dir.path(),
+        &identity,
+        &["--timeout", "1", "--no-lan"],
+    );
     assert!(!output.status.success());
     let message = stderr(&output);
     assert!(
         message.contains(&format!(
             "could not get the bundle from 127.0.0.1:{port} within 1 s"
         )),
+        "{message}"
+    );
+}
+
+#[test]
+fn get_gives_up_when_nobody_on_the_local_network_has_the_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let link = "tempest:?bundle=207855f013f5a4066c9987ee3fa4b0ae63c8eeee02035634587286457cf5b85a";
+    let identity = dir.path().join("identity.pem");
+    let lan_port = lan_port();
+    let extra = [
+        "--timeout",
+        "1",
+        "--bind",
+        "127.0.0.1",
+        "--lan-port",
+        &lan_port,
+    ];
+    let output = get(link, dir.path(), &identity, &extra);
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(
+        message.contains("could not get the bundle from peers on the local network within 1 s"),
         "{message}"
     );
 }

@@ -2741,3 +2741,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `tempest share --tracker URL` names the tracker in the link and announces to it. `tempest get` asks every tracker the link names, plus any given with `--tracker`, and needs either a peer with an address or a tracker.
 
 **Rationale:** reqwest is the standard async HTTP client and lets the TLS configuration match the rest of Tempest's. A task per bundle and tracker keeps each announce schedule independent and easy to follow; trackers see the same requests either way. Announcing only public addresses follows the protocol's advice not to leak local network details.
+
+---
+
+## D-178: LAN discovery details
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** `protocol/discovery.md` fixes LAN discovery's messages, groups and reply rate, but leaves open which interfaces to use, which socket to send from, what a query reveals, and how heard-of peers reach downloads.
+
+**Options for interfaces:** the system's default multicast interface; every interface; the interfaces of the addresses the endpoint advertises (chosen). **For sending:** from the shared listening socket; from the QUIC socket (quinn owns it); from a socket per interface bound to its address on a port of its own (chosen). **For queries:** only prompt replies; also make the querier known (chosen). **For delivery:** every heard-of peer to every bundle; to downloads only, until they complete (chosen).
+
+**Decision:**
+
+- LAN discovery announces on the interfaces of the addresses the endpoint advertises (D-175): every non-loopback interface for a wildcard bind, and exactly the bound address otherwise, loopback included. Each gets a sending socket bound to that address, so a datagram's source is an address the endpoint is reachable at and replies to queries come back to it. A listening socket per family on the group port, with address and port reuse, joins the group on each interface.
+- It announces and queries when it starts, announces every 60 seconds, and queries when a download is watched, at most once a second.
+- A query reveals its sender as an announce does. Senders with link-local IPv6 source addresses are answered but not dialed, since an address can't carry their scope ID.
+- Peers heard of are handed to watched downloads, never to complete bundles. They are remembered for 3 minutes after last heard, up to 1,024 peers and 8 addresses each, so a download that starts later gets them at once.
+- `tempest share` and `tempest get` run LAN discovery unless `--no-lan` is given, and `--lan-port` changes the group port. `get` accepts a link with only a bundle ID while LAN discovery runs. If it can't start, they warn and carry on.
+
+**Rationale:** Announcing only where the endpoint is reachable keeps every heard-of address dialable. A socket bound per interface follows the protocol's advice to query from a unique port, and needs no per-packet source selection. A querier is a peer on the LAN like any other, and is likely downloading something. Seeds don't dial, so only downloads need peers.

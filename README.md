@@ -30,7 +30,7 @@ tempest tracker                                   # runs a tracker
 tempest share --tracker http://host:4777 ./photos # announces the bundle to it
 ```
 
-`tempest <command> --help` lists each command's options.
+Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. `tempest <command> --help` lists each command's options.
 
 ## Repository
 

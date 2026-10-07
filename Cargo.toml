@@ -44,7 +44,8 @@ pem-rfc7468 = { version = "1", features = ["std"] }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-socket2 = "0.6"
+# `all` for SO_REUSEPORT, so several clients on one machine can listen for LAN discovery.
+socket2 = { version = "0.6", features = ["all"] }
 
 # HTTP for trackers (D-043): axum serves, reqwest asks. Both use only HTTP/1.1 and tokio; reqwest
 # gets rustls on ring with the platform's certificate verifier, like the rest of the TLS stack.

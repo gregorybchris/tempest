@@ -6,10 +6,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use tempest_net::{
-    AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, Identity, Node, NodeConfig,
-    TrackerClient,
+    AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, Identity, Lan, LanConfig,
+    Node, NodeConfig, TrackerClient,
 };
 use tempest_protocol::Address;
+use tempest_protocol::lan::LAN_PORT;
 
 /// How long a tracker request may take.
 const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -28,6 +29,12 @@ pub struct PeerArgs {
     /// both families.
     #[arg(long, value_name = "IP")]
     pub bind: Vec<IpAddr>,
+    /// Neither look for peers on the local network nor announce this one there.
+    #[arg(long)]
+    pub no_lan: bool,
+    /// The UDP port of LAN discovery's multicast groups.
+    #[arg(long, default_value_t = LAN_PORT, value_name = "PORT")]
+    pub lan_port: u16,
 }
 
 /// A running node and what it needs to tell others about itself.
@@ -35,6 +42,8 @@ pub struct Peer {
     pub node: Node,
     /// The addresses it advertises.
     pub addresses: Vec<Address>,
+    /// LAN discovery, unless it is off or could not start.
+    pub lan: Option<Lan>,
 }
 
 impl Peer {
@@ -103,9 +112,21 @@ impl PeerArgs {
             Vec::new()
         };
         config.addresses = addresses.clone();
+        let lan = if self.no_lan {
+            None
+        } else {
+            let config = LanConfig {
+                port: self.lan_port,
+                ..LanConfig::default()
+            };
+            Lan::start(&endpoint, config)
+                .inspect_err(|error| eprintln!("warning: LAN discovery is off: {error}"))
+                .ok()
+        };
         Ok(Peer {
             node: Node::start(endpoint, config),
             addresses,
+            lan,
         })
     }
 

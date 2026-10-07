@@ -25,7 +25,7 @@ pub fn direct_addresses(bound: &[SocketAddr]) -> io::Result<Vec<Address>> {
 
 /// The addresses to advertise for sockets bound to `bound` on a machine whose interfaces have
 /// the addresses `interfaces`.
-fn advertise(bound: &[SocketAddr], interfaces: &[IpAddr]) -> Vec<Address> {
+pub(crate) fn advertise(bound: &[SocketAddr], interfaces: &[IpAddr]) -> Vec<Address> {
     let mut addresses = Vec::new();
     for socket in bound {
         if socket.ip().is_unspecified() {

@@ -1,5 +1,5 @@
-//! `tempest get`: download a bundle from the peer its link names and the peers its trackers
-//! list.
+//! `tempest get`: download a bundle from the peer its link names, the peers its trackers list
+//! and the peers on the local network.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -53,10 +53,10 @@ pub fn get(args: GetArgs) -> Result<()> {
         });
     let mut trackers = link.trackers.clone();
     trackers.extend(args.tracker.iter().cloned());
-    if record.is_none() && trackers.is_empty() {
+    if record.is_none() && trackers.is_empty() && args.peer.no_lan {
         bail!(
-            "the link names neither a peer with an address nor a tracker \
-             (reaching peers through relays is not supported yet)"
+            "the link names neither a peer with an address nor a tracker, and LAN discovery is \
+             off (reaching peers through relays is not supported yet)"
         );
     }
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
@@ -69,17 +69,27 @@ async fn download(
     record: Option<PeerRecord>,
     trackers: Vec<String>,
 ) -> Result<()> {
+    let peer = args.peer.start(args.port, false)?;
     let sources = Sources {
         addresses: record.iter().flat_map(|r| r.addresses.clone()).collect(),
         trackers: trackers.len(),
+        lan: peer.lan.is_some(),
     };
-    let peer = args.peer.start(args.port, false)?;
+    if !sources.any() {
+        bail!(
+            "the link names neither a peer with an address nor a tracker, and LAN discovery \
+             could not start"
+        );
+    }
     let destination = Destination::NewFolderIn(args.output.clone());
     let mut handle = peer
         .node
         .download(bundle, destination, record.into_iter().collect())
         .await?;
     let announcers = peer.announce(&trackers, &handle)?;
+    if let Some(lan) = &peer.lan {
+        lan.watch(&handle).await;
+    }
     let started = Instant::now();
     let timeout = Duration::from_secs(args.timeout);
     let mut watch = Watch::new(&sources, timeout);
@@ -107,9 +117,15 @@ struct Sources {
     addresses: Vec<Address>,
     /// How many trackers it asks.
     trackers: usize,
+    /// Whether it looks on the local network.
+    lan: bool,
 }
 
 impl Sources {
+    fn any(&self) -> bool {
+        !self.addresses.is_empty() || self.trackers > 0 || self.lan
+    }
+
     fn describe(&self) -> String {
         let addresses: Vec<String> = self.addresses.iter().map(ToString::to_string).collect();
         let trackers = match self.trackers {
@@ -118,7 +134,8 @@ impl Sources {
             n => Some(format!("peers from {n} trackers")),
         };
         let addresses = (!addresses.is_empty()).then(|| addresses.join(", "));
-        [addresses, trackers]
+        let lan = self.lan.then(|| "peers on the local network".to_owned());
+        [addresses, trackers, lan]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()

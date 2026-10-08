@@ -120,6 +120,10 @@ all = { level = "warn", priority = -1 }
 [profile.dev]
 debug = "line-tables-only"
 
+# Dependencies' debug info is never used: our backtraces only need our own crates' line tables.
+[profile.dev.package."*"]
+debug = false
+
 # Hashing dominates test time in unoptimized builds; optimizing it keeps swarm tests fast.
 [profile.dev.package.sha2]
 opt-level = 3
@@ -127,7 +131,6 @@ opt-level = 3
 # DuckDB is C++: debug info makes its objects take gigabytes, and unoptimized it appends slowly.
 [profile.dev.package.libduckdb-sys]
 opt-level = 2
-debug = false
 
 # The web UIs' WebAssembly, built by trunk (`--cargo-profile web`) to embed in the binary: small
 # rather than fast, which its work never needs.

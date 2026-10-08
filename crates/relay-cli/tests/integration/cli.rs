@@ -15,7 +15,7 @@ fn the_version_names_the_program() {
     assert!(text.starts_with("tempest-relay "), "{text}");
 }
 
-/// A relay starts, says how peers name it, and stops when killed.
+/// A relay starts, says how peers name it, and on SIGTERM stops cleanly.
 #[test]
 fn the_relay_says_how_peers_name_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -34,15 +34,33 @@ fn the_relay_says_how_peers_name_it() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let stderr = BufReader::new(child.stderr.take().unwrap());
-    let named = stderr
+    let mut lines = BufReader::new(child.stderr.take().unwrap())
         .lines()
-        .map_while(Result::ok)
+        .map_while(Result::ok);
+    let named = lines
+        .by_ref()
         .find_map(|line| line.strip_prefix("peers name it ").map(str::to_owned));
-    let _ = child.kill();
-    let _ = child.wait();
-    let named = named.expect("the relay printed no identity");
+    let Some(named) = named else {
+        let _ = child.kill();
+        panic!("the relay printed no identity: {:?}", child.wait());
+    };
     let (key, address) = named.split_once('@').expect("<key>@<host>:<port>");
     assert_eq!(key.len(), 64, "{named}");
     assert!(address.starts_with("127.0.0.1:"), "{named}");
+
+    #[cfg(unix)]
+    {
+        let sent = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        assert!(lines.any(|line| line == "stopped"), "no clean stop");
+        assert!(child.wait().unwrap().success());
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }

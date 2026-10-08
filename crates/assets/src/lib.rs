@@ -1,5 +1,5 @@
 //! Serving a web UI's files, embedded at build time when they were built (D-201), and opening
-//! it in a browser. Shared by the `tempest` and `tempest-sim` binaries.
+//! it in a browser. Shared by the binaries that embed a UI.
 
 pub mod build;
 

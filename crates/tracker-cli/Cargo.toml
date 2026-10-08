@@ -1,0 +1,39 @@
+[package]
+name = "tempest-tracker-cli"
+description = "tempest-tracker, Tempest's tracker: peer lists, listings with search, and the tracker's website"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tempest-tracker"
+path = "src/main.rs"
+
+# Not released yet: whether releases ship the server binaries is open (D-236).
+[package.metadata.dist]
+dist = false
+
+[dependencies]
+tempest-assets.workspace = true
+tempest-net.workspace = true
+tempest-protocol.workspace = true
+tempest-tracker.workspace = true
+tempest-tracker-api.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+
+[build-dependencies]
+tempest-assets.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

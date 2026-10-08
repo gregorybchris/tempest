@@ -1,4 +1,4 @@
-//! `tempest tracker`: run a tracker's peer-list service.
+//! `tempest-tracker`: run a tracker, and operate its catalog.
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use tempest_assets as assets;
 use tempest_net::FetchLimits;
 use tempest_protocol::{BundleId, PeerId, RelayIdentity};
-use tempest_relay::RelayConfig;
 use tempest_tracker::limits::Action;
 use tempest_tracker::{
     Catalog, CatalogConfig, CatalogLimits, DEFAULT_PORT, FetcherConfig, Rate, Tracker,
@@ -17,9 +16,6 @@ use tempest_tracker::{
 };
 use tempest_tracker_api::Category;
 use tokio::net::TcpListener;
-use tokio::sync::watch;
-
-use crate::relay;
 
 /// The tracker website's files, by their path in the page, as `crates/tracker-web/dist` held them at
 /// build time (D-201).
@@ -36,15 +32,21 @@ const TRACKER_WEB_NOT_BUILT: &str = r#"<!DOCTYPE html>
   code { color: #d2ffe0; }
 </style>
 <h1>Tempest tracker</h1>
-<p>The tracker is running, but this <code>tempest</code> binary was built without its website.</p>
+<p>The tracker is running, but this <code>tempest-tracker</code> binary was built without its website.</p>
 <p>Build the website with <code>trunk build</code> in <code>crates/tracker-web</code>,
-then build <code>tempest</code> again. Meanwhile, its API answers under <code>/tempest/v1</code>, as in
+then build <code>tempest-tracker</code> again. Meanwhile, its API answers under <code>/tempest/v1</code>, as in
 <code>/tempest/v1/listings</code>.</p>
 </html>
 "#;
 
-#[derive(Debug, clap::Args)]
-#[command(args_conflicts_with_subcommands = true)]
+/// Tempest's tracker: helps peers in public swarms find each other, and with a catalog, takes
+/// listings and serves a website of them.
+#[derive(Debug, clap::Parser)]
+#[command(
+    name = "tempest-tracker",
+    version,
+    args_conflicts_with_subcommands = true
+)]
 pub struct TrackerArgs {
     #[command(subcommand)]
     command: Option<TrackerCommand>,
@@ -63,24 +65,13 @@ pub struct TrackerArgs {
     /// The most peers listed across all swarms.
     #[arg(long, default_value_t = TrackerConfig::default().max_peers)]
     max_peers: usize,
-    /// A relay to recommend to peers, as `<key>@host[:port]`. Repeat for more.
+    /// A relay to recommend to peers, as `<key>@host[:port]`, which `tempest-relay` prints
+    /// when it starts. Repeat for more. The relay runs separately.
     #[arg(long, value_name = "RELAY")]
     relay: Vec<RelayIdentity>,
     /// Serve only this bundle, making the tracker private. Repeat for more.
     #[arg(long, value_name = "BUNDLE")]
     allow: Vec<BundleId>,
-    /// Also run a relay, with the default limits of `tempest relay`.
-    #[arg(long)]
-    run_relay: bool,
-    /// The relay's UDP port.
-    #[arg(long, default_value_t = tempest_relay::DEFAULT_PORT, requires = "run_relay")]
-    relay_port: u16,
-    /// The relay's public IP address. With it, the tracker recommends its own relay to peers.
-    #[arg(long, value_name = "IP", requires = "run_relay")]
-    relay_public_ip: Option<IpAddr>,
-    /// The relay's key file. Created if missing. Defaults to that of `tempest relay`.
-    #[arg(long, value_name = "FILE", requires = "run_relay")]
-    relay_identity: Option<PathBuf>,
     /// Requests arrive through a reverse proxy, such as one that adds HTTPS: take the client's
     /// IP from the last `X-Forwarded-For` entry.
     #[arg(long)]
@@ -96,7 +87,7 @@ struct CatalogArgs {
     /// responsible for what it lists.
     #[arg(long, value_name = "FILE")]
     catalog: Option<PathBuf>,
-    /// Let a key join the catalog only with an invite (see `tempest tracker invite`).
+    /// Let a key join the catalog only with an invite (see `tempest-tracker invite`).
     #[arg(long, requires = "catalog")]
     invites_required: bool,
     /// A category listings can be in, as `slug=Name`. Repeat for more; replaces the defaults.
@@ -130,7 +121,7 @@ struct CatalogArgs {
 enum TrackerCommand {
     /// Make an invite to a catalog, and print its code.
     Invite {
-        /// The catalog's SQLite file, as given to `tempest tracker --catalog`.
+        /// The catalog's SQLite file, as given to `tempest-tracker --catalog`.
         #[arg(long, value_name = "FILE")]
         catalog: PathBuf,
     },
@@ -176,7 +167,7 @@ enum TrackerCommand {
 /// work whether or not a tracker is running on it.
 #[derive(Debug, clap::Args)]
 struct CatalogFile {
-    /// The catalog's SQLite file, as given to `tempest tracker --catalog`.
+    /// The catalog's SQLite file, as given to `tempest-tracker --catalog`.
     #[arg(long, value_name = "FILE")]
     catalog: PathBuf,
 }
@@ -270,11 +261,7 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         None => {}
     }
     let catalog = args.catalog.open()?;
-    let relay_identity = args
-        .run_relay
-        .then(|| relay::load_identity(args.relay_identity.as_ref()))
-        .transpose()?;
-    let mut config = TrackerConfig {
+    let config = TrackerConfig {
         interval: Duration::from_secs(args.interval.max(1)),
         min_interval: Duration::from_secs(args.min_interval),
         max_peers: args.max_peers,
@@ -285,25 +272,6 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
     };
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
     runtime.block_on(async {
-        // Relaying is one of the tracker's roles (D-028).
-        let relay = match &relay_identity {
-            Some(identity) => {
-                let relay_config = RelayConfig {
-                    public_ip: args.relay_public_ip,
-                    ..RelayConfig::new(SocketAddr::new(
-                        Ipv4Addr::UNSPECIFIED.into(),
-                        args.relay_port,
-                    ))
-                };
-                let relay = relay::start(identity, relay_config, args.bind)?;
-                config
-                    .relays
-                    .extend(relay::identity_of(&relay, args.relay_public_ip)?);
-                Some(relay)
-            }
-            None => None,
-        };
-
         let listener = bind(args.bind, args.port).await?;
         let address = listener.local_addr()?;
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
@@ -319,22 +287,10 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
                 .fetcher(args.catalog.fetcher())
                 .with_pages(assets::router(TRACKER_WEB, TRACKER_WEB_NOT_BUILT));
         }
-        let (stop, stopped) = watch::channel(false);
-        tokio::spawn(async move {
+        let shutdown = async {
             let _ = tokio::signal::ctrl_c().await;
-            let _ = stop.send(true);
-        });
-        let shutdown = |mut stopped: watch::Receiver<bool>| async move {
-            let _ = stopped.wait_for(|stop| *stop).await;
         };
-        let relaying = async {
-            if let Some(relay) = &relay {
-                relay.serve(shutdown(stopped.clone())).await;
-            }
-        };
-        let (served, ()) =
-            tokio::join!(tracker.serve(listener, shutdown(stopped.clone())), relaying);
-        served?;
+        tracker.serve(listener, shutdown).await?;
         eprintln!("stopped");
         Ok(())
     })

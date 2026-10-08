@@ -1,5 +1,6 @@
 //! `tempest share` and `tempest get` as separate processes on localhost.
 
+use crate::common;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
@@ -80,7 +81,7 @@ fn lines(stream: impl std::io::Read + Send + 'static) -> mpsc::Receiver<String> 
     received
 }
 
-/// A running `tempest tracker` on localhost, killed when dropped.
+/// A running `tempest-tracker` on localhost, killed when dropped.
 struct TrackerProcess {
     child: Child,
     url: String,
@@ -88,8 +89,8 @@ struct TrackerProcess {
 
 impl TrackerProcess {
     fn start() -> Self {
-        let mut child = tempest()
-            .args(["tracker", "--bind", "127.0.0.1", "--port", "0"])
+        let mut child = common::tracker()
+            .args(["--bind", "127.0.0.1", "--port", "0"])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -367,7 +368,7 @@ fn the_default_port_is_4773() {
     assert!(help.contains("[default: 4773]"), "{help}");
 }
 
-/// A running `tempest relay` on 127.0.0.1, killed when dropped.
+/// A running `tempest-relay` on 127.0.0.1, killed when dropped.
 struct RelayProcess {
     child: Child,
     /// How peers name it: `<key>@127.0.0.1:<port>`.
@@ -376,8 +377,8 @@ struct RelayProcess {
 
 impl RelayProcess {
     fn start(identity: &Path) -> Self {
-        let mut child = tempest()
-            .args(["relay", "--bind", "127.0.0.1", "--port", "0"])
+        let mut child = common::relay()
+            .args(["--bind", "127.0.0.1", "--port", "0"])
             .args(["--public-ip", "127.0.0.1", "--identity"])
             .arg(identity)
             .stdout(Stdio::null())

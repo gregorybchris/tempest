@@ -1,4 +1,4 @@
-//! `tempest relay`: run a relay, which lends public addresses to peers behind routers.
+//! `tempest-relay`: run a relay, which lends public addresses to peers behind routers.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
@@ -6,13 +6,15 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use tempest_net::Identity;
 use tempest_protocol::PeerId;
-use tempest_protocol::relay::{RelayHost, RelayIdentity};
+use tempest_protocol::relay::RelayHost;
 use tempest_relay::{DEFAULT_PORT, Relay, RelayConfig};
 
 /// The environment variable that overrides where the relay's identity is stored.
 const RELAY_IDENTITY_ENV: &str = "TEMPEST_RELAY_IDENTITY";
 
-#[derive(Debug, clap::Args)]
+/// Runs a relay, which lends public addresses to peers behind routers.
+#[derive(Debug, clap::Parser)]
+#[command(name = "tempest-relay", version)]
 pub struct RelayArgs {
     /// The relay's key file. Created if missing. Defaults to `relay.pem` in Tempest's folder in
     /// the per-user data directory.
@@ -71,11 +73,11 @@ pub fn relay(args: RelayArgs) -> Result<()> {
 }
 
 /// Loads the relay's identity from `path`, or from its default place.
-pub fn load_identity(path: Option<&PathBuf>) -> Result<Identity> {
+fn load_identity(path: Option<&PathBuf>) -> Result<Identity> {
     let path = match path {
         Some(path) => path.clone(),
         None => {
-            let data_dir = tempest_engine::config::default_data_dir().with_context(|| {
+            let data_dir = tempest_net::dirs::default_data_dir().with_context(|| {
                 format!(
                     "cannot find the per-user data directory; pass --identity or set \
                      {RELAY_IDENTITY_ENV}"
@@ -91,7 +93,7 @@ pub fn load_identity(path: Option<&PathBuf>) -> Result<Identity> {
 /// Binds a relay on `ip`, or else IPv6's wildcard address, which takes IPv4 too on most
 /// systems, falling back to IPv4's. Tells the operator how peers should name it. Must be called
 /// within a tokio runtime.
-pub fn start(identity: &Identity, config: RelayConfig, ip: Option<IpAddr>) -> Result<Relay> {
+fn start(identity: &Identity, config: RelayConfig, ip: Option<IpAddr>) -> Result<Relay> {
     let port = config.bind.port();
     let candidates = match ip {
         Some(ip) => vec![ip],
@@ -117,16 +119,6 @@ pub fn start(identity: &Identity, config: RelayConfig, ip: Option<IpAddr>) -> Re
     }
     let error = last.expect("at least one candidate");
     Err(error).with_context(|| format!("cannot bind UDP port {port}"))
-}
-
-/// The relay's identity, if its public IP is known.
-pub fn identity_of(relay: &Relay, public_ip: Option<IpAddr>) -> Result<Option<RelayIdentity>> {
-    let port = relay.local_addr()?.port();
-    Ok(public_ip.map(|ip| RelayIdentity {
-        key: relay.key(),
-        host: RelayHost::Ip(ip),
-        port,
-    }))
 }
 
 fn parse_ports(text: &str) -> Result<(u16, u16)> {

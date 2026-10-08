@@ -1,4 +1,4 @@
-//! The tracker's website in headless Chrome, against `tempest tracker --catalog` with bundles
+//! The tracker's website in headless Chrome, against `tempest-tracker --catalog` with bundles
 //! published by `tempest share --publish`: searching with a typo, narrowing by category and
 //! tag, and signing in by signing the page's code with `tempest sign-in`.
 //!
@@ -9,6 +9,7 @@
 
 #![cfg(unix)]
 
+use crate::common;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -110,10 +111,10 @@ fn http(address: &str, method: &str, path: &str, body: Option<&Value>) -> (u16, 
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
-/// Starts `tempest tracker` with listings in `dir`, and returns it with its address.
+/// Starts `tempest-tracker` with listings in `dir`, and returns it with its address.
 fn start_tracker(dir: &Path) -> (Running, String) {
-    let mut child = tempest()
-        .args(["tracker", "--bind", "127.0.0.1", "--port", "0", "--catalog"])
+    let mut child = common::tracker()
+        .args(["--bind", "127.0.0.1", "--port", "0", "--catalog"])
         .arg(dir.join("catalog.db"))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

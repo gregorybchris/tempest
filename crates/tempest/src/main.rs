@@ -7,9 +7,7 @@ mod handoff;
 mod peer;
 mod progress;
 mod publish;
-mod relay;
 mod share;
-mod tracker;
 mod transfers;
 mod tui;
 mod web;
@@ -52,7 +50,7 @@ enum Command {
     Daemon(daemon::DaemonArgs),
     /// Moved to the `tempest-sim` binary (D-214).
     #[command(hide = true)]
-    Sim(SimArgs),
+    Sim(MovedArgs),
     /// List a transfer on a tracker, or change its listing.
     Publish(publish::PublishArgs),
     /// Remove a transfer's listing from a tracker, and stop asking the tracker to list it.
@@ -60,15 +58,18 @@ enum Command {
     /// Sign a browser in to a tracker's website: sign the code the website shows with this
     /// installation's key.
     SignIn(publish::SignInArgs),
-    /// Run a tracker, which helps peers in public swarms find each other.
-    Tracker(tracker::TrackerArgs),
-    /// Run a relay, which lends public addresses to peers behind routers.
-    Relay(relay::RelayArgs),
+    /// Moved to the `tempest-tracker` binary (D-236).
+    #[command(hide = true)]
+    Tracker(MovedArgs),
+    /// Moved to the `tempest-relay` binary (D-236).
+    #[command(hide = true)]
+    Relay(MovedArgs),
 }
 
-/// What `tempest sim` was given; it only points to `tempest-sim`.
+/// What `tempest sim`, `tempest tracker` and `tempest relay` were given; they only point to the
+/// program that replaced them.
 #[derive(Debug, clap::Args)]
-struct SimArgs {
+struct MovedArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
     _args: Vec<String>,
 }
@@ -91,8 +92,12 @@ fn main() -> ExitCode {
         Command::Publish(args) => publish::publish(args),
         Command::Unpublish(args) => publish::unpublish(args),
         Command::SignIn(args) => publish::sign_in(args),
-        Command::Tracker(args) => tracker::tracker(args),
-        Command::Relay(args) => relay::relay(args),
+        Command::Tracker(_) => Err(anyhow::anyhow!(
+            "the tracker is now its own program: run `tempest-tracker` with the same arguments"
+        )),
+        Command::Relay(_) => Err(anyhow::anyhow!(
+            "the relay is now its own program: run `tempest-relay` with the same arguments"
+        )),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

@@ -1,6 +1,7 @@
-//! `tempest share --publish` against `tempest tracker --catalog`, as separate processes on
+//! `tempest share --publish` against `tempest-tracker --catalog`, as separate processes on
 //! localhost: the bundle shows on the tracker with its content and the metadata given.
 
+use crate::common;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
@@ -47,10 +48,10 @@ impl Drop for Running {
     }
 }
 
-/// Starts `tempest tracker` with listings (a catalog file) in `dir` and returns it with its URL.
+/// Starts `tempest-tracker` with listings (a catalog file) in `dir` and returns it with its URL.
 fn start_tracker(dir: &Path) -> (Running, String) {
-    let mut child = tempest()
-        .args(["tracker", "--bind", "127.0.0.1", "--port", "0", "--catalog"])
+    let mut child = common::tracker()
+        .args(["--bind", "127.0.0.1", "--port", "0", "--catalog"])
         .arg(dir.join("catalog.db"))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -196,8 +197,8 @@ fn listing_fields_need_publish() {
 #[test]
 fn publishing_to_a_tracker_without_listings_says_so() {
     let dir = tempfile::tempdir().unwrap();
-    let mut child = tempest()
-        .args(["tracker", "--bind", "127.0.0.1", "--port", "0"])
+    let mut child = common::tracker()
+        .args(["--bind", "127.0.0.1", "--port", "0"])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -250,163 +251,4 @@ fn sign_in_signs_a_browsers_code() {
     let (status, collected) = request(&url, "POST", "/tempest/v1/session/challenges/poll", &poll);
     assert_eq!(status, 200, "{collected}");
     assert_eq!(collected["session"]["account"]["key"], key);
-}
-
-/// The tracker's website is at `/`, whether it was built into the binary or not, and every
-/// file it names is served.
-#[test]
-fn the_tracker_serves_its_website() {
-    let dir = tempfile::tempdir().unwrap();
-    let (_tracker, url) = start_tracker(dir.path());
-    let address = url.strip_prefix("http://").unwrap();
-    let page = |path: &str| {
-        let mut stream = TcpStream::connect(address).unwrap();
-        write!(
-            stream,
-            "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
-        let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).unwrap();
-        let text = String::from_utf8_lossy(&raw).into_owned();
-        let (head, body) = text.split_once("\r\n\r\n").unwrap();
-        (head.split(' ').nth(1).unwrap().to_owned(), body.to_owned())
-    };
-    let (status, html) = page("/");
-    assert_eq!(status, "200");
-    assert!(html.contains("<title>Tempest tracker</title>"), "{html}");
-    for name in html
-        .split('"')
-        .filter(|part| part.ends_with(".js") || part.ends_with(".css") || part.ends_with(".wasm"))
-    {
-        let path = format!("/{}", name.trim_start_matches('/'));
-        assert_eq!(page(&path).0, "200", "{path}");
-    }
-    // The API's paths stay the API's.
-    let (status, body) = page("/tempest/v1/nowhere");
-    assert_eq!(status, "404");
-    assert!(body.contains("not_found"), "{body}");
-}
-
-/// The operator's commands act on the catalog file, with the tracker stopped or running.
-#[test]
-fn operator_commands_hide_ban_and_list_reports() {
-    use tempest_protocol::Hash;
-    use tempest_tracker::{Catalog, CatalogConfig};
-    use tempest_tracker_api::listing::{Content, NewReport};
-
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("catalog.db");
-    let (publisher, reporter) = (Hash::new([1; 32]), Hash::new([2; 32]));
-    let (first, second) = (Hash::new([0xa1; 32]), Hash::new([0xa2; 32]));
-    {
-        let mut catalog = Catalog::open(&file, CatalogConfig::default()).unwrap();
-        for bundle in [&first, &second] {
-            catalog.request_listing(100, bundle, &publisher).unwrap();
-            let content = Content {
-                name: "data".into(),
-                size: 1,
-                files: 1,
-            };
-            catalog.set_content(bundle, &content).unwrap();
-        }
-        catalog
-            .request_listing(100, &Hash::new([9; 32]), &reporter)
-            .unwrap();
-        let report = NewReport {
-            reason: "looks like malware\nsee the readme".into(),
-        };
-        catalog.report(200, &first, &reporter, &report).unwrap();
-    }
-    let operate = |args: &[&str]| {
-        let output = tempest()
-            .args(["tracker"])
-            .args(args)
-            .arg("--catalog")
-            .arg(&file)
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        let stderr = String::from_utf8(output.stderr).unwrap();
-        (output.status.success(), stdout, stderr)
-    };
-
-    // Reports, with the tracker stopped.
-    let (ok, out, _) = operate(&["reports"]);
-    assert!(ok);
-    assert!(out.contains(&format!("bundle     {first}")), "{out}");
-    assert!(out.contains(&format!("reporter   {reporter}")), "{out}");
-    assert!(
-        out.contains("  looks like malware\n  see the readme"),
-        "{out}"
-    );
-    let (_, out, _) = operate(&["reports", "--bundle", &second.to_string()]);
-    assert_eq!(out.trim(), "no reports");
-
-    // Hiding and banning, with the tracker running.
-    let (_tracker, url) = {
-        let mut child = tempest()
-            .args(["tracker", "--bind", "127.0.0.1", "--port", "0", "--catalog"])
-            .arg(&file)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let received = lines(child.stderr.take().unwrap());
-        let line = received
-            .recv_timeout(LIMIT)
-            .expect("the tracker printed nothing");
-        let url = line
-            .strip_prefix("tracker listening on ")
-            .and_then(|rest| rest.split(';').next())
-            .unwrap_or_else(|| panic!("unexpected line: {line}"))
-            .to_owned();
-        (Running(child), url)
-    };
-    let status = |bundle: &Hash| get(&url, &format!("/tempest/v1/listings/{bundle}")).0;
-    assert_eq!(status(&first), 200);
-    let found = || {
-        get(&url, "/tempest/v1/listings").1["total"]
-            .as_u64()
-            .unwrap()
-    };
-    assert_eq!(found(), 2);
-
-    let (ok, out, err) = operate(&["hide", &first.to_string()]);
-    assert!(ok, "{err}");
-    assert_eq!(out.trim(), format!("hid {first}"));
-    assert_eq!(status(&first), 404);
-    assert_eq!(status(&second), 200);
-    assert_eq!(found(), 1);
-    let (_, out, _) = operate(&["reports"]);
-    assert!(out.contains("(taken down)"), "{out}");
-    let (ok, _, _) = operate(&["unhide", &first.to_string()]);
-    assert!(ok);
-    assert_eq!(status(&first), 200);
-    assert_eq!(found(), 2);
-
-    let (ok, out, err) = operate(&["ban", &publisher.to_string()]);
-    assert!(ok, "{err}");
-    assert_eq!(out.trim(), format!("banned {publisher}"));
-    assert_eq!(status(&first), 404);
-    assert_eq!(status(&second), 404);
-    assert_eq!(found(), 0);
-    let (ok, out, _) = operate(&["unban", &publisher.to_string()]);
-    assert!(ok);
-    assert_eq!(out.trim(), format!("unbanned {publisher}"));
-    assert_eq!(status(&second), 200);
-    assert_eq!(found(), 2);
-
-    // Mistakes are errors, and never make a catalog.
-    let (ok, _, err) = operate(&["hide", &Hash::new([7; 32]).to_string()]);
-    assert!(!ok);
-    assert!(err.contains("no such listing"), "{err}");
-    let missing = dir.path().join("none.db");
-    let output = tempest()
-        .args(["tracker", "reports", "--catalog"])
-        .arg(&missing)
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    assert!(!missing.exists());
 }

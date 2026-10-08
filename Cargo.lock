@@ -4807,8 +4807,6 @@ dependencies = [
  "tempest-engine",
  "tempest-net",
  "tempest-protocol",
- "tempest-relay",
- "tempest-tracker",
  "tempest-tracker-api",
  "tempest-tui",
  "tempfile",
@@ -4940,6 +4938,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-relay-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "tempest-net",
+ "tempest-protocol",
+ "tempest-relay",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tempest-sim"
 version = "0.1.0"
 dependencies = [
@@ -5031,6 +5042,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tempest-protocol",
+]
+
+[[package]]
+name = "tempest-tracker-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "tempest-assets",
+ "tempest-net",
+ "tempest-protocol",
+ "tempest-tracker",
+ "tempest-tracker-api",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

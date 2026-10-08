@@ -1,6 +1,6 @@
 [package]
 name = "tempest-tracker-web"
-description = "Tempest's tracker website, served by `tempest tracker --catalog`"
+description = "Tempest's tracker website, served by `tempest-tracker --catalog`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

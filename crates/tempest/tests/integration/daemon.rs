@@ -2,6 +2,7 @@
 
 #![cfg(unix)]
 
+use crate::common;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -157,21 +158,21 @@ fn contents(size: usize, seed: u64) -> Vec<u8> {
         .collect()
 }
 
-/// A running `tempest tracker` on localhost, killed when dropped.
+/// A running `tempest-tracker` on localhost, killed when dropped.
 struct TrackerProcess {
     child: Child,
     url: String,
 }
 
 impl TrackerProcess {
-    fn start(dir: &Path) -> Self {
-        Self::start_with(dir, &[])
+    fn start() -> Self {
+        Self::start_with(&[])
     }
 
     /// [`TrackerProcess::start`] with `extra` arguments.
-    fn start_with(dir: &Path, extra: &[&str]) -> Self {
-        let mut child = tempest(dir)
-            .args(["tracker", "--bind", "127.0.0.1", "--port", "0"])
+    fn start_with(extra: &[&str]) -> Self {
+        let mut child = common::tracker()
+            .args(["--bind", "127.0.0.1", "--port", "0"])
             .args(extra)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -226,7 +227,7 @@ impl Drop for TrackerProcess {
 #[test]
 fn transfers_run_through_daemons_and_the_cli_controls_them() {
     let root = tempfile::tempdir().unwrap();
-    let tracker = TrackerProcess::start(root.path());
+    let tracker = TrackerProcess::start();
     let source = root.path().join("album");
     fs::create_dir_all(&source).unwrap();
     let files = [
@@ -357,7 +358,7 @@ fn the_cli_publishes_and_unpublishes_through_the_daemon() {
     let root = tempfile::tempdir().unwrap();
     let catalog = root.path().join("catalog.db");
     let catalog = catalog.to_str().unwrap();
-    let tracker = TrackerProcess::start_with(root.path(), &["--catalog", catalog]);
+    let tracker = TrackerProcess::start_with(&["--catalog", catalog]);
     let source = root.path().join("notes");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("a.txt"), contents(2000, 3)).unwrap();
@@ -375,11 +376,11 @@ fn the_cli_publishes_and_unpublishes_through_the_daemon() {
     }
     assert_eq!(transfers(&dir)[0]["published"][0], tracker.url.as_str());
 
-    let withdrawn = run(tempest(&dir).args(["unpublish", "notes", &tracker.url]));
+    let unpublished = run(tempest(&dir).args(["unpublish", "notes", &tracker.url]));
     assert!(
-        stdout(&withdrawn).contains("unpublished"),
+        stdout(&unpublished).contains("unpublished"),
         "{}",
-        stdout(&withdrawn)
+        stdout(&unpublished)
     );
     assert_eq!(tracker.listing_status(&id), 404);
     assert_eq!(transfers(&dir)[0]["published"], serde_json::json!([]));

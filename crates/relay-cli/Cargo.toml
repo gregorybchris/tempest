@@ -1,0 +1,33 @@
+[package]
+name = "tempest-relay-cli"
+description = "tempest-relay, Tempest's relay: lends public addresses to peers behind routers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tempest-relay"
+path = "src/main.rs"
+
+# Not released yet: whether releases ship the server binaries is open (D-236).
+[package.metadata.dist]
+dist = false
+
+[dependencies]
+tempest-net.workspace = true
+tempest-protocol.workspace = true
+tempest-relay.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

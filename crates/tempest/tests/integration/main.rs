@@ -1,5 +1,6 @@
 //! The tempest crate's integration tests, in one test binary to link once.
 
+mod common;
 mod daemon;
 mod publish;
 mod share;

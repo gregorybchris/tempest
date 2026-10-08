@@ -2226,7 +2226,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-151: Profile names and contents
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-224)
 
 **Context:** `specs/strategies.md` left profile names and their settings open, suggesting "balanced", "background", "classic BitTorrent" and "cooperative".
 
@@ -2238,6 +2238,8 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `classic`: the classic BitTorrent client as a baseline: one-chunk requests, a fixed pipeline of 5, classic endgame, and the same upload strategy once complete.
 - `cooperative`: serve everyone (Cooperative upload) and keep sharing.
 - `background`: polite sharing: 20 connections, 2 uploads at once, 2 reciprocity slots, and a shorter idle timeout for lingering.
+
+D-224 removes the lingering from both: profiles no longer change when a download stops sharing, which the `sharing.*` settings alone decide.
 - `streaming`: the streaming-window chunk selection.
 
 **Rationale:** The suggested names cover beginners' choices and the simulator's baselines. `streaming` is added because it is the one user-facing reason to change chunk selection.
@@ -3593,8 +3595,12 @@ This revises D-063 and D-155.
 - The engine's `sharing.*` settings are the only user-facing ones: ratio, time, idle timeout, and the action at the limit. They drive the core's lingering, whose own settings stop being user-facing.
 - A peer leaving a swarm sends its known peers in a final Peers message before Goodbye.
 - Standalone `tempest get` still exits when its download completes (D-175).
+- The engine gives the session only the idle timeout and counts the ratio and the time across runs itself. When a session stops on its own, the sharing action applies, so `remove` works for the idle timeout too.
+- A share starts with no limits, so a link keeps working (D-156, D-220); only limits set on the share apply. Session settings under `lingering.` are refused.
+- The farewell list holds up to 50 peers, connected ones first, then other known peers, and is exempt from the once-a-minute limit. A peer that is leaving finishes its control stream and waits, within a bound, for the acknowledgement before it closes, since QUIC drops unsent data on a close. A finished control stream is the start of a Goodbye.
+- A download that is already complete when the engine restarts starts its session as complete, so only the ratio and time apply to it.
 
-This revises D-065, D-156 and D-184.
+This revises D-065, D-151, D-156 and D-184.
 
 **Rationale:** Two ratio settings with different defaults contradict conceptual clarity. The farewell list fixes stranding with one message.
 

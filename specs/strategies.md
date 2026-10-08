@@ -63,8 +63,9 @@ Decides which peers are told Serving (yes), and whose requests get answered with
 
 How long to keep sharing after finishing (D-065, D-066).
 
-- **Public swarms:** keep sharing at least until uploaded ≥ downloaded (ratio 1.0), or until nobody has wanted anything from us for a while. Then stop, unless the user chose to keep sharing.
+- **Public swarms:** a session that downloaded the bundle keeps sharing until it reaches its ratio, or until nobody has wanted anything from it for its idle timeout, whichever comes first. Each limit can be switched off; with both off it shares until stopped. A session that started with every chunk, such as a bundle's origin, never stops on its own. The defaults are ratio 1.0 and ten minutes (D-065, D-224). The engine's `sharing.*` settings are the user-facing ones (D-184, D-224); the engine hands the idle timeout to the session and counts the ratio and time across runs itself.
 - **Direct sends:** stop once the recipient has every chunk.
+- **Leaving:** before closing its connections for good, a session sends each peer one last Peers: up to 50 peers, those it is connected to first, then others it knows (D-224). It does so only when peer exchange is on. The protocol exempts that message from the once-a-minute limit.
 
 ## Misbehaving peers
 

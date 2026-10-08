@@ -2455,7 +2455,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-163: Golden baselines and the determinism check
 
-**Date:** 2026-10-07 · **Status:** Provisional; the golden scenario set and the long check are amended by D-171
+**Date:** 2026-10-07 · **Status:** Decided; the golden scenario set and the long check are amended by D-171
 
 **Context:** D-077 and D-132 call for golden scenarios against saved baselines, with a setting for longer runs; `specs/simulation.md` calls for a CI check that the same seed gives the same event log.
 

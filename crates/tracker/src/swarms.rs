@@ -51,6 +51,13 @@ impl Default for TrackerConfig {
     }
 }
 
+/// `at + after`, or a time about a century after `at` if that overflows, so no setting can make
+/// the arithmetic panic.
+pub(crate) fn later(at: Instant, after: Duration) -> Instant {
+    const CENTURY: Duration = Duration::from_secs(100 * 365 * 24 * 3600);
+    at.checked_add(after.min(CENTURY)).unwrap_or(at)
+}
+
 /// How long a full tracker asks new peers to wait before trying again.
 const FULL_RETRY: Duration = Duration::from_secs(60);
 
@@ -209,7 +216,7 @@ impl Swarms {
         if let Some(listing) = known
             && request.event == AnnounceEvent::Update
         {
-            let allowed_at = listing.last_announce + config.min_interval;
+            let allowed_at = later(listing.last_announce, config.min_interval);
             if now < allowed_at {
                 let refusal = Refusal::new(ErrorCode::RateLimited, "announcing too often");
                 return Err(refusal.retry_after(allowed_at - now));
@@ -243,7 +250,7 @@ impl Swarms {
                 relay: request.relay,
                 complete: request.complete,
                 last_announce: now,
-                expires: now + 2 * config.interval,
+                expires: later(now, config.interval.saturating_mul(2)),
             };
             swarm.insert(request.peer, listing);
             let wanted = request.num_want.min(config.max_num_want) as usize;
@@ -368,6 +375,23 @@ mod tests {
 
     fn ip() -> IpAddr {
         IP.parse().unwrap()
+    }
+
+    #[test]
+    fn huge_intervals_do_not_overflow() {
+        let config = TrackerConfig {
+            interval: Duration::MAX,
+            min_interval: Duration::MAX,
+            ..TrackerConfig::default()
+        };
+        let mut s = Swarms::new(config, 7);
+        let t = Instant::now();
+        s.announce(t, &request(1, AnnounceEvent::Started), ip())
+            .unwrap();
+        let refusal = s
+            .announce(t, &request(1, AnnounceEvent::Update), ip())
+            .unwrap_err();
+        assert_eq!(refusal.body.error, ErrorCode::RateLimited);
     }
 
     #[test]

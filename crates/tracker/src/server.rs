@@ -22,6 +22,7 @@ use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
 use crate::fetcher::{self, FetcherConfig};
+use crate::http::{self, HttpLimits};
 use crate::limits::{Action, CatalogLimits, Limiter};
 use crate::swarms::{Refusal, Swarms, TrackerConfig};
 
@@ -40,6 +41,7 @@ pub struct Tracker {
     fetcher: FetcherConfig,
     behind_proxy: bool,
     limiter: Arc<Mutex<Limiter>>,
+    http_limits: HttpLimits,
     pages: Option<Router>,
 }
 
@@ -53,6 +55,7 @@ impl Tracker {
             fetcher: FetcherConfig::default(),
             behind_proxy: false,
             limiter: Arc::new(Mutex::new(Limiter::new(CatalogLimits::default()))),
+            http_limits: HttpLimits::default(),
             pages: None,
         })
     }
@@ -74,6 +77,12 @@ impl Tracker {
     /// The catalog's rate limits per client IP. Clones made before this keep the old ones.
     pub fn catalog_limits(mut self, limits: CatalogLimits) -> Self {
         self.limiter = Arc::new(Mutex::new(Limiter::new(limits)));
+        self
+    }
+
+    /// The limits on HTTP connections and how long their requests may take.
+    pub fn http_limits(mut self, limits: HttpLimits) -> Self {
+        self.http_limits = limits;
         self
     }
 
@@ -118,30 +127,41 @@ impl Tracker {
         listener: TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> io::Result<()> {
-        let sweeper = tokio::spawn(self.clone().sweep());
-        let fetching = match &self.catalog {
+        let mut sweeper = tokio::spawn(self.clone().sweep());
+        let mut fetching = match &self.catalog {
             Some(catalog) => {
                 let run = fetcher::run(self.clone(), catalog.clone(), self.fetcher.clone());
                 Some(tokio::spawn(run))
             }
             None => None,
         };
-        let app = self
-            .router()
-            .into_make_service_with_connect_info::<SocketAddr>();
-        let served = axum::serve(listener, app).with_graceful_shutdown(shutdown);
-        let result = match fetching {
-            Some(mut fetching) => tokio::select! {
-                result = served => result,
-                // The fetcher runs until aborted; it ends only if its endpoint can't be bound.
-                ended = &mut fetching => match ended {
-                    Ok(Err(error)) => Err(error),
-                    _ => Err(io::Error::other("the manifest fetcher stopped")),
-                },
+        let fetcher_ended = async {
+            match &mut fetching {
+                Some(fetching) => fetching.await,
+                None => std::future::pending().await,
+            }
+        };
+        let served = http::serve(listener, self.router(), self.http_limits, shutdown);
+        // The sweeper and the fetcher run until aborted; either ending early is a fault.
+        let result = tokio::select! {
+            () = served => Ok(()),
+            ended = &mut sweeper => Err(io::Error::other(match ended {
+                Err(error) if error.is_panic() => "the sweeper panicked",
+                _ => "the sweeper stopped",
+            })),
+            ended = fetcher_ended => match ended {
+                // It ends by itself only if its endpoint can't be bound.
+                Ok(Err(error)) => Err(error),
+                Err(error) if error.is_panic() => {
+                    Err(io::Error::other("the manifest fetcher panicked"))
+                }
+                _ => Err(io::Error::other("the manifest fetcher stopped")),
             },
-            None => served.await,
         };
         sweeper.abort();
+        if let Some(fetching) = fetching {
+            fetching.abort();
+        }
         result
     }
 

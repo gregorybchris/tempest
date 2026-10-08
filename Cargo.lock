@@ -5017,6 +5017,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "getrandom 0.3.4",
+ "hyper",
+ "hyper-util",
  "proptest",
  "rand 0.9.5",
  "rand_chacha",

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tempest_protocol::tracker::ErrorCode;
 
-use crate::swarms::Refusal;
+use crate::swarms::{Refusal, later};
 
 /// What a client is doing, each with its own limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -198,13 +198,13 @@ impl Limiter {
         }
         let full_at = self.buckets.get(&key).copied().unwrap_or(now).max(now);
         // The bucket holds `burst` requests: full_at may run that far ahead of now.
-        let allowed_ahead = rate.every * (rate.burst - 1);
+        let allowed_ahead = rate.every.saturating_mul(rate.burst - 1);
         let ahead = full_at - now;
         if ahead > allowed_ahead {
             let refusal = Refusal::new(ErrorCode::RateLimited, "too many requests; slow down");
             return Err(refusal.retry_after(ahead - allowed_ahead));
         }
-        self.buckets.insert(key, full_at + rate.every);
+        self.buckets.insert(key, later(full_at, rate.every));
         Ok(())
     }
 
@@ -256,6 +256,15 @@ mod tests {
             .check(start, Action::Comment, ip("198.51.100.2"))
             .unwrap();
         limiter.check(start, Action::Vote, client).unwrap();
+    }
+
+    #[test]
+    fn huge_rates_do_not_overflow() {
+        let mut limiter = limiter(Rate::new(u32::MAX, u64::MAX));
+        let now = Instant::now();
+        let client = ip("198.51.100.1");
+        limiter.check(now, Action::Comment, client).unwrap();
+        limiter.check(now, Action::Comment, client).unwrap();
     }
 
     #[test]

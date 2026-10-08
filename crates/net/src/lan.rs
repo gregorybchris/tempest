@@ -87,6 +87,7 @@ impl Lan {
             sockets,
             watched: Vec::new(),
             last_query: None,
+            requery: None,
         };
         tokio::spawn(task.run(receiver));
         Ok(Self { commands })
@@ -372,6 +373,14 @@ async fn read(socket: Arc<UdpSocket>, datagrams: mpsc::Sender<Datagram>) {
     }
 }
 
+/// Waits until `requery`'s time, or forever when there is none.
+async fn sleep_until_requery(requery: Option<(Instant, Duration)>) {
+    match requery {
+        Some((at, _)) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
 /// The LAN discovery task's state.
 struct LanTask {
     state: LanState,
@@ -380,6 +389,9 @@ struct LanTask {
     sockets: Sockets,
     watched: Vec<Watched>,
     last_query: Option<Instant>,
+    /// When to query again for downloads that still want peers, and the wait after that. A
+    /// single query or its reply can be lost, and the next announce may be a minute away.
+    requery: Option<(Instant, Duration)>,
 }
 
 impl LanTask {
@@ -404,6 +416,7 @@ impl LanTask {
                     None => break,
                 },
                 Some(datagram) = received.recv() => self.receive(datagram).await,
+                () = sleep_until_requery(self.requery) => self.requery().await,
                 _ = announce.tick() => {
                     self.announce().await;
                     self.state.expire(Instant::now());
@@ -424,6 +437,24 @@ impl LanTask {
         }
         self.watched.push(watched);
         self.query().await;
+        let wait = self.config.query_interval * 2;
+        self.requery = Some((Instant::now() + wait, wait));
+    }
+
+    /// Queries again while a download still wants peers, backing off up to the announce
+    /// interval.
+    async fn requery(&mut self) {
+        self.watched.retain(|w| !w.stopped());
+        let Some((_, wait)) = self.requery else {
+            return;
+        };
+        if !self.watched.iter().any(Watched::wants_peers) {
+            self.requery = None;
+            return;
+        }
+        self.query().await;
+        let wait = (wait * 2).min(self.config.announce_interval);
+        self.requery = Some((Instant::now() + wait, wait));
     }
 
     async fn receive(&mut self, datagram: Datagram) {

@@ -919,6 +919,38 @@ fn a_new_peer_record_never_holds_its_relay_address_as_a_direct_one() {
 }
 
 #[test]
+fn a_hello_with_many_addresses_is_shared_with_a_few() {
+    const D: ConnId = ConnId(8);
+    let bundle_id = content().manifest().bundle_id();
+    let mut session = complete(Config::default());
+    let addr = |n: u16| Address::from(std::net::SocketAddr::from(([192, 0, 2, 1], n)));
+    let crowded = Hello {
+        addresses: (1..=10_000).map(addr).collect(),
+        ..hello(bundle_id)
+    };
+    connect(&mut session, C, peer_id(10), Direction::Accepted);
+    control(&mut session, C, Message::Hello(crowded));
+    control(&mut session, C, Message::Have(Have::default()));
+    connect(&mut session, D, peer_id(11), Direction::Accepted);
+    control(&mut session, D, Message::Hello(hello(bundle_id)));
+    control(&mut session, D, Message::Have(Have::default()));
+    let shared: Vec<PeerRecord> = session
+        .poll_actions()
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Send {
+                conn,
+                message: Message::Peers(peers),
+            } if conn == D => Some(peers.peers),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].addresses.len(), MAX_PEER_ADDRESSES);
+}
+
+#[test]
 fn peer_exchange_respects_the_protocol_limits() {
     let bundle_id = content().manifest().bundle_id();
     let mut config = Config::default();

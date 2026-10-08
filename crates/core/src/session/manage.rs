@@ -9,7 +9,7 @@ use rand::seq::IteratorRandom;
 use tempest_protocol::message::{GoodbyeReason, MAX_PEER_RECORDS, PeerRecord, Peers};
 use tempest_protocol::{Message, PeerId};
 
-use super::Session;
+use super::{Session, tidy_record};
 use crate::event::{EventKind, StopReason};
 use crate::io::ConnId;
 use crate::time::Time;
@@ -118,11 +118,12 @@ impl Session {
             .filter(|c| c.is_open() && c.peer() != recipient)
             .filter_map(|c| {
                 let hello = c.hello.as_ref()?;
-                let record = PeerRecord {
+                // A Hello may list any number of addresses; a Peers record carries a few.
+                let record = tidy_record(PeerRecord {
                     peer_id: c.peer(),
                     addresses: hello.addresses.clone(),
                     relay: hello.relay,
-                };
+                });
                 Some((c.peer(), record))
             })
             .collect()

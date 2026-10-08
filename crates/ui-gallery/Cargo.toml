@@ -20,7 +20,16 @@ js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 wasm-bindgen-test.workspace = true
-web-sys = { workspace = true, features = ["HtmlElement", "MessageChannel", "MessagePort", "NodeList"] }
+web-sys = { workspace = true, features = [
+  "HtmlElement",
+  "KeyboardEvent",
+  "KeyboardEventInit",
+  "MessageChannel",
+  "MessagePort",
+  "MouseEvent",
+  "MouseEventInit",
+  "NodeList",
+] }
 
 [lints]
 workspace = true

@@ -61,6 +61,7 @@ The web UIs use Leptos (D-117). Code written for them, by people or agents, foll
 - Never create one memo per item that subscribes to a shared signal. Removing a subscriber is O(n) in `reactive_graph`, so this pattern becomes quadratic: 1,536 such memos cost about 55 ms per update in an early prototype. Use one effect that diffs into per-item signals, `Selector`, or keyed stores.
 - Keep UI logic in plain Rust modules, and keep components thin.
 - A CI benchmark of a 1,536-cell live view guards against performance regressions (D-199).
+- Build forms from the UI kit's controls, never the browser's default look. A drop-down is the kit's select, which draws its own popup; checkboxes, radios, text, number, range and file inputs stay native elements that the kit's stylesheet restyles; on/off settings are switches (D-219).
 
 ## Client layout
 

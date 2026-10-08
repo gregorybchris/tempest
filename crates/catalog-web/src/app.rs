@@ -391,17 +391,6 @@ fn keep_look(ctx: Ctx) {
     });
 }
 
-/// Whether `element` takes typed keys.
-fn typing_in(element: &web_sys::Element) -> bool {
-    match element.tag_name().as_str() {
-        "SELECT" | "TEXTAREA" => true,
-        "INPUT" => element
-            .get_attribute("type")
-            .is_none_or(|t| !matches!(t.as_str(), "checkbox" | "radio" | "submit" | "button")),
-        _ => false,
-    }
-}
-
 /// Focuses the search field once it exists.
 pub fn focus_search(ctx: Ctx) {
     request_animation_frame(move || {
@@ -421,7 +410,7 @@ fn keyboard(ctx: Ctx) {
         let target = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-        let typing = target.as_ref().is_some_and(typing_in);
+        let typing = target.as_ref().is_some_and(takes_keys);
         if e.key() == "Escape" {
             if typing {
                 if let Some(field) = target.and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())

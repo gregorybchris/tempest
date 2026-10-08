@@ -142,6 +142,7 @@ fn App() -> impl IntoView {
                 <TransfersSection world />
                 <ChartsSection world />
                 <ControlsSection />
+                <FormSection />
             </main>
             <HintBar hints=vec![
                 Hint { keys: vec!["1", "4"], label: "areas" },
@@ -454,6 +455,128 @@ fn ControlsSection() -> impl IntoView {
             >
                 <p class="dim">"It stops sharing. The downloaded files stay on disk unless you delete them too."</p>
             </Dialog>
+        </section>
+    }
+}
+
+/// Every form control, in each of its states.
+#[component]
+fn FormSection() -> impl IntoView {
+    let toasts = use_toasts();
+    let named = |names: &[&str]| -> Vec<(String, String)> {
+        names
+            .iter()
+            .map(|n| (n.to_lowercase(), (*n).to_owned()))
+            .collect()
+    };
+    let status = RwSignal::new(String::new());
+    let statuses = named(&[
+        "",
+        "Downloading",
+        "Sharing",
+        "Stalled",
+        "Stopped",
+        "Errored",
+    ])
+    .into_iter()
+    .map(|(v, n)| match v.is_empty() {
+        true => (v, "all statuses (24)".to_owned()),
+        false => (v, format!("{} ({})", n.to_lowercase(), n.len())),
+    })
+    .collect::<Vec<_>>();
+    let country = RwSignal::new("norway".to_owned());
+    let countries = named(&[
+        "Argentina",
+        "Australia",
+        "Austria",
+        "Belgium",
+        "Brazil",
+        "Canada",
+        "Chile",
+        "Denmark",
+        "Estonia",
+        "Finland",
+        "France",
+        "Germany",
+        "Iceland",
+        "India",
+        "Ireland",
+        "Italy",
+        "Japan",
+        "Kenya",
+        "Mexico",
+        "Netherlands",
+        "New Zealand",
+        "Norway",
+        "Portugal",
+        "Spain",
+        "Sweden",
+        "Switzerland",
+        "Uruguay",
+    ]);
+    let action = RwSignal::new("stop".to_owned());
+    let stopped = RwSignal::new(true);
+    let verify = RwSignal::new(false);
+    let category = RwSignal::new("audio".to_owned());
+    let lan = RwSignal::new(true);
+    let upnp = RwSignal::new(false);
+    let slots = RwSignal::new(4.0);
+    let ratio = RwSignal::new(1.5);
+    let notes = RwSignal::new("Five shards and a README.".to_owned());
+    let query = RwSignal::new(String::new());
+    let chose =
+        move |names: Vec<String>| toasts.push(Tone::Neutral, format!("Chose {}", names.join(", ")));
+    view! {
+        <section class="gallery__section gallery__grid">
+            <Panel title="choices">
+                <div class="gallery__stack">
+                    <div class="gallery__row gallery__row--fields">
+                        <Select label="Status" options=statuses value=status on_change=move |v| status.set(v) />
+                        <Select label="Sort by" options=named(&["by queue", "by name", "by size", "by progress"]) value=Signal::stored("by size".to_owned()) on_change=|_| () />
+                    </div>
+                    <SelectField label="Country (type to jump)" options=countries value=country />
+                    <div class="gallery__row gallery__row--fields">
+                        <Select label="Disabled" options=named(&["Stop"]) value=Signal::stored("stop".to_owned()) on_change=|_| () disabled=true />
+                        <Select label="Invalid" options=named(&["Stop", "Keep sharing"]) value=action on_change=move |v| action.set(v) invalid=true />
+                    </div>
+                    <div class="gallery__row">
+                        <Checkbox checked=stopped on_change=move |on| stopped.set(on)>"Add it stopped"</Checkbox>
+                        <Checkbox checked=verify on_change=move |on| verify.set(on)>"Verify on finish"</Checkbox>
+                        <Checkbox checked=true on_change=|_| () disabled=true>"Disabled"</Checkbox>
+                    </div>
+                    <div class="gallery__row" role="radiogroup" aria-label="Category">
+                        {["audio", "video", "datasets"].map(|c| view! {
+                            <Radio name="gallery-category" checked=Signal::derive(move || category.get() == c) on_select=move || category.set(c.to_owned())>
+                                {c}
+                            </Radio>
+                        })}
+                        <Radio name="gallery-category" checked=false on_select=|| () disabled=true>"disabled"</Radio>
+                    </div>
+                    <div class="gallery__row">
+                        <Switch on=lan on_change=move |on| lan.set(on)>"LAN discovery"</Switch>
+                        <Switch on=upnp on_change=move |on| upnp.set(on)>"UPnP"</Switch>
+                        <Switch on=true on_change=|_| () disabled=true>"Disabled"</Switch>
+                    </div>
+                </div>
+            </Panel>
+            <Panel title="inputs">
+                <div class="gallery__stack">
+                    <SearchBox value=query placeholder="filter: name or #tag" />
+                    <label class="field">
+                        <span class="field__label">"Disabled"</span>
+                        <input class="input" type="text" disabled=true placeholder="search what trackers list…" />
+                    </label>
+                    <label class="field">
+                        <span class="field__label">"Description"</span>
+                        <textarea class="input" rows=3 prop:value=move || notes.get() on:input=move |e| notes.set(event_target_value(&e))></textarea>
+                    </label>
+                    <div class="gallery__row gallery__row--fields">
+                        <NumberField label="Active downloads" value=slots min=1.0 max=8.0 />
+                        <Slider label="Share ratio" value=ratio min=0.0 max=5.0 step=0.1 format=|v| format!("{v:.1}") />
+                    </div>
+                    <FileField label="Files to share" multiple=true on_change=chose />
+                </div>
+            </Panel>
         </section>
     }
 }

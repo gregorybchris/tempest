@@ -1,5 +1,6 @@
-//! The building blocks every web UI shares: navigation, buttons, fields, badges, panels,
-//! tables, drawers, dialogs, toasts and key hints. Each renders the stylesheet's classes.
+//! The building blocks every web UI shares: navigation, buttons, badges, panels, tables,
+//! drawers, dialogs, toasts and key hints, and the form controls of [`crate::form`]. Each
+//! renders the stylesheet's classes.
 
 use std::time::Duration;
 
@@ -7,6 +8,7 @@ use leptos::ev;
 use leptos::prelude::*;
 
 use crate::chart::{Color, Sparkline};
+pub use crate::form::*;
 use crate::theme::bool_attr;
 
 /// An accent, for text and marks that say how something is going.
@@ -247,99 +249,6 @@ where
                 })
                 .collect_view()}
         </div>
-    }
-}
-
-/// A labeled text input.
-#[component]
-pub fn TextField(
-    /// Its label.
-    label: &'static str,
-    /// Its text.
-    value: RwSignal<String>,
-    /// Shown while it is empty.
-    #[prop(optional)]
-    placeholder: &'static str,
-    /// A line of help under it.
-    #[prop(optional)]
-    help: Option<&'static str>,
-    /// What is wrong with the text, if anything.
-    #[prop(optional, into)]
-    error: Signal<Option<String>>,
-) -> impl IntoView {
-    view! {
-        <label class="field">
-            <span class="field__label">{label}</span>
-            <input
-                class="input"
-                type="text"
-                placeholder=placeholder
-                spellcheck="false"
-                aria-invalid=move || bool_attr(error.with(Option::is_some))
-                prop:value=move || value.get()
-                on:input=move |e| value.set(event_target_value(&e))
-            />
-            {help.map(|help| view! { <span class="field__help">{help}</span> })}
-            {move || error.get().map(|error| view! { <span class="field__error">{error}</span> })}
-        </label>
-    }
-}
-
-/// A search box: a text input marked with `/`, the key that focuses it.
-#[component]
-pub fn SearchBox(
-    /// The query.
-    value: RwSignal<String>,
-    /// Shown while it is empty.
-    #[prop(default = "search…")]
-    placeholder: &'static str,
-    /// Its element, so a shortcut can focus it.
-    #[prop(optional)]
-    node_ref: NodeRef<leptos::html::Input>,
-) -> impl IntoView {
-    view! {
-        <div class="search">
-            <input
-                node_ref=node_ref
-                class="input"
-                type="search"
-                placeholder=placeholder
-                aria-label=placeholder
-                spellcheck="false"
-                prop:value=move || value.get()
-                on:input=move |e| value.set(event_target_value(&e))
-            />
-        </div>
-    }
-}
-
-/// A labeled drop-down of named values.
-#[component]
-pub fn SelectField(
-    /// Its label.
-    label: &'static str,
-    /// Each value and its name.
-    #[prop(into)]
-    options: Signal<Vec<(String, String)>>,
-    /// The value chosen.
-    value: RwSignal<String>,
-) -> impl IntoView {
-    view! {
-        <label class="field">
-            <span class="field__label">{label}</span>
-            <select class="select" on:change=move |e| value.set(event_target_value(&e)) prop:value=move || value.get()>
-                {move || {
-                    options
-                        .get()
-                        .into_iter()
-                        .map(|(option, name)| {
-                            let selected = value.get_untracked() == option;
-                            view! { <option value=option selected=selected>{name}</option> }
-                        })
-                        .collect_view()
-                }}
-            </select>
-        </label>
     }
 }
 

@@ -317,11 +317,11 @@ fn InlineField(
 }
 
 /// A switch that changes `key` when clicked.
-fn switch(on: bool, flip: impl Fn() + 'static) -> impl IntoView {
+fn switch(on: bool, flip: impl Fn() + Send + Sync + 'static) -> impl IntoView {
     view! {
-        <button class="toggle" type="button" data-change="" aria-pressed=bool_attr(on) on:click=move |_| flip()>
+        <Switch on=on on_change=move |_| flip() attr:data-change="">
             {if on { "on" } else { "off" }}
-        </button>
+        </Switch>
     }
 }
 

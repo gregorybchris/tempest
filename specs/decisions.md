@@ -3494,3 +3494,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 **Decision:** The test is `#[ignore]` with a reason. Run explicitly, it fails without ChromeDriver or the built-in UI. CI's web job runs it with `--ignored`.
 
 **Rationale:** An ignored test shows as ignored in every run, rather than as a pass, and needs no extra variable to remember. Plain `cargo test` still works anywhere.
+
+---
+
+## D-219: Themed form controls in the UI kit
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The web UIs used native selects, checkboxes and radios. Their popups and marks are drawn by the browser and operating system, so they ignored the four themes and looked like default HTML.
+
+**Options:** a component library such as biji-ui; a port of Radix's primitives; the kit's own components, with `leptos-use` for browser behavior (chosen).
+
+**Decision:**
+
+- The select is the kit's own: a button with the `combobox` role and a listbox popup, following the WAI-ARIA select-only combobox. Focus stays on the button; the arrows, `Home`, `End`, the page keys and type-ahead move the highlight; `enter` or `space` chooses; `esc`, a click outside or leaving closes it. The popup is placed against the button in a portal, below it unless above has more room, so dialogs neither clip nor shift it.
+- Keys a select uses stop there, so an app's shortcuts and dialogs don't also act on them. The apps count a combobox as a field that takes typed keys, as they did native selects.
+- Checkboxes, radios, text, search, number, range and file inputs stay native, restyled with `appearance: none` and the theme tokens, for the browser's accessibility and keyboard behavior. On/off settings are switches: buttons with the `switch` role.
+- Every control has hover, focus, invalid and disabled states, from the theme tokens only.
+- `leptos-use` 0.19 supplies click-outside and event listeners, with only those features enabled.
+
+**Rationale:** No stylesheet reaches a native select's popup, so a themed one must be drawn. One select written against the ARIA pattern is little code next to a library whose look would still need overriding. Native elements already handle the other controls' accessibility, and restyling them needs no script.

@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use leptos::ev;
-use leptos::html::{Input, Select};
+use leptos::html::Input;
 use leptos::prelude::*;
 use send_wrapper::SendWrapper;
 use serde_json::json;
@@ -38,9 +38,9 @@ pub struct Fields {
     /// The list's filter.
     pub search: NodeRef<Input>,
     /// The status filter.
-    pub status: NodeRef<Select>,
+    pub status: NodeRef<leptos::html::Button>,
     /// The sort.
-    pub sort: NodeRef<Select>,
+    pub sort: NodeRef<leptos::html::Button>,
 }
 
 /// The whole page.
@@ -210,7 +210,7 @@ fn typing(ui: Ui) {
     let field = |e: &web_sys::FocusEvent| {
         e.target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-            .is_some_and(|el| typing_in(&el))
+            .is_some_and(|el| takes_keys(&el))
     };
     let focus = window_event_listener(ev::focusin, move |e| ui.typing.set(field(&e)));
     let blur = window_event_listener(ev::focusout, move |_| ui.typing.set(false));
@@ -218,17 +218,6 @@ fn typing(ui: Ui) {
         focus.remove();
         blur.remove();
     });
-}
-
-/// Whether `element` takes typed keys.
-fn typing_in(element: &web_sys::Element) -> bool {
-    match element.tag_name().as_str() {
-        "SELECT" | "TEXTAREA" => true,
-        "INPUT" => element
-            .get_attribute("type")
-            .is_none_or(|t| !matches!(t.as_str(), "checkbox" | "radio" | "submit" | "button")),
-        _ => false,
-    }
 }
 
 /// The keyboard (D-191): one listener, reading the bindings table.
@@ -247,7 +236,7 @@ fn keyboard(store: Store, ui: Ui, controls: Controls, fields: Fields, order: Ord
         let typing = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-            .is_some_and(|el| typing_in(&el));
+            .is_some_and(|el| takes_keys(&el));
         if key == "Escape" {
             if escape(ui, typing, &e) {
                 e.prevent_default();

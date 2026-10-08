@@ -221,13 +221,6 @@
 
 /* ---------- Dialogs and other areas ---------- */
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-2);
-  color: var(--dim);
-}
-
 .help td {
   white-space: normal;
 }

@@ -130,17 +130,27 @@ fn Toolbar() -> impl IntoView {
         })
     };
     let total = move || store.model.with(|m| m.transfers().len());
-    let on_status = move |e| {
-        let id = event_target_value(&e);
+    let on_status = move |id: String| {
         ui.finding.update(|f| f.status = StatusFilter::from_id(&id));
     };
-    let on_sort = move |e| {
-        let id = event_target_value(&e);
+    let on_sort = move |id: String| {
         ui.finding.update(|f| {
             f.sort.key = SortKey::from_id(&id).unwrap_or(SortKey::Queue);
             f.sort.reversed = false;
         });
     };
+    let statuses = Signal::derive(move || {
+        let mut options = vec![(String::new(), format!("all statuses ({})", total()))];
+        options.extend(counts().into_iter().map(|(status, count)| {
+            let name = format!("{} ({count})", status.title().to_lowercase());
+            (status.id().to_owned(), name)
+        }));
+        options
+    });
+    let sorts: Vec<(String, String)> = SortKey::ALL
+        .iter()
+        .map(|key| (key.id().to_owned(), format!("by {}", key.title())))
+        .collect();
     let shown = move || {
         let (shown, total) = (order.ids.with(Vec::len), total());
         match ui.finding.with(|f| f.filtering()) {
@@ -151,38 +161,20 @@ fn Toolbar() -> impl IntoView {
     view! {
         <div class="toolbar">
             <SearchBox value=query placeholder="filter: name or #tag" node_ref=fields.search />
-            <select
-                class="select"
-                aria-label="Status"
+            <Select
+                label="Status"
                 node_ref=fields.status
-                on:change=on_status
-                prop:value=move || ui.finding.with(|f| f.status.map_or("", StatusFilter::id).to_owned())
-            >
-                <option value="">{move || format!("all statuses ({})", total())}</option>
-                {move || {
-                    counts()
-                        .into_iter()
-                        .map(|(status, count)| {
-                            let selected = ui.finding.with_untracked(|f| f.status == Some(status));
-                            view! {
-                                <option value=status.id() selected=selected>
-                                    {format!("{} ({count})", status.title().to_lowercase())}
-                                </option>
-                            }
-                        })
-                        .collect_view()
-                }}
-            </select>
-            <select
-                class="select"
-                aria-label="Sort by"
+                options=statuses
+                value=Signal::derive(move || ui.finding.with(|f| f.status.map_or("", StatusFilter::id).to_owned()))
+                on_change=on_status
+            />
+            <Select
+                label="Sort by"
                 node_ref=fields.sort
-                on:change=on_sort
-                prop:value=move || ui.finding.with(|f| f.sort.key.id().to_owned())
-            >
-                {SortKey::ALL
-                    .map(|key| view! { <option value=key.id()>{format!("by {}", key.title())}</option> })}
-            </select>
+                options=sorts
+                value=Signal::derive(move || ui.finding.with(|f| f.sort.key.id().to_owned()))
+                on_change=on_sort
+            />
             <button
                 class="btn btn--ghost btn--small"
                 type="button"

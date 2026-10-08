@@ -11,7 +11,9 @@ use tempest_api::prefs;
 use tempest_api::settings::parse_tags;
 use tempest_api::ui::SavedView;
 use tempest_protocol::BundleId;
-use tempest_ui_kit::components::{Button, ButtonKind, Chip, Dialog as Modal, Tone};
+use tempest_ui_kit::components::{
+    Button, ButtonKind, Checkbox, Chip, Dialog as Modal, Radio, SelectField, Tone,
+};
 use tempest_ui_kit::theme::bool_attr;
 
 use crate::api;
@@ -127,10 +129,7 @@ fn AddLink() -> impl IntoView {
                     <span class="field__help">"The download starts through the queue, into the default folder."</span>
                 </label>
             </form>
-            <label class="check">
-                <input type="checkbox" prop:checked=move || stopped.get() on:change=move |e| stopped.set(event_target_checked(&e)) />
-                "Add it stopped"
-            </label>
+            <Checkbox checked=stopped on_change=move |on| stopped.set(on)>"Add it stopped"</Checkbox>
         </Modal>
     }
 }
@@ -345,17 +344,15 @@ fn SetCategory(id: BundleId) -> impl IntoView {
             }
         >
             <div class="choices" role="radiogroup" aria-label="Category">
-                <label class="check">
-                    <input type="radio" name="category" prop:checked=move || chosen.with(String::is_empty) on:change=move |_| chosen.set(String::new()) />
+                <Radio name="category" checked=Signal::derive(move || chosen.with(String::is_empty)) on_select=move || chosen.set(String::new())>
                     "none"
-                </label>
+                </Radio>
                 {move || options().into_iter().map(|option| {
-                    let value = option.clone();
+                    let (o, value) = (option.clone(), option.clone());
                     view! {
-                        <label class="check">
-                            <input type="radio" name="category" prop:checked={let o = option.clone(); move || chosen.with(|c| *c == o)} on:change=move |_| chosen.set(value.clone()) />
+                        <Radio name="category" checked=Signal::derive(move || chosen.with(|c| *c == o)) on_select=move || chosen.set(value.clone())>
                             {option}
-                        </label>
+                        </Radio>
                     }
                 }).collect_view()}
             </div>
@@ -488,12 +485,13 @@ fn Limits(id: BundleId) -> impl IntoView {
                 <h3 class="form-grid__title">"Sharing"</h3>
                 {input(2, "Ratio", engine_ratio.clone())}
                 {input(3, "Time", engine_time.clone())}
-                <label class="field form-grid__wide">
-                    <span class="field__label">"At the limit"</span>
-                    <select class="select" on:change=move |e| action.set(event_target_value(&e)) prop:value=move || action.get()>
-                        {edits::ACTIONS.map(|(value, name)| view! { <option value=value selected=action.get_untracked() == value>{name}</option> })}
-                    </select>
-                </label>
+                <div class="form-grid__wide">
+                    <SelectField
+                        label="At the limit"
+                        options=edits::ACTIONS.map(|(value, name)| (value.to_owned(), name.to_owned())).to_vec()
+                        value=action
+                    />
+                </div>
                 <button type="submit" hidden=true></button>
             </form>
             <p class="dim note">"Speeds such as 500K or 2.5M, within the engine's limits; times such as 12h. Empty keeps the engine's setting; none means no limit of its own."</p>
@@ -532,17 +530,12 @@ fn Columns() -> impl IntoView {
             <p class="dim note">"Name, progress and status always show. Narrow windows drop columns, least important first. The TUI shows the same ones."</p>
             <div class="choices choices--columns">
                 {Column::OPTIONAL.map(|column| {
-                    let on = move || chosen.with(|c| c.contains(&column));
+                    let on = Signal::derive(move || chosen.with(|c| c.contains(&column)));
                     let flip = move |_| chosen.update(|c| match c.iter().position(|x| *x == column) {
                         Some(i) => { c.remove(i); }
                         None => c.push(column),
                     });
-                    view! {
-                        <label class="check">
-                            <input type="checkbox" prop:checked=on on:change=flip />
-                            {column.title()}
-                        </label>
-                    }
+                    view! { <Checkbox checked=on on_change=flip>{column.title()}</Checkbox> }
                 })}
             </div>
         </Modal>

@@ -303,17 +303,6 @@ fn keep_basket(ctx: Ctx) {
     });
 }
 
-/// Whether `element` takes typed keys.
-fn typing_in(element: &web_sys::Element) -> bool {
-    match element.tag_name().as_str() {
-        "SELECT" | "TEXTAREA" => true,
-        "INPUT" => element
-            .get_attribute("type")
-            .is_none_or(|t| !matches!(t.as_str(), "checkbox" | "radio" | "submit" | "button")),
-        _ => false,
-    }
-}
-
 /// The keyboard: one listener, reading the bindings table.
 fn keyboard(ctx: Ctx) {
     let handle = window_event_listener(ev::keydown, move |e| {
@@ -323,7 +312,7 @@ fn keyboard(ctx: Ctx) {
         let target = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-        let typing = target.as_ref().is_some_and(typing_in);
+        let typing = target.as_ref().is_some_and(takes_keys);
         if e.key() == "Escape" {
             if typing {
                 if let Some(field) = target.and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())

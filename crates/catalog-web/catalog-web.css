@@ -814,11 +814,6 @@ a.tag:hover {
   justify-content: flex-end;
 }
 
-.textarea {
-  resize: vertical;
-  line-height: 1.5;
-}
-
 .textarea__count {
   justify-self: end;
 }

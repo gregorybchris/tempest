@@ -100,6 +100,8 @@ wasm-bindgen-test = "0.3"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
+# Browser behavior for the UI kit's controls, such as clicks outside a popup (D-219).
+leptos-use = { version = "0.19", default-features = false, features = ["on_click_outside", "use_event_listener"] }
 # Lets components clean up browser objects, which aren't Send, in Leptos's cleanups.
 send_wrapper = "0.6"
 

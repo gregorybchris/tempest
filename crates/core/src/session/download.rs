@@ -42,11 +42,35 @@ impl Session {
         };
         conn.out.insert(request, outgoing);
         self.manifest_request = Some((id, request));
+        self.manifest_deadline = now + self.config.requests.snub_timeout;
         self.actions.push(Action::Request {
             conn: id,
             request,
             message: OutRequest::Manifest,
         });
+    }
+
+    /// Gives up on a ManifestRequest left unanswered for the snub timeout, if another peer could
+    /// be asked instead; the silent peer isn't asked again. With nobody else to ask, it keeps
+    /// waiting, since a large manifest can take a while on a slow link.
+    pub(super) fn check_manifest_request(&mut self, now: Time) {
+        let Some((id, request)) = self.manifest_request else {
+            return;
+        };
+        if now < self.manifest_deadline {
+            return;
+        }
+        let other = (self.conns.iter())
+            .any(|(&c, conn)| c != id && conn.may_request(now) && !conn.lacks_manifest);
+        if !other {
+            self.manifest_deadline = now + self.config.requests.snub_timeout;
+            return;
+        }
+        let conn = self.conns.get_mut(&id).expect("open");
+        conn.out.remove(&request);
+        conn.lacks_manifest = true;
+        self.manifest_request = None;
+        self.actions.push(Action::Cancel { conn: id, request });
     }
 
     /// Requests chunks on every connection that has room.

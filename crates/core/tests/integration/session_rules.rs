@@ -277,6 +277,46 @@ fn holdings_before_the_manifest_are_checked_when_it_arrives() {
 }
 
 #[test]
+fn an_unanswered_manifest_request_moves_to_another_peer() {
+    const D: ConnId = ConnId(8);
+    let manifest_requests = |actions: &[Action]| -> Vec<ConnId> {
+        (actions.iter())
+            .filter_map(|a| match a {
+                Action::Request {
+                    conn,
+                    message: OutRequest::Manifest,
+                    ..
+                } => Some(*conn),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut session = fresh(content().manifest().bundle_id());
+    open_peer(&mut session, C, 9);
+    assert_eq!(manifest_requests(&session.poll_actions()), [C]);
+
+    // Alone, a slow peer is waited for.
+    let timeout = Config::default().requests.snub_timeout;
+    let mut now = Time::ZERO + timeout;
+    session.handle_timer(now);
+    assert!(session.poll_actions().is_empty());
+
+    // With another peer to ask, the silent one is given up on.
+    open_peer(&mut session, D, 10);
+    session.poll_actions();
+    now += timeout;
+    assert!(session.next_timer().is_some_and(|t| t <= now));
+    session.handle_timer(now);
+    let actions = session.poll_actions();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Cancel { conn: C, .. }))
+    );
+    assert_eq!(manifest_requests(&actions), [D]);
+}
+
+#[test]
 fn a_manifest_that_does_not_match_is_bad_data() {
     let mut session = fresh(content().manifest().bundle_id());
     open(&mut session, RangeList::new());

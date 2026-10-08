@@ -89,6 +89,8 @@ pub struct Session {
     next_conn_review: Time,
     /// The one ManifestRequest in flight, if any.
     manifest_request: Option<(ConnId, RequestId)>,
+    /// When the ManifestRequest in flight is next checked for an answer.
+    manifest_deadline: Time,
     next_request: u64,
     /// The chunk a media player is at, for the streaming strategy.
     position: u32,
@@ -202,6 +204,7 @@ impl Session {
             next_dial: None,
             next_conn_review: Time::ZERO,
             manifest_request: None,
+            manifest_deadline: Time::ZERO,
             next_request: 0,
             position: 0,
             endgame: false,
@@ -425,9 +428,14 @@ impl Session {
         let conn_review =
             (self.at_connection_limit() && !self.complete).then_some(self.next_conn_review);
         let linger = self.linger_deadline();
+        let manifest = self.manifest_request.map(|_| self.manifest_deadline);
         per_conn
             .flatten()
-            .chain([review, dial, conn_review, linger].into_iter().flatten())
+            .chain(
+                [review, dial, conn_review, linger, manifest]
+                    .into_iter()
+                    .flatten(),
+            )
             .min()
     }
 
@@ -457,6 +465,7 @@ impl Session {
             self.close(now, id, GoodbyeReason::ProtocolViolation, message);
         }
         self.check_snubs(now);
+        self.check_manifest_request(now);
         self.request_manifest(now);
         if self.uploader.next_review().is_some_and(|t| t <= now) {
             self.review_serving(now);

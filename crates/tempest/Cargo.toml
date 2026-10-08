@@ -39,6 +39,7 @@ unicode-width.workspace = true
 tempest-assets.workspace = true
 
 [dev-dependencies]
+tempest-api = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 tower.workspace = true
 

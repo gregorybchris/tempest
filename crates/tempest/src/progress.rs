@@ -68,7 +68,7 @@ impl StatusLine {
 }
 
 /// `text` cut to `width` columns, ending in `…` if it was cut.
-fn fit(text: &str, width: usize) -> String {
+pub fn fit(text: &str, width: usize) -> String {
     let columns = |text: &str| text.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>();
     if columns(text) <= width {
         return text.to_owned();

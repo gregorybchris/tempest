@@ -6,6 +6,9 @@ use tempest_engine::{Status, TransferInfo};
 
 use crate::engine::{EngineArgs, Target, short_id};
 use tempest_api::units::{bytes, duration, percent};
+use unicode_width::UnicodeWidthStr;
+
+use crate::progress::fit;
 
 #[derive(Debug, clap::Args)]
 pub struct ListArgs {
@@ -122,7 +125,8 @@ fn table(transfers: &[TransferInfo]) -> String {
         .map(|t| {
             [
                 short_id(&t.id),
-                truncate(&t.name, 40),
+                // A name may hold anything, even line breaks.
+                fit(&t.name.replace(char::is_control, " "), 40),
                 t.status.name().to_owned(),
                 percent(t.progress),
                 t.size.map_or("-".to_owned(), bytes),
@@ -138,14 +142,14 @@ fn table(transfers: &[TransferInfo]) -> String {
     let mut widths = header.map(str::len);
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.chars().count());
+            *width = (*width).max(cell.width());
         }
     }
     let line = |cells: &[String]| {
         let padded: Vec<_> = cells
             .iter()
             .zip(widths)
-            .map(|(cell, width)| format!("{cell:<width$}"))
+            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.width())))
             .collect();
         format!("{}\n", padded.join("  ").trim_end())
     };
@@ -159,20 +163,26 @@ fn table(transfers: &[TransferInfo]) -> String {
     table
 }
 
-fn truncate(text: &str, max: usize) -> String {
-    match text.chars().count() > max {
-        true => format!("{}…", text.chars().take(max - 1).collect::<String>()),
-        false => text.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn long_names_are_truncated() {
-        assert_eq!(truncate("short", 8), "short");
-        assert_eq!(truncate("much too long", 8), "much to…");
+    fn wide_and_control_characters_keep_the_columns() {
+        let transfers: Vec<_> = ["日本語のファイル", "two\nlines", "plain"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| TransferInfo::example(i as u8, name, 0))
+            .collect();
+        let table = table(&transfers);
+        assert!(table.contains("two lines"), "{table}");
+        // The status column starts at the same display column on every line.
+        let lines: Vec<&str> = table.lines().collect();
+        assert_eq!(lines.len(), 4, "{table}");
+        let status = |line: &str, word: &str| line[..line.find(word).unwrap()].width();
+        let at = status(lines[0], "STATUS");
+        for (line, transfer) in lines[1..].iter().zip(&transfers) {
+            assert_eq!(status(line, transfer.status.name()), at, "{table}");
+        }
     }
 }

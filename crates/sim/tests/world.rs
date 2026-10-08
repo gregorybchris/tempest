@@ -227,3 +227,52 @@ experiment:
     let arrivals = |r: &RunResult| r.peers.iter().map(|p| p.arrived).collect::<Vec<_>>();
     assert_eq!(arrivals(&a), arrivals(&c));
 }
+
+/// Varying one class's count and settings changes that class alone (D-230): the other class's
+/// peers arrive as they did.
+#[test]
+fn varied_classes_keep_the_others_paired() {
+    let yaml = "
+name: classes
+duration: 10m
+bundle: { files: [{ size: 1MiB }] }
+peers:
+  - { class: origin, starts: complete, bandwidth: { up: 20Mbps } }
+  - class: early
+    count: 2
+    arrivals: { pattern: poisson, interval: 5s }
+  - class: late
+    count: 5
+    arrivals: { pattern: poisson, interval: 5s }
+experiment:
+  vary:
+    peers.early.count: [2, 6]
+    peers.origin.settings.strategies.superseed: [false, true]
+";
+    let scenario = Scenario::from_yaml(yaml).unwrap();
+    let variants = scenario.variants();
+    let results: Vec<RunResult> = variants
+        .iter()
+        .map(|v| run(&scenario, v, 3, RunOptions { keep_log: true }).unwrap())
+        .collect();
+    let count = |r: &RunResult, class: usize| r.peers.iter().filter(|p| p.class == class).count();
+    assert_eq!(count(&results[0], 1), 2);
+    assert_eq!(count(&results[2], 1), 6);
+    let late = |r: &RunResult| {
+        r.peers
+            .iter()
+            .filter(|p| p.class == 2)
+            .map(|p| p.arrived)
+            .collect::<Vec<_>>()
+    };
+    for result in &results[1..] {
+        assert_eq!(late(result), late(&results[0]));
+    }
+    let superseeded = |r: &RunResult| {
+        r.log
+            .iter()
+            .any(|e| matches!(e.record, Record::Decision(EventKind::Offered { .. })))
+    };
+    assert!(!superseeded(&results[0]));
+    assert!(superseeded(&results[1]));
+}

@@ -2,13 +2,13 @@
 //! every chunk has been sent once.
 //!
 //! Have and HaveUpdate describe the chunks a peer "has and is willing to provide", so a
-//! superseeding peer announces only what it offers. Each connected peer is offered one range of
-//! chunks, of the configured request size, that nobody has been sent yet. Once that peer has the
-//! whole range, which it shows by announcing it, it is offered another. Superseeding ends when
+//! superseeding peer announces only what it offers. Each connected peer is offered a window of
+//! ranges of chunks, each of the configured request size, that nobody has been sent yet (D-223).
+//! Once that peer has a whole range, which it shows by announcing it, it is offered another. The
+//! window grows while no other peer is being served, so that a lone downloader isn't held to one
+//! range per round trip, and shrinks to one range in a crowd. Superseeding ends when
 //! every chunk has been sent once, or when another peer turns out to have every chunk; then
 //! everything is announced to everyone.
-
-use std::ops::Range;
 
 use tempest_protocol::Message;
 use tempest_protocol::message::HaveUpdate;
@@ -51,48 +51,92 @@ impl Session {
         }
         Some(Offer {
             announced,
-            pending: None,
+            pending: Vec::new(),
+            window: 1,
         })
     }
 
-    /// Offers a peer its next range once it has the last one.
+    /// Tops up a peer's window of offered ranges, dropping the ranges it now has.
+    ///
+    /// Each time the peer gains chunks, its window grows by one range, up to
+    /// `upload.superseed_window`, unless this peer is serving another one; then it shrinks by
+    /// one, to no less than one range. A lone downloader's window so grows until it keeps this
+    /// peer's upload busy, while in a crowd each peer keeps about one range, and early arrivals
+    /// don't hold ranges that later ones could be sent.
     pub(super) fn offer_next(&mut self, now: Time, id: ConnId) {
-        let (Some(bundle), Some(superseed)) = (&self.bundle, &self.superseed) else {
-            return;
-        };
-        let conn = &self.conns[&id];
-        let (Some(offer), Holdings::Known(held)) = (&conn.offer, &conn.holdings) else {
-            return;
-        };
-        if let Some((start, count)) = offer.pending
-            && !bundle.span(start, count).all(|c| held.contains(c))
-        {
-            return;
-        }
-        let elsewhere: Vec<Range<u32>> = self
+        let backlog = self
             .conns
             .iter()
             .filter(|&(&other, _)| other != id)
-            .filter_map(|(_, c)| c.offer.as_ref()?.pending)
-            .map(|(start, count)| bundle.span(start, count))
-            .collect();
+            .any(|(_, c)| !c.incoming.is_empty());
+        let most = self.config.upload.superseed_window;
+        let (Some(bundle), Some(conn)) = (&self.bundle, self.conns.get_mut(&id)) else {
+            return;
+        };
+        let (Some(offer), Holdings::Known(held)) = (&mut conn.offer, &conn.holdings) else {
+            return;
+        };
+        offer
+            .pending
+            .retain(|&(start, count)| !bundle.span(start, count).all(|c| held.contains(c)));
+        offer.window = match backlog {
+            true => offer.window.saturating_sub(1).max(1),
+            false => offer.window.saturating_add(1).min(most),
+        };
+        while self.conns[&id]
+            .offer
+            .as_ref()
+            .is_some_and(|o| o.pending.len() < o.window as usize)
+        {
+            if !self.offer_one(now, id) {
+                break;
+            }
+        }
+    }
+
+    /// Offers a peer one more range, if any chunk is left to offer it.
+    fn offer_one(&mut self, now: Time, id: ConnId) -> bool {
+        let (Some(bundle), Some(superseed)) = (&self.bundle, &self.superseed) else {
+            return false;
+        };
+        let conn = &self.conns[&id];
+        let (Some(offer), Holdings::Known(held)) = (&conn.offer, &conn.holdings) else {
+            return false;
+        };
+        let mut elsewhere = ChunkSet::new(bundle.layout.chunk_count());
+        let ranges = self
+            .conns
+            .iter()
+            .filter(|&(&other, _)| other != id)
+            .filter_map(|(_, c)| c.offer.as_ref())
+            .flat_map(|offer| &offer.pending);
+        for &(start, count) in ranges {
+            for chunk in bundle.span(start, count) {
+                elsewhere.insert(chunk);
+            }
+        }
         let unoffered = |c: u32| !held.contains(c) && !offer.announced.contains(c);
         let unsent = |c: u32| unoffered(c) && !superseed.sent.contains(c);
-        // Prefer chunks not on offer to anyone else, then any not yet sent.
+        // Prefer chunks not on offer to anyone else. A peer with nothing on offer may also get
+        // chunks on offer elsewhere and not yet sent, so that it isn't left idle; the rest of a
+        // window never is, since that would send chunks twice.
         let chunk = superseed
             .sent
             .iter_missing()
-            .find(|&c| unsent(c) && !elsewhere.iter().any(|r| r.contains(&c)))
-            .or_else(|| superseed.sent.iter_missing().find(|&c| unsent(c)));
-        let next = chunk.map(|c| bundle.request_around(c, self.config.requests.chunks, unoffered));
-        let span = next.map(|(start, count)| bundle.span(start, count));
-
+            .find(|&c| unsent(c) && !elsewhere.contains(c))
+            .or_else(|| {
+                let idle = offer.pending.is_empty();
+                idle.then(|| superseed.sent.iter_missing().find(|&c| unsent(c)))
+                    .flatten()
+            });
+        let Some(chunk) = chunk else {
+            return false;
+        };
+        let (start, count) = bundle.request_around(chunk, self.config.requests.chunks, unoffered);
+        let span = bundle.span(start, count);
         let conn = self.conns.get_mut(&id).expect("open");
         let offer = conn.offer.as_mut().expect("superseeding");
-        offer.pending = next;
-        let (Some((start, count)), Some(span)) = (next, span) else {
-            return;
-        };
+        offer.pending.push((start, count));
         for chunk in span.clone() {
             offer.announced.insert(chunk);
         }
@@ -114,6 +158,7 @@ impl Session {
             count,
         };
         self.emit(now, kind);
+        true
     }
 
     /// Records chunks sent, ending superseeding once every chunk has been sent once.

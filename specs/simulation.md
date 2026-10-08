@@ -71,6 +71,8 @@ experiment:
 
 This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run <scenario.yaml>` runs and summarizes (D-160). Every run records its seed, the resolved scenario, a hash of the scenario file, and the git commit.
 
+A varied key is either a setting for every peer, as above, or a field of one class, written `peers.<class>.<field>`: its `count`, `bandwidth.up`, or a setting for that class alone under `settings`, such as `peers.origin.settings.strategies.superseed` (D-230). Variants stay paired on each seed: every class draws its randomness for as many peers as it has in any variant, so changing one class's count leaves the other classes' arrivals and sessions as they were.
+
 ## Results (D-073, D-074, D-075)
 
 - **Storage:** one local **DuckDB** database holds experiments, runs, summary metrics and full event logs (every message, decision event and state change). `tempest sim run` adds each experiment to it. The simulator's `results` module defines the schema (D-161):
@@ -123,9 +125,9 @@ From the owner's planning notes and the research (see the research atlas):
 - Does withholding upload from non-reciprocating peers help? Which upload strategy should be the default?
 - Cross-swarm helping: the owner's idea of helping slow peers in other swarms (prior art: Tribler's 2Fast)
 - Request size and in-flight amount sweeps. *First run* ([`request-size`](../crates/sim/scenarios/experiments/request-size.yaml), 100 ms links): the defaults are best or tied. One-chunk requests are 16% slower and send 15× the overhead, and 70% slower when only the bandwidth-delay product is kept in flight; 64-chunk requests are 15% slower.
-- How the origin serves a crowd when its upload is the bottleneck. *First run* ([`origin-policy`](../crates/sim/scenarios/experiments/origin-policy.yaml)): answering every peer in turn, the default, takes 2.7× the time the origin needs to send one copy; serving a few peers at a time, BitTorrent's choke, 1.5×; superseeding, 1.2×. Superseeding is opt-in (D-063).
+- How the origin serves a crowd when its upload is the bottleneck. *First run* ([`origin-policy`](../crates/sim/scenarios/experiments/origin-policy.yaml)): answering every peer in turn, the default, takes 2.7× the time the origin needs to send one copy; serving a few peers at a time, BitTorrent's choke, 1.5×; superseeding, 1.2×. Superseeding is opt-in (D-063, D-223).
 - Lingering policies and swarm stability
-- Superseeding: when it helps and when it hurts
+- Superseeding: when it helps and when it hurts. *First run* ([`superseed-crowd`](../crates/sim/scenarios/experiments/superseed-crowd.yaml), [`superseed-direct`](../crates/sim/scenarios/experiments/superseed-direct.yaml)): with a window of offered ranges, crowds keep the whole saving and 1:1 sends keep up to 100 Mbps, but not at 1 Gbps. Numbers in D-223.
 - Free-rider and strategic-client robustness
 
 ## Open questions

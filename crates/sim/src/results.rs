@@ -375,8 +375,9 @@ impl Recorder<'_> {
         )?;
 
         let mut peers = conn.appender("peers")?;
+        let classes = self.scenario.classes(result.variant);
         for (index, peer) in result.peers.iter().enumerate() {
-            let class = &self.scenario.peers[peer.class];
+            let class = &classes[peer.class];
             let at = |t: Option<tempest_core::Time>| t.map(|t| t.since_epoch().as_secs_f64());
             let finite = |r: f64| r.is_finite().then_some(r);
             peers.append_row(params![

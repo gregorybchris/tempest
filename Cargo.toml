@@ -114,6 +114,10 @@ missing_docs = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+# Leftovers from debugging and unfinished code.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 # Line tables keep backtraces useful at a fraction of full debug info's disk use.
 [profile.dev]

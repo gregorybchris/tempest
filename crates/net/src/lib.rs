@@ -18,6 +18,7 @@
 //! - [`fetch`]: fetching a manifest from one peer without joining its swarm, as a tracker does
 //!   to list a bundle.
 //! - [`lan`]: finding peers on the local network through multicast.
+//! - [`signal`]: waiting for the process to be asked to stop.
 //!
 //! The protocol and strategy logic stays in `tempest-core`'s sans-IO state machines (D-068). This
 //! crate moves their messages over real connections.
@@ -33,6 +34,7 @@ pub mod lan;
 pub mod limit;
 pub mod portmap;
 pub mod publish;
+pub mod signal;
 pub mod storage;
 pub mod stream;
 pub mod tls;

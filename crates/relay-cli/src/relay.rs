@@ -62,11 +62,7 @@ pub fn relay(args: RelayArgs) -> Result<()> {
             ..RelayConfig::new(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), args.port))
         };
         let relay = start(&identity, config, args.bind)?;
-        relay
-            .serve(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await;
+        relay.serve(tempest_net::signal::interrupted()).await;
         eprintln!("stopped");
         Ok(())
     })

@@ -287,10 +287,9 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
                 .fetcher(args.catalog.fetcher())
                 .with_pages(assets::router(TRACKER_WEB, TRACKER_WEB_NOT_BUILT));
         }
-        let shutdown = async {
-            let _ = tokio::signal::ctrl_c().await;
-        };
-        tracker.serve(listener, shutdown).await?;
+        tracker
+            .serve(listener, tempest_net::signal::interrupted())
+            .await?;
         eprintln!("stopped");
         Ok(())
     })

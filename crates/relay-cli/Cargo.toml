@@ -24,7 +24,7 @@ tempest-relay.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile.workspace = true

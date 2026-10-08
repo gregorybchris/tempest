@@ -95,7 +95,7 @@ pub async fn run(
         let handing_over = handing.clone();
         let asks = hand_off.is_some();
         let shutdown = async move {
-            interrupted().await;
+            tempest_net::signal::interrupted().await;
             if asks {
                 let active = (stopping.list().await.iter())
                     .filter(|t| t.status.is_active())
@@ -126,20 +126,4 @@ pub async fn run(
         handoff::report(handed, &url);
     }
     Ok(())
-}
-
-/// Waits for Ctrl-C, or on Unix for SIGTERM too.
-async fn interrupted() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = terminate.recv() => {}
-            }
-            return;
-        }
-    }
-    let _ = tokio::signal::ctrl_c().await;
 }

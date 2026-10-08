@@ -212,16 +212,77 @@ async fn storage_moves_and_a_failed_move_leaves_it_in_place() {
     b.start(id).await.unwrap();
     wait_for(&b, id, "sharing again", |t| t.status == Status::Sharing).await;
 
-    // A share's entries move into the new folder, which becomes their base.
+    // A share keeps its folder name, which becomes its base in the new folder.
     let base = root.path().join("new base");
     a.move_storage(share.id, &base).await.unwrap();
     let rebased = wait_for(&a, share.id, "moved", |t| {
         t.status == Status::Sharing && t.save_folder == base
     })
     .await;
-    assert_eq!(rebased.content_dir.as_deref(), Some(base.as_path()));
-    assert_files(&base, &files);
+    assert_eq!(rebased.content_dir, Some(base.join("album")));
+    assert_files(&base.join("album"), &files);
     assert!(!source.join("one.bin").exists());
+
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_single_file_lands_in_the_save_folder_and_moves_without_a_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("report.bin");
+    let data = contents(MIB + 5, 3);
+    fs::write(&source, &data).unwrap();
+    let a = Engine::open(config(&root.path().join("a"))).await.unwrap();
+    let b = Engine::open(config(&root.path().join("b"))).await.unwrap();
+    let (_, done) = share_and_download(&a, &b, &source).await;
+    let saved = done.save_folder.clone();
+    assert_eq!(done.content_dir.as_deref(), Some(saved.as_path()));
+    assert!(fs::read(saved.join("report.bin")).unwrap() == data);
+
+    let elsewhere = root.path().join("elsewhere");
+    b.move_storage(done.id, &elsewhere).await.unwrap();
+    let moved = wait_for(&b, done.id, "moved", |t| {
+        t.status == Status::Sharing && t.save_folder == elsewhere
+    })
+    .await;
+    assert_eq!(moved.content_dir.as_deref(), Some(elsewhere.as_path()));
+    assert!(fs::read(elsewhere.join("report.bin")).unwrap() == data);
+    assert!(!saved.join("report.bin").exists());
+
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_single_file_download_fails_where_the_name_is_taken() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("report.bin");
+    fs::write(&source, contents(MIB, 4)).unwrap();
+    let a = Engine::open(config(&root.path().join("a"))).await.unwrap();
+    let b = Engine::open(config(&root.path().join("b"))).await.unwrap();
+    let share = a.add_path(&source, ShareOptions::default()).await.unwrap();
+    wait_for(&a, share.id, "sharing", |t| t.status == Status::Sharing).await;
+    let taken = root.path().join("taken");
+    fs::create_dir_all(&taken).unwrap();
+    fs::write(taken.join("report.bin"), "mine").unwrap();
+    let options = AddOptions {
+        save_folder: Some(taken.clone()),
+        ..AddOptions::default()
+    };
+    b.add_link(&share.link, options).await.unwrap();
+    let failed = wait_for(&b, share.id, "errored", |t| {
+        matches!(t.status, Status::Errored { .. })
+    })
+    .await;
+    let Status::Errored { reason } = &failed.status else {
+        unreachable!()
+    };
+    assert!(reason.contains("report.bin"), "{reason}");
+    assert_eq!(
+        fs::read_to_string(taken.join("report.bin")).unwrap(),
+        "mine"
+    );
 
     a.shutdown().await;
     b.shutdown().await;

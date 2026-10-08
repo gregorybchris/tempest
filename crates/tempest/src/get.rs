@@ -126,7 +126,10 @@ async fn download(
     handle.finished().await.context("the download failed")?;
     let status = outcome?;
     let manifest = status.manifest.context("complete without a manifest")?;
-    let folder = args.output.join(manifest.name());
+    let folder = match manifest.single_file() {
+        Some(path) => args.output.join(path),
+        None => args.output.join(manifest.name()),
+    };
     eprintln!(
         "downloaded {} in {}",
         bytes(manifest.total_size()),
@@ -168,9 +171,16 @@ async fn through_daemon(client: &ApiClient, args: &GetArgs, link: &Link) -> Resu
     let result = follow(client, added, Duration::from_secs(args.timeout), &mut line).await;
     line.clear();
     let done = result?;
-    let folder = done
+    let mut folder = done
         .content_dir
         .context("complete without a content folder")?;
+    // A single file lands in the save folder itself; print the file.
+    if folder == done.save_folder {
+        let files = client.files(link.bundle).await?;
+        if let [file] = files.as_slice() {
+            folder.push(&file.path);
+        }
+    }
     eprintln!(
         "downloaded {} in {}",
         bytes(done.size.unwrap_or(0)),

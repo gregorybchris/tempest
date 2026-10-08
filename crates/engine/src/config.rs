@@ -382,7 +382,7 @@ impl Default for QueueSettings {
     fn default() -> Self {
         Self {
             max_active_downloads: Some(3),
-            max_active_uploads: Some(5),
+            max_active_uploads: None,
         }
     }
 }
@@ -486,6 +486,32 @@ impl EngineConfig {
             config.set(key, value.clone())?;
         }
         Ok(config)
+    }
+
+    /// The keys that this config, as read from its file, sets and that `changes` override with
+    /// another value, with the file's value. A key at its default counts as not set by the
+    /// file, except under `settings.`, whose overrides exist only where the file has them.
+    pub fn overridden_by(&self, changes: &BTreeMap<String, Value>) -> Vec<(String, Value)> {
+        let own = serde_json::to_value(self).unwrap_or_default();
+        let default = serde_json::to_value(Self::default()).unwrap_or_default();
+        let at = |root: &Value, key: &str| {
+            key.split('.')
+                .try_fold(root, |value, part| value.get(part))
+                .cloned()
+        };
+        let mut overridden = Vec::new();
+        for (key, stored) in changes {
+            let file = match key.strip_prefix("settings.") {
+                Some(session_key) if session_key != "profile" => {
+                    self.settings.overrides.get(session_key).cloned()
+                }
+                _ => at(&own, key).filter(|value| Some(value) != at(&default, key).as_ref()),
+            };
+            if let Some(file) = file.filter(|file| file != stored) {
+                overridden.push((key.clone(), file));
+            }
+        }
+        overridden
     }
 
     /// The groups of settings that differ from `running`'s and take effect only when the
@@ -833,6 +859,27 @@ publish: [https://catalog.example.org]
         changed.set("port_mapping.enabled", json!(false)).unwrap();
         assert_eq!(changed, config);
         assert!(changed.restart_required(&default).is_empty());
+    }
+
+    #[test]
+    fn stored_changes_that_override_the_file_are_found() {
+        let config = EngineConfig::from_yaml(
+            "queue: { max_active_downloads: 2 }\nsettings: { overrides: { upload.reciprocal_slots: 7 } }",
+        )
+        .unwrap();
+        let changes = BTreeMap::from([
+            ("queue.max_active_downloads".to_owned(), json!(4)),
+            // The file doesn't set this one.
+            ("queue.max_active_uploads".to_owned(), json!(1)),
+            ("settings.upload.reciprocal_slots".to_owned(), json!(9)),
+        ]);
+        assert_eq!(
+            config.overridden_by(&changes),
+            vec![
+                ("queue.max_active_downloads".to_owned(), json!(2)),
+                ("settings.upload.reciprocal_slots".to_owned(), json!(7)),
+            ]
+        );
     }
 
     #[test]

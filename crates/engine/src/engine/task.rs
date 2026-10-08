@@ -1263,13 +1263,16 @@ impl EngineTask {
         let (Some(manifest), Some(dir)) = (&t.manifest, &t.row.content_dir) else {
             return;
         };
-        let items: Vec<Item> = match t.row.kind {
-            Kind::Download => vec![Item {
+        let single = single_file_in_place(&t.row, manifest);
+        let new_dir = moved_dir(t.row.kind, manifest, dir, &folder, single);
+        let items: Vec<Item> = match (t.row.kind, single) {
+            // A download's folder holds only its bundle.
+            (Kind::Download, None) => vec![Item {
                 from: dir.clone(),
-                to: folder.join(manifest.name()),
+                to: new_dir,
             }],
-            // A share's entries move one by one: its base folder may hold other things.
-            Kind::Share => manifest
+            // Otherwise the entries move one by one: the base folder may hold other things.
+            _ => manifest
                 .entries()
                 .iter()
                 .filter_map(|entry| entry.path.split('/').next())
@@ -1277,7 +1280,7 @@ impl EngineTask {
                 .into_iter()
                 .map(|top| Item {
                     from: dir.join(top),
-                    to: folder.join(top),
+                    to: new_dir.join(top),
                 })
                 .collect(),
         };
@@ -1312,17 +1315,19 @@ impl EngineTask {
             }
         };
         let manifest = t.manifest.clone().expect("a moved transfer has a manifest");
-        let new_dir = match t.row.kind {
-            Kind::Download => folder.join(manifest.name()),
-            Kind::Share => folder.clone(),
-        };
+        let old_dir = t
+            .row
+            .content_dir
+            .clone()
+            .expect("a moved transfer has a content folder");
+        let single = single_file_in_place(&t.row, &manifest);
+        let new_dir = moved_dir(t.row.kind, &manifest, &old_dir, &folder, single);
         match result {
             Ok(()) => {
                 t.row.save_folder = folder;
                 t.row.content_dir = Some(new_dir);
             }
             Err(error) => {
-                let old_dir = t.row.content_dir.as_deref().unwrap_or(Path::new(""));
                 t.row.error = Some(format!(
                     "Couldn't move the files to {}: {error}. They are still in {}.",
                     folder.display(),
@@ -1627,6 +1632,30 @@ fn notice(before: &TransferInfo, after: &TransferInfo) -> Option<Notice> {
     }
 }
 
+/// The file of a transfer that is one file stored directly in its save folder (or shared from
+/// its folder). A download kept in a folder of its own, as earlier versions made, is not.
+fn single_file_in_place<'a>(row: &TransferRow, manifest: &'a Manifest) -> Option<&'a str> {
+    let single = manifest.single_file()?;
+    (row.kind == Kind::Share || row.content_dir.as_ref() == Some(&row.save_folder))
+        .then_some(single)
+}
+
+/// Where a transfer's content folder is once moved from `dir` into `folder`. A single file goes
+/// straight into `folder`; anything else keeps its folder's name, as shares and downloads do alike.
+fn moved_dir(
+    kind: Kind,
+    manifest: &Manifest,
+    dir: &Path,
+    folder: &Path,
+    single: Option<&str>,
+) -> PathBuf {
+    match (single, kind) {
+        (Some(_), _) => folder.to_owned(),
+        (None, Kind::Download) => folder.join(manifest.name()),
+        (None, Kind::Share) => folder.join(dir.file_name().unwrap_or_default()),
+    }
+}
+
 /// Records a download's manifest once its status shows it. Returns whether it was new.
 fn learn_manifest(
     known: &mut Option<Arc<Manifest>>,
@@ -1638,7 +1667,10 @@ fn learn_manifest(
     };
     row.manifest = Some(manifest.to_bytes());
     row.chunks = u64::from(ChunkLayout::new(manifest).chunk_count());
-    row.content_dir = Some(row.save_folder.join(manifest.name()));
+    row.content_dir = Some(match manifest.single_file() {
+        Some(_) => row.save_folder.clone(),
+        None => row.save_folder.join(manifest.name()),
+    });
     *known = Some(manifest.clone());
     true
 }

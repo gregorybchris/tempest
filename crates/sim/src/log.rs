@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use sha2::{Digest, Sha256};
+use tempest_core::event::{CloseCause, InFlightReason, SelectReason, ServeReason};
+use tempest_core::io::{Direction, PathKind};
 use tempest_core::{EventKind, Time};
 use tempest_protocol::PeerId;
 use tempest_protocol::message::MessageType;
@@ -134,8 +136,16 @@ pub struct Row {
 }
 
 impl Row {
-    /// Fills the row from `entry`, naming peers by their index in `peers`.
-    fn fill(&mut self, seq: u64, entry: &Entry, peers: &BTreeMap<PeerId, usize>) {
+    /// Fills the row from `entry`, naming peers by their index in `peers`. A decision event's
+    /// readable detail is written only if `describe` is set, since formatting every event costs
+    /// more than the rest of the log together.
+    fn fill(
+        &mut self,
+        seq: u64,
+        entry: &Entry,
+        peers: &BTreeMap<PeerId, usize>,
+        describe: bool,
+    ) {
         let detail = self.detail.take();
         *self = Self {
             seq,
@@ -163,10 +173,12 @@ impl Row {
                 self.kind = event.name();
                 self.reason = event.reason();
                 self.fill_event(event, peers);
-                let mut text = detail.unwrap_or_default();
-                text.clear();
-                write!(text, "{event}").expect("writing to a string succeeds");
-                self.detail = Some(text);
+                if describe {
+                    let mut text = detail.unwrap_or_default();
+                    text.clear();
+                    write!(text, "{event}").expect("writing to a string succeeds");
+                    self.detail = Some(text);
+                }
             }
         }
     }
@@ -226,30 +238,8 @@ impl Row {
         }
     }
 
-    /// Feeds the row's columns, except its position, to `hasher` unambiguously.
+    /// Feeds the row's columns, except its position and detail, to `hasher` unambiguously.
     fn digest(&self, hasher: &mut Sha256) {
-        fn text(hasher: &mut Sha256, text: &str) {
-            hasher.update((text.len() as u64).to_le_bytes());
-            hasher.update(text.as_bytes());
-        }
-        fn number(hasher: &mut Sha256, value: Option<u64>) {
-            match value {
-                Some(value) => {
-                    hasher.update([1]);
-                    hasher.update(value.to_le_bytes());
-                }
-                None => hasher.update([0]),
-            }
-        }
-        fn name(hasher: &mut Sha256, value: Option<&str>) {
-            match value {
-                Some(value) => {
-                    hasher.update([1]);
-                    text(hasher, value);
-                }
-                None => hasher.update([0]),
-            }
-        }
         hasher.update(self.time.as_nanos().to_le_bytes());
         hasher.update(self.peer.to_le_bytes());
         text(hasher, self.kind);
@@ -260,7 +250,128 @@ impl Row {
         number(hasher, self.count.map(u64::from));
         number(hasher, self.bytes);
         name(hasher, self.reason);
-        name(hasher, self.detail.as_deref());
+    }
+}
+
+fn text(hasher: &mut Sha256, text: &str) {
+    hasher.update((text.len() as u64).to_le_bytes());
+    hasher.update(text.as_bytes());
+}
+
+fn number(hasher: &mut Sha256, value: Option<u64>) {
+    match value {
+        Some(value) => {
+            hasher.update([1]);
+            hasher.update(value.to_le_bytes());
+        }
+        None => hasher.update([0]),
+    }
+}
+
+fn name(hasher: &mut Sha256, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            hasher.update([1]);
+            text(hasher, value);
+        }
+        None => hasher.update([0]),
+    }
+}
+
+/// Feeds what a decision event holds beyond its row's columns to `hasher`, so the digest covers
+/// everything its detail says without formatting it. Every field is named, so a new one fails
+/// to compile here until it is digested or deliberately skipped.
+fn digest_details(hasher: &mut Sha256, event: &EventKind) {
+    use EventKind as E;
+    match event {
+        E::Connected {
+            conn: _,
+            peer: _,
+            direction,
+            path,
+        } => {
+            let dialed = matches!(direction, Direction::Dialed);
+            let relayed = matches!(path, PathKind::Relayed);
+            hasher.update([u8::from(dialed), u8::from(relayed)]);
+        }
+        E::Closed {
+            conn: _,
+            peer: _,
+            cause,
+        } => match cause {
+            CloseCause::Local { reason: _, message } => {
+                hasher.update([0]);
+                text(hasher, message);
+            }
+            CloseCause::Remote { reason: _, message } => {
+                hasher.update([1]);
+                text(hasher, message);
+            }
+            CloseCause::Lost => hasher.update([2]),
+        },
+        E::Requested {
+            conn: _,
+            peer: _,
+            start: _,
+            count: _,
+            reason,
+        } => match *reason {
+            SelectReason::Rarest { holders: n }
+            | SelectReason::NearPlayback { ahead: n }
+            | SelectReason::Endgame { copies: n } => number(hasher, Some(u64::from(n))),
+            SelectReason::RandomFirst | SelectReason::Random | SelectReason::Sequential => {
+                number(hasher, None);
+            }
+        },
+        E::Received {
+            conn: _,
+            peer: _,
+            start: _,
+            count: _,
+            bytes: _,
+            duplicate,
+        } => number(hasher, Some(*duplicate)),
+        E::ServingChanged {
+            conn: _,
+            peer: _,
+            serving: _,
+            reason,
+        } => match *reason {
+            ServeReason::Reciprocal { rate } => number(hasher, Some(rate)),
+            ServeReason::Proportional { permille } => number(hasher, Some(u64::from(permille))),
+            _ => number(hasher, None),
+        },
+        E::InFlightChanged {
+            conn: _,
+            peer: _,
+            requests: _,
+            reason,
+        } => match *reason {
+            InFlightReason::Measured { rate, rtt } => {
+                number(hasher, Some(rate));
+                number(hasher, Some(rtt.as_nanos() as u64));
+            }
+            _ => number(hasher, None),
+        },
+        E::PeersShared {
+            conn: _,
+            peer: _,
+            count: _,
+            farewell,
+        } => hasher.update([u8::from(*farewell)]),
+        E::Opened { .. }
+        | E::DialFailed { .. }
+        | E::ManifestReceived { .. }
+        | E::RequestRejected { .. }
+        | E::Uploaded { .. }
+        | E::Banned { .. }
+        | E::Completed
+        | E::EndgameStarted { .. }
+        | E::Cancelled { .. }
+        | E::Snubbed { .. }
+        | E::Offered { .. }
+        | E::SuperseedingEnded { .. }
+        | E::StoppedSharing { .. } => {}
     }
 }
 
@@ -294,8 +405,12 @@ impl<'s> Log<'s> {
 
     /// Adds an entry, naming peers by their index in `peers`.
     pub(crate) fn push(&mut self, entry: Entry, peers: &BTreeMap<PeerId, usize>) {
-        self.row.fill(self.count, &entry, peers);
+        self.row
+            .fill(self.count, &entry, peers, self.sink.is_some());
         self.row.digest(&mut self.hasher);
+        if let Record::Decision(event) = &entry.record {
+            digest_details(&mut self.hasher, event);
+        }
         if let Some(sink) = &mut self.sink {
             sink.row(&self.row);
         }
@@ -316,5 +431,58 @@ impl<'s> Log<'s> {
                 hex
             });
         (digest, self.count, self.entries.unwrap_or_default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempest_core::ConnId;
+    use tempest_protocol::Hash;
+
+    use super::*;
+
+    fn received(duplicate: u64) -> Entry {
+        Entry {
+            time: Time::ZERO,
+            peer: 0,
+            record: Record::Decision(EventKind::Received {
+                conn: ConnId(1),
+                peer: Hash::new([7; 32]),
+                start: 0,
+                count: 1,
+                bytes: 100,
+                duplicate,
+            }),
+        }
+    }
+
+    fn digest(entry: Entry) -> String {
+        let mut log = Log::new(false, None);
+        log.push(entry, &BTreeMap::new());
+        log.finish().0
+    }
+
+    #[test]
+    fn a_log_without_a_sink_digests_details_it_never_formats() {
+        let mut log = Log::new(false, None);
+        log.push(received(0), &BTreeMap::new());
+        assert_eq!(log.row.detail, None, "nothing reads the detail");
+        // A field only the detail shows still changes the digest.
+        assert_ne!(digest(received(0)), digest(received(5)));
+    }
+
+    #[test]
+    fn a_sink_gets_each_decisions_detail() {
+        struct Last(Option<String>);
+        impl Sink for Last {
+            fn row(&mut self, row: &Row) {
+                self.0.clone_from(&row.detail);
+            }
+        }
+        let mut last = Last(None);
+        let mut log = Log::new(false, Some(&mut last));
+        log.push(received(0), &BTreeMap::new());
+        drop(log);
+        assert!(last.0.is_some_and(|text| !text.is_empty()));
     }
 }

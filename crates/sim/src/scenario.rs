@@ -448,6 +448,9 @@ impl Scenario {
         if self.sample_interval.is_zero() {
             return Err(invalid("sample_interval", "must be more than 0"));
         }
+        if self.tracker.interval.is_zero() {
+            return Err(invalid("tracker.interval", "must be more than 0"));
+        }
         if self.peers.is_empty() {
             return Err(invalid("peers", "needs at least one class"));
         }
@@ -862,6 +865,8 @@ experiment:
         assert!(e.starts_with("seeds:"), "{e}");
         let e = error(&format!("{MINIMAL}sample_interval: 0s"));
         assert!(e.starts_with("sample_interval:"), "{e}");
+        let e = error(&format!("{MINIMAL}tracker: {{ interval: 0s }}"));
+        assert!(e.starts_with("tracker.interval:"), "{e}");
         let e = error(&format!("{MINIMAL}payload: real\n").replace("1MiB", "1GiB"));
         assert!(e.starts_with("payload:"), "{e}");
         let e = error(&MINIMAL.replace(

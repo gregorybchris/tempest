@@ -35,7 +35,7 @@ brew install gregorybchris/tap/tempest
 
 Windows users can instead download the `.msi` from the release page.
 
-The simulator is a separate program, `tempest-sim-cli`, installed the same way. To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest` (and `--path crates/sim-cli --features bundled-duckdb` for the simulator).
+To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`. The simulator, `tempest-sim`, is a development tool and is only built from source: `cargo install --path crates/sim-cli --features bundled-duckdb`, or without the feature to link an installed DuckDB ([development](specs/development.md)).
 
 ## Usage
 

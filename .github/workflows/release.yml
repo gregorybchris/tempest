@@ -134,7 +134,7 @@ jobs:
         shell: "bash"
       - name: "Build the web UIs"
         run: |
-          for ui in web sim-web catalog-web; do
+          for ui in web catalog-web; do
             (cd "crates/$ui" && trunk build --release --cargo-profile web)
           done
         shell: "bash"

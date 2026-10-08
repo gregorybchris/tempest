@@ -3747,8 +3747,22 @@ This revises D-175, D-182 and D-189.
 **Decision:**
 
 - A release can be built on one Mac with `dist build`, using the system linker for both macOS targets, `cargo-zigbuild` for the Linux targets and `cargo-xwin` for Windows. Steps and tools are in `specs/development.md`.
-- Windows `tempest` builds this way; Windows `tempest-sim` does not, because clang-cl rejects DuckDB's C++ (`dllexport` on a deleted function). Nor can the `.msi` installers be built, which need WiX on Windows. Those come from CI.
+- Windows `tempest` builds this way. The `.msi` installers can't be built, since they need WiX on Windows; they come from CI. (Windows `tempest-sim` didn't cross-compile either, because clang-cl rejects DuckDB's C++, which D-233 makes moot.)
 - Linux binaries are cross-built and not run locally.
 - A local build publishes nothing; tagging, the GitHub release and the Homebrew tap stay separate steps.
 
 **Rationale:** The workflow file and the dist configuration stay the single source of what a release contains; the local build only supplies the machine.
+
+---
+
+## D-233: Releases ship only `tempest`
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Releasing `tempest-sim` (D-214) meant compiling DuckDB's C++ for every platform, which took most of a local release's hour, and it doesn't cross-compile for Windows (D-232).
+
+**Options:** ship it and cache the C++ compile with sccache; link DuckDB's prebuilt dynamic libraries and ship them beside the binary; don't ship it (chosen).
+
+**Decision:** Releases contain only `tempest`. `tempest-sim` is built from source (`specs/development.md`), where development links the system DuckDB. This refines D-211.
+
+**Rationale:** The simulator is a development and research tool; its users build Tempest anyway. Releases get faster and simpler, with no C++ toolchain per platform.

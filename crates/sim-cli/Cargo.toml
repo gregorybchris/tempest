@@ -19,14 +19,9 @@ path = "src/main.rs"
 bundled-duckdb = ["tempest-sim/bundled-duckdb"]
 
 # Releases bundle DuckDB (D-214).
+# The simulator is a development tool, built from source rather than released (D-233).
 [package.metadata.dist]
-features = ["bundled-duckdb"]
-
-[package.metadata.wix]
-upgrade-guid = "E2B4FD67-9670-4F57-9ACC-41805769868F"
-path-guid = "997B2F78-F8E7-43C7-B423-68AB328A07D4"
-license = false
-eula = false
+dist = false
 
 [dependencies]
 tempest-assets.workspace = true

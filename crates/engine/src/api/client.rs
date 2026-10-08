@@ -305,6 +305,20 @@ impl ApiClient {
         self.send(Method::POST, &path, Some(request)).await
     }
 
+    /// Withdraws a transfer's listing from a tracker's catalog (see
+    /// [`Engine::unpublish`](crate::Engine::unpublish)).
+    pub async fn unpublish(
+        &self,
+        id: BundleId,
+        tracker: &str,
+    ) -> Result<TransferInfo, ClientError> {
+        let path = format!(
+            "/transfers/{id}/publish?tracker={}",
+            encode_segment(tracker)
+        );
+        self.send(Method::DELETE, &path, None::<&()>).await
+    }
+
     /// Signs the engine's key in to a tracker's catalog for whoever asked for the request's
     /// code.
     pub async fn catalog_sign_in(

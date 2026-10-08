@@ -9,7 +9,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use tempest_net::TrackerClient;
+use tempest_net::{TrackerClient, TrackerError};
 use tempest_protocol::BundleId;
 
 /// How long a process may take to start or finish.
@@ -165,8 +165,14 @@ struct TrackerProcess {
 
 impl TrackerProcess {
     fn start(dir: &Path) -> Self {
+        Self::start_with(dir, &[])
+    }
+
+    /// [`TrackerProcess::start`] with `extra` arguments.
+    fn start_with(dir: &Path, extra: &[&str]) -> Self {
         let mut child = tempest(dir)
             .args(["tracker", "--bind", "127.0.0.1", "--port", "0"])
+            .args(extra)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -192,6 +198,21 @@ impl TrackerProcess {
         let client = TrackerClient::new(LIMIT).unwrap();
         let stats = runtime.block_on(client.stats(&self.url, &bundle)).unwrap();
         stats.complete
+    }
+
+    /// The status of `bundle`'s listing in the catalog, as anyone browsing sees it: 200 or 404.
+    fn listing_status(&self, bundle: &str) -> u16 {
+        let bundle: BundleId = bundle.parse().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let client = TrackerClient::new(LIMIT).unwrap();
+        match runtime.block_on(client.listing(&self.url, None, &bundle)) {
+            Ok(_) => 200,
+            Err(TrackerError::Refused { status, .. }) => status,
+            Err(error) => panic!("{error}"),
+        }
     }
 }
 
@@ -327,4 +348,45 @@ fn the_cli_reaches_a_daemon_with_remote_access_through_its_data_directory() {
         stderr(&second)
     );
     daemon.interrupt();
+}
+
+/// `tempest share --publish` lists a share through the daemon, and `tempest catalog unpublish`
+/// withdraws it, through the daemon or with none running.
+#[test]
+fn the_cli_publishes_and_unpublishes_through_the_daemon() {
+    let root = tempfile::tempdir().unwrap();
+    let catalog = root.path().join("catalog.db");
+    let catalog = catalog.to_str().unwrap();
+    let tracker = TrackerProcess::start_with(root.path(), &["--catalog", catalog]);
+    let source = root.path().join("notes");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("a.txt"), contents(2000, 3)).unwrap();
+
+    let dir = root.path().join("engine");
+    let daemon = Daemon::start(&dir, &[]);
+    let shared = run(tempest(&dir)
+        .args(["share", "--publish", &tracker.url])
+        .arg(&source));
+    let id = field(&shared, "bundle");
+    let started = Instant::now();
+    while tracker.listing_status(&id) != 200 {
+        assert!(started.elapsed() < LIMIT, "never listed");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(transfers(&dir)[0]["published"][0], tracker.url.as_str());
+
+    let withdrawn = run(tempest(&dir).args(["catalog", "unpublish", "notes", &tracker.url]));
+    assert!(
+        stdout(&withdrawn).contains("withdrawn"),
+        "{}",
+        stdout(&withdrawn)
+    );
+    assert_eq!(tracker.listing_status(&id), 404);
+    assert_eq!(transfers(&dir)[0]["published"], serde_json::json!([]));
+
+    // With no daemon, the command signs in with the engine's key itself.
+    daemon.interrupt();
+    let again = run(tempest(&dir).args(["catalog", "unpublish", &id, &tracker.url]));
+    assert!(stdout(&again).contains("withdrawn"), "{}", stdout(&again));
+    assert_eq!(tracker.listing_status(&id), 404);
 }

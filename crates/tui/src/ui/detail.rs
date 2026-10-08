@@ -188,8 +188,12 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
             transfer.category.clone().unwrap_or_else(|| "–".to_owned()),
         ),
         row("Tags", tags),
-        row("Link", transfer.link.clone()),
     ]);
+    if !transfer.published.is_empty() {
+        let trackers: Vec<&str> = transfer.published.iter().map(String::as_str).collect();
+        lines.push(row("Published on", trackers.join(", ")));
+    }
+    lines.push(row("Link", transfer.link.clone()));
     let scroll = u16::try_from(app.scroll).unwrap_or(u16::MAX);
     frame.render_widget(
         Paragraph::new(lines)

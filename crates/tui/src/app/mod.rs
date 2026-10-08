@@ -19,6 +19,7 @@ use tempest_engine::{SettingsView, Status, TransferInfo};
 use tempest_protocol::BundleId;
 
 pub use self::inside::{Fetched, Inside, Look};
+use self::modal::confirm_unpublish;
 pub use self::modal::{
     AddField, AddForm, FormKind, Modal, PickItem, PickKind, TextKind, ValueEdit, ValueTarget,
 };
@@ -819,6 +820,22 @@ impl App {
                     text: transfer.link.clone(),
                     what: format!("{}'s link", transfer.name),
                 });
+            }
+            Command::Unpublish => {
+                let mut published = transfer.published.iter();
+                self.modal = match (published.next(), published.next()) {
+                    (None, _) => {
+                        let text = format!("{} isn't published on any catalog.", target.name);
+                        self.notify(text, false);
+                        None
+                    }
+                    (Some(tracker), None) => Some(confirm_unpublish(target, tracker.clone())),
+                    (Some(_), Some(_)) => Some(Modal::Pick {
+                        kind: PickKind::Unpublish(target),
+                        selected: 0,
+                    }),
+                };
+                return None;
             }
             Command::Limits => {
                 let transfer = transfer.clone();

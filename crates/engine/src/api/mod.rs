@@ -64,6 +64,11 @@ struct RemoveQuery {
     delete_files: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct UnpublishQuery {
+    tracker: String,
+}
+
 /// The API's routes over `engine`, refusing what `access` doesn't allow.
 pub fn router(engine: Engine, access: Access) -> Router {
     let transfer = |path: &str| format!("{PREFIX}/transfers/{{id}}{path}");
@@ -87,7 +92,7 @@ pub fn router(engine: Engine, access: Access) -> Router {
         .route(&transfer("/category"), put(set_category))
         .route(&transfer("/settings"), put(set_transfer_settings))
         .route(&transfer("/queue"), post(move_in_queue))
-        .route(&transfer("/publish"), post(publish))
+        .route(&transfer("/publish"), post(publish).delete(unpublish))
         .route(&format!("{PREFIX}/catalog/sign-in"), post(catalog_sign_in))
         .route(
             &format!("{PREFIX}/settings"),
@@ -324,6 +329,15 @@ async fn publish(
     ok(&engine
         .publish(bundle_id(&id)?, &request.tracker, &request.listing, invite)
         .await?)
+}
+
+async fn unpublish(
+    State(engine): State<Engine>,
+    Path(id): Path<String>,
+    query: std::result::Result<Query<UnpublishQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result {
+    let Query(query) = query.map_err(|rejection| ApiError::invalid(rejection.body_text()))?;
+    ok(&engine.unpublish(bundle_id(&id)?, &query.tracker).await?)
 }
 
 async fn catalog_sign_in(

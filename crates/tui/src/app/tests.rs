@@ -248,6 +248,51 @@ fn remove_asks_whether_to_keep_the_files() {
 }
 
 #[test]
+fn unpublish_confirms_the_catalog_or_picks_one_first() {
+    let mut app = three();
+    let alpha = target(&app);
+    press(&mut app, KeyCode::Char('U'));
+    assert_eq!(app.modal, None);
+    let notice = app.notice.take().unwrap().text;
+    assert_eq!(notice, "alpha isn't published on any catalog.");
+
+    // Published on one: a confirmation, which esc dismisses.
+    let mut published = app.selected_transfer().unwrap().clone();
+    published.published = ["https://one.example".to_owned()].into();
+    app.apply(ApiEvent::Transfer(Box::new(published.clone())));
+    press(&mut app, KeyCode::Char('U'));
+    assert!(matches!(app.modal, Some(Modal::Confirm { .. })));
+    assert_eq!(press(&mut app, KeyCode::Esc), None);
+    press(&mut app, KeyCode::Char('U'));
+    let one = Action::Unpublish("https://one.example".to_owned());
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(alpha.clone(), one))
+    );
+
+    // On two: pick one, then confirm.
+    published.published.insert("https://two.example".to_owned());
+    app.apply(ApiEvent::Transfer(Box::new(published)));
+    press(&mut app, KeyCode::Char('U'));
+    let kind = PickKind::Unpublish(alpha.clone());
+    let items: Vec<String> = app.pick_items(&kind).into_iter().map(|i| i.label).collect();
+    assert_eq!(items, ["https://one.example", "https://two.example"]);
+    press(&mut app, KeyCode::Char('j'));
+    assert_eq!(press(&mut app, KeyCode::Enter), None);
+    let two = Action::Unpublish("https://two.example".to_owned());
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        Some(Request::Transfer(alpha.clone(), two.clone()))
+    );
+    let request = Request::Transfer(alpha, two);
+    app.finished(&request, Ok(Reply::Done));
+    assert_eq!(
+        app.notice.unwrap().text,
+        "Withdrew alpha from https://two.example's catalog."
+    );
+}
+
+#[test]
 fn rename_sends_the_new_name_or_none_to_reset() {
     let mut app = three();
     let alpha = target(&app);

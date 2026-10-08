@@ -1,5 +1,6 @@
-//! `tempest catalog`: signing in to trackers' catalogs and listing transfers there (D-128,
-//! D-129), with this installation's key, through the daemon if one is running.
+//! `tempest catalog`: signing in to trackers' catalogs, and listing transfers there or
+//! withdrawing them (D-128, D-129), with this installation's key, through the daemon if one is
+//! running.
 
 use anyhow::Result;
 use tempest_catalog_api::listing::{Listing, ListingEdit, ListingStatus};
@@ -31,6 +32,16 @@ pub enum CatalogCommand {
         tracker: String,
         #[command(flatten)]
         listing: ListingArgs,
+        #[command(flatten)]
+        engine: EngineArgs,
+    },
+    /// Withdraw a transfer's listing from a tracker's catalog, and stop asking the tracker to
+    /// list it.
+    Unpublish {
+        /// The transfer: a bundle ID, a unique prefix of one, or a name.
+        transfer: String,
+        /// The tracker's URL, such as `https://tracker.example.org`.
+        tracker: String,
         #[command(flatten)]
         engine: EngineArgs,
     },
@@ -136,6 +147,22 @@ pub fn catalog(command: CatalogCommand) -> Result<()> {
                 })
             })?;
             print_listing(&tracker, &listing);
+            Ok(())
+        }
+        CatalogCommand::Unpublish {
+            transfer,
+            tracker,
+            engine,
+        } => {
+            Target::run(&engine, async |target| {
+                let id = target.find(&transfer).await?.id;
+                match target {
+                    Target::Daemon(client) => client.unpublish(id, &tracker).await?,
+                    Target::Held(engine) => engine.unpublish(id, &tracker).await?,
+                };
+                Ok(())
+            })?;
+            println!("catalog   {} (withdrawn)", tracker.trim_end_matches('/'));
             Ok(())
         }
     }

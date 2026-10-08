@@ -71,6 +71,22 @@ impl TrackerClient {
         self.exchange(json(request, edit)).await
     }
 
+    /// Withdraws the session's key's listing of `bundle`.
+    pub async fn withdraw_listing(
+        &self,
+        tracker: &str,
+        token: &str,
+        bundle: &BundleId,
+    ) -> Result<(), TrackerError> {
+        let path = format!("listings/{bundle}");
+        let request = self
+            .http
+            .delete(tempest_catalog_api::url(tracker, &path))
+            .bearer_auth(token);
+        let _: serde_json::Value = self.exchange(request).await?;
+        Ok(())
+    }
+
     /// `bundle`'s listing, as the session whose token is `token` sees it, if one is given.
     pub async fn listing(
         &self,

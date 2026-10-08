@@ -226,6 +226,7 @@ mod tests {
             content_dir: None,
             link: String::new(),
             settings: Default::default(),
+            published: BTreeSet::new(),
         }
     }
 

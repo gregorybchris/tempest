@@ -49,6 +49,8 @@ pub enum Action {
     Queue(QueueStep),
     /// Replace its own settings, by dotted key.
     Settings(BTreeMap<String, Value>),
+    /// Withdraw its listing from this tracker's catalog.
+    Unpublish(String),
 }
 
 /// Something the app can't do itself: a request to the engine, or opening a folder.
@@ -209,6 +211,7 @@ impl Action {
             Self::Move(_) => "move",
             Self::Queue(_) => "reorder",
             Self::Settings(_) => "set the limits of",
+            Self::Unpublish(_) => "unpublish",
         }
     }
 
@@ -244,6 +247,7 @@ impl Action {
                 format!("Moved {name} {place} the queue.")
             }
             Self::Settings(_) => format!("Saved {name}'s limits."),
+            Self::Unpublish(tracker) => format!("Withdrew {name} from {tracker}'s catalog."),
         }
     }
 }

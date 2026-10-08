@@ -20,7 +20,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 use super::notify::{self, Notice};
 use super::relocate::{self, Item};
-use super::supervisor::Supervisor;
+use super::supervisor::{ListingChange, Supervisor};
 use super::{
     AddOptions, CHECKPOINT_INTERVAL, Command, EVENT_BUFFER, EngineError, GOODBYE_TIMEOUT, Inside,
     Internal, NewShare, Reply, SettingsView, TICK,
@@ -99,8 +99,8 @@ struct Run {
     /// Dropping or setting it stops the bundle.
     stop: watch::Sender<bool>,
     checkpoint: mpsc::Sender<()>,
-    /// Trackers to announce it to with `listing` from now on.
-    publish: mpsc::UnboundedSender<String>,
+    /// Changes to the trackers it is published on.
+    listing: mpsc::UnboundedSender<ListingChange>,
     /// The transfer's totals before this run.
     base_uploaded: u64,
     base_downloaded: u64,
@@ -422,6 +422,10 @@ impl EngineTask {
                 let result = self.publish(id, tracker).await;
                 let _ = reply.send(result);
             }
+            Command::Unpublish(id, tracker, reply) => {
+                let result = self.unpublish(id, tracker).await;
+                let _ = reply.send(result);
+            }
             Command::Categories(reply) => {
                 let _ = reply.send(self.store.categories().unwrap_or_default());
             }
@@ -694,10 +698,44 @@ impl EngineTask {
             ..
         }) = self.transfers.get(&id)
         {
-            let _ = run.publish.send(tracker.clone());
+            let _ = run.listing.send(ListingChange::Publish(tracker.clone()));
         }
         self.change(id, |t| {
             t.row.publish.insert(tracker);
+            Ok(())
+        })
+        .await
+    }
+
+    /// Stops listing a transfer on `tracker`'s catalog: forgotten, and told to its running
+    /// bundle's supervisor, which stops announcing there unless the transfer has another reason
+    /// to.
+    async fn unpublish(
+        &mut self,
+        id: BundleId,
+        tracker: String,
+    ) -> Result<TransferInfo, EngineError> {
+        let t = self.transfers.get(&id).ok_or(EngineError::NotFound(id))?;
+        let same = |url: &String| url.trim_end_matches('/') == tracker.trim_end_matches('/');
+        let published: Vec<String> = t.row.publish.iter().filter(|u| same(u)).cloned().collect();
+        if let Live::Running(run) = &t.live {
+            let keep = t
+                .link
+                .trackers
+                .iter()
+                .chain(&self.config.trackers)
+                .any(same);
+            for tracker in &published {
+                let _ = run.listing.send(ListingChange::Unpublish {
+                    tracker: tracker.clone(),
+                    keep,
+                });
+            }
+        }
+        self.change(id, |t| {
+            for tracker in &published {
+                t.row.publish.remove(tracker);
+            }
             Ok(())
         })
         .await
@@ -913,6 +951,7 @@ impl EngineTask {
             content_dir: row.content_dir.clone(),
             link,
             settings: row.settings.clone(),
+            published: row.publish.clone(),
         }))
     }
 
@@ -1134,14 +1173,14 @@ impl EngineTask {
         };
         let (stop, stop_receiver) = watch::channel(false);
         let (checkpoint, checkpoint_receiver) = mpsc::channel(1);
-        let (publish, publish_receiver) = mpsc::unbounded_channel();
+        let (listing_changes, listing_receiver) = mpsc::unbounded_channel();
         let now = Instant::now();
         t.live = Live::Running(Run {
             generation,
             status: handle.status.clone(),
             stop,
             checkpoint,
-            publish,
+            listing: listing_changes,
             base_uploaded: t.row.uploaded,
             base_downloaded: t.row.downloaded,
             last_progress: now,
@@ -1165,7 +1204,7 @@ impl EngineTask {
             listing,
             internal: self.internal.clone(),
         };
-        tokio::spawn(supervisor.run(stop_receiver, checkpoint_receiver, publish_receiver));
+        tokio::spawn(supervisor.run(stop_receiver, checkpoint_receiver, listing_receiver));
     }
 
     /// Checks a transfer's data from scratch: now if it is idle, or once it has stopped.

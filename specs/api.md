@@ -42,6 +42,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `PUT /v1/transfers/{id}/settings` | The transfer's own settings by dotted key, replacing what it had: session settings, `limits.download` and `limits.upload`, and `sharing.*` | The transfer |
 | `POST /v1/transfers/{id}/queue` | `{"to": "top" \| "up" \| "down" \| "bottom" \| <place>}` | Every transfer, in the new order |
 | `POST /v1/transfers/{id}/publish` | `{"tracker", "listing", "invite"}`: a tracker's URL, the listing's fields as the catalog's `PUT /catalog/v1/listings/{bundle}` takes them, and an optional invite | The listing, after the engine signed in with its key and set it; from then on the transfer announces there with `listing` (D-129) |
+| `DELETE /v1/transfers/{id}/publish?tracker=…` | | The transfer, after the engine signed in with its key and withdrew the listing through the catalog's `DELETE /catalog/v1/listings/{bundle}`; from then on it announces there without `listing`, or not at all if only publishing put it there. A listing the catalog doesn't have counts as withdrawn |
 | `POST /v1/catalog/sign-in` | `{"tracker", "code", "invite"}` | The account, after the engine signed in for whoever asked the catalog for `code`, such as a browser |
 | `GET /v1/settings` | | The settings in effect, which were changed through the API, which groups await a restart, and whether the alternative speed limits apply now |
 | `PATCH /v1/settings` | Settings by dotted key, as in the config file | As `GET`; all the changes apply, or none |
@@ -53,7 +54,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 
 A chunk map's cells cover consecutive chunks in order, their sizes differing by at most one, so its size stays bounded however large the bundle. A cell's availability is the fewest connected peers holding any one of its chunks. A transfer that isn't running has nothing in flight and every availability 0, and says so with `"running": false` (D-193).
 
-A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link and dates.
+A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link, dates and the trackers it is published on.
 
 Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers, relays, port mapping and the clients' `ui` settings (D-195) apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
 
@@ -81,4 +82,4 @@ Settings changed through the API are kept in the state database and apply over t
 
 `tempest share` and `tempest get` hand their transfer to the daemon when one answers: `share` prints the link and returns, and `get` follows the download to completion. Options that only make sense for a process of its own, such as `--port` or `--identity`, and `--standalone`, run them without the daemon as before (D-175).
 
-`tempest share --publish <tracker>` also lists the share on that tracker's catalog, through the daemon's `publish` route or, standalone, by signing in itself. `tempest catalog publish` does the same for a transfer already added, and `tempest catalog sign-in <tracker> --code` signs in a browser showing the catalog. All of them sign with the engine's key.
+`tempest share --publish <tracker>` also lists the share on that tracker's catalog, through the daemon's `publish` route or, standalone, by signing in itself. `tempest catalog publish` does the same for a transfer already added, `tempest catalog unpublish` withdraws it, and `tempest catalog sign-in <tracker> --code` signs in a browser showing the catalog. All of them sign with the engine's key.

@@ -218,6 +218,8 @@ pub enum PickKind {
     Sort,
     /// A saved view.
     View,
+    /// A catalog to withdraw a transfer from.
+    Unpublish(Target),
 }
 
 impl PickKind {
@@ -228,6 +230,7 @@ impl PickKind {
             Self::Status => "Show",
             Self::Sort => "Sort by",
             Self::View => "Views",
+            Self::Unpublish(_) => "Withdraw from",
         }
     }
 }
@@ -625,6 +628,13 @@ impl App {
                 };
                 Outcome::Ask(Request::Transfer(target, Action::Category(category)))
             }
+            PickKind::Unpublish(target) => {
+                let published = self.model.transfer(&target.id).map(|t| &t.published);
+                match published.and_then(|p| p.iter().nth(index)) {
+                    Some(tracker) => Outcome::Open(confirm_unpublish(target, tracker.clone())),
+                    None => Outcome::Close,
+                }
+            }
             PickKind::Status => {
                 let status = index
                     .checked_sub(1)
@@ -687,6 +697,11 @@ impl App {
                 );
                 items
             }
+            PickKind::Unpublish(target) => (self.model.transfer(&target.id))
+                .into_iter()
+                .flat_map(|t| &t.published)
+                .map(|tracker| item(tracker, false))
+                .collect(),
             PickKind::View => {
                 let current = self.current_view();
                 let describe = |finding: &Finding| match finding.describe() {
@@ -861,5 +876,17 @@ fn text_key(
             input,
             error: Some(error),
         }),
+    }
+}
+
+/// Asks whether to withdraw `target`'s listing from `tracker`'s catalog.
+pub(super) fn confirm_unpublish(target: Target, tracker: String) -> Modal {
+    Modal::Confirm {
+        title: "Withdraw".to_owned(),
+        text: format!("Withdraw {} from {tracker}'s catalog?", target.name),
+        detail: "The catalog stops listing it, and this peer stops asking it to. The transfer \
+                 keeps sharing."
+            .to_owned(),
+        request: Box::new(Request::Transfer(target, Action::Unpublish(tracker))),
     }
 }

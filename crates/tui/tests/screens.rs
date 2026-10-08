@@ -49,6 +49,7 @@ fn transfer(seed: u8, name: &str, status: Status) -> TransferInfo {
         content_dir: None,
         link: String::new(),
         settings: Default::default(),
+        published: BTreeSet::new(),
     }
 }
 

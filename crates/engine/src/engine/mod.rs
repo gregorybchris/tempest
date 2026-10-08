@@ -225,6 +225,7 @@ enum Command {
     ),
     Move(BundleId, QueueMove, Reply<Vec<TransferInfo>>),
     Publish(BundleId, String, Reply<TransferInfo>),
+    Unpublish(BundleId, String, Reply<TransferInfo>),
     Categories(oneshot::Sender<BTreeMap<String, PathBuf>>),
     SetCategoryFolder(String, PathBuf, Reply<()>),
     RemoveCategory(String, Reply<()>),
@@ -440,6 +441,39 @@ impl Engine {
         self.call(|reply| Command::Publish(id, tracker, reply))
             .await?;
         Ok(listing)
+    }
+
+    /// Withdraws a transfer's listing from the catalog of the tracker at `tracker`: signs in
+    /// with this peer's key, withdraws the listing, signs out, and from then on announces the
+    /// transfer there without `listing`, or not at all if only publishing put it there. A
+    /// listing the catalog doesn't have counts as withdrawn.
+    pub async fn unpublish(
+        &self,
+        id: BundleId,
+        tracker: &str,
+    ) -> Result<TransferInfo, EngineError> {
+        if !crate::config::is_http_url(tracker) {
+            return Err(EngineError::InvalidTracker(tracker.to_owned()));
+        }
+        self.get(id).await.ok_or(EngineError::NotFound(id))?;
+        let failed = |source| EngineError::Tracker {
+            tracker: tracker.to_owned(),
+            source,
+        };
+        let client = &self.tracker;
+        let session = client
+            .catalog_sign_in(tracker, &self.identity, None)
+            .await
+            .map_err(failed)?;
+        let withdrawn = client.withdraw_listing(tracker, &session.token, &id).await;
+        let _ = client.catalog_sign_out(tracker, &session.token).await;
+        match withdrawn {
+            Ok(()) | Err(TrackerError::Refused { status: 404, .. }) => {}
+            Err(error) => return Err(failed(error)),
+        }
+        let tracker = tracker.to_owned();
+        self.call(|reply| Command::Unpublish(id, tracker, reply))
+            .await
     }
 
     /// Signs this peer's key in to the catalog of the tracker at `tracker` for whoever asked

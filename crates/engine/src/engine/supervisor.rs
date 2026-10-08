@@ -14,8 +14,17 @@ async fn stopped(stop: &mut watch::Receiver<bool>) {
     let _ = stop.wait_for(|stop| *stop).await;
 }
 
+/// A change to the trackers a running bundle is published on.
+#[derive(Debug)]
+pub(super) enum ListingChange {
+    /// Announce there with `listing` from now on.
+    Publish(String),
+    /// Announce there without it, or stop announcing there unless `keep`.
+    Unpublish { tracker: String, keep: bool },
+}
+
 /// Owns a running bundle: forwards its decision events, takes checkpoints when asked, has
-/// trackers list it when it is published, stops it when told, and reports how it ended.
+/// trackers list it while it is published, stops it when told, and reports how it ended.
 pub(super) struct Supervisor {
     pub id: BundleId,
     pub generation: u64,
@@ -34,7 +43,7 @@ impl Supervisor {
         mut self,
         mut stop: watch::Receiver<bool>,
         mut checkpoint: mpsc::Receiver<()>,
-        mut publish: mpsc::UnboundedReceiver<String>,
+        mut listing: mpsc::UnboundedReceiver<ListingChange>,
     ) {
         let mut status = self.handle.status.clone();
         let mut events_open = true;
@@ -46,7 +55,10 @@ impl Supervisor {
                     break;
                 }
                 Some(()) = checkpoint.recv() => self.checkpoint().await,
-                Some(tracker) = publish.recv() => self.publish(tracker),
+                Some(change) = listing.recv() => match change {
+                    ListingChange::Publish(tracker) => self.publish(tracker),
+                    ListingChange::Unpublish { tracker, keep } => self.unpublish(&tracker, keep),
+                },
                 event = self.handle.events.recv(), if events_open => match event {
                     Ok(event) => self.forward(event).await,
                     Err(RecvError::Lagged(missed)) => {
@@ -109,6 +121,18 @@ impl Supervisor {
                 &self.handle,
                 Some(self.listing),
             )),
+        }
+    }
+
+    /// Announces to `tracker` without `listing`, or stops announcing there unless `keep`.
+    fn unpublish(&mut self, tracker: &str, keep: bool) {
+        let Some(index) = self.announcers.iter().position(|a| a.tracker() == tracker) else {
+            return;
+        };
+        if keep {
+            self.announcers[index].set_listing(None);
+        } else {
+            tokio::spawn(self.announcers.remove(index).stop());
         }
     }
 

@@ -31,6 +31,7 @@ pub enum Command {
     Open,
     Copy,
     Limits,
+    Unpublish,
 
     QueueUp,
     QueueDown,
@@ -114,7 +115,7 @@ impl Section {
 
 impl Command {
     /// Every command, in the order help and the palette list them.
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 55] = [
         Self::Down,
         Self::Up,
         Self::First,
@@ -133,6 +134,7 @@ impl Command {
         Self::Open,
         Self::Copy,
         Self::Limits,
+        Self::Unpublish,
         Self::QueueUp,
         Self::QueueDown,
         Self::QueueTop,
@@ -222,6 +224,7 @@ impl Command {
             Self::Open => &[Char('o')],
             Self::Copy => &[Char('y')],
             Self::Limits => &[Char('L')],
+            Self::Unpublish => &[Char('U')],
             Self::QueueUp => &[Char('K')],
             Self::QueueDown => &[Char('J')],
             Self::QueueTop => &[Char('<')],
@@ -281,6 +284,7 @@ impl Command {
             Self::Open => "Open its folder",
             Self::Copy => "Copy its link",
             Self::Limits => "Speed and sharing limits",
+            Self::Unpublish => "Withdraw from a catalog",
             Self::QueueUp => "Up the queue",
             Self::QueueDown => "Down the queue",
             Self::QueueTop => "Top of the queue",
@@ -402,7 +406,8 @@ impl Command {
             | Self::MoveStorage
             | Self::Open
             | Self::Copy
-            | Self::Limits => Section::Transfer,
+            | Self::Limits
+            | Self::Unpublish => Section::Transfer,
             Self::QueueUp | Self::QueueDown | Self::QueueTop | Self::QueueBottom => Section::Queue,
             Self::Detail
             | Self::NextTab
@@ -615,7 +620,7 @@ mod tests {
 
     #[test]
     fn the_palette_ranks_closer_matches_first() {
-        assert_eq!(palette_matches(Screen::List, "").len(), 34);
+        assert_eq!(palette_matches(Screen::List, "").len(), 35);
         assert_eq!(palette_matches(Screen::List, "rem")[0], Command::Remove);
         assert_eq!(palette_matches(Screen::List, "tags")[0], Command::Tags);
         assert_eq!(palette_matches(Screen::List, "queue")[0], Command::QueueUp);

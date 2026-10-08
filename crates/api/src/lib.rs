@@ -101,6 +101,9 @@ pub struct TransferInfo {
     pub link: String,
     /// Its own settings, by dotted key, over the engine's.
     pub settings: BTreeMap<String, serde_json::Value>,
+    /// The trackers whose catalogs it is published on (D-208).
+    #[serde(default)]
+    pub published: BTreeSet<String>,
 }
 
 /// Whether a transfer downloads a bundle or shares one made here.
@@ -157,6 +160,7 @@ impl TransferInfo {
             content_dir: None,
             link: String::new(),
             settings: BTreeMap::new(),
+            published: BTreeSet::new(),
         }
     }
 }

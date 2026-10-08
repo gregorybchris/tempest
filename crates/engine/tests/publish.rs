@@ -1,5 +1,6 @@
 //! Publishing shares on a tracker's catalog (D-129): by `Engine::publish`, by the config's
-//! `publish` trackers, and signing in for a browser with a code.
+//! `publish` trackers, and through the API, withdrawing them too; and signing in for a browser
+//! with a code.
 
 mod common;
 
@@ -9,7 +10,10 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tempest_catalog_api::account::{Challenge, PollResponse};
 use tempest_catalog_api::listing::{Listing, ListingEdit, ListingStatus};
+use tempest_engine::api::client::{ApiClient, ClientError};
+use tempest_engine::api::{Access, PublishRequest, router};
 use tempest_engine::{Engine, EngineError, ShareOptions};
+use tempest_net::TrackerError;
 use tempest_net::{EndpointConfig, TrackerClient};
 use tempest_protocol::BundleId;
 use tempest_tracker::{Catalog, CatalogConfig, FetcherConfig, Tracker, TrackerConfig};
@@ -177,5 +181,47 @@ async fn the_engine_signs_in_a_browsers_code() {
         .catalog_sign_in(&tracker, &challenge.code, None)
         .await;
     assert!(matches!(again, Err(EngineError::Tracker { .. })));
+    engine.shutdown().await;
+}
+
+/// Publishing and then unpublishing through the API withdraws the listing, and the engine
+/// forgets the tracker, so later announces don't list it again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unpublishing_through_the_api_withdraws_the_listing() {
+    let tracker = start_tracker().await;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(dir.path())).await.unwrap();
+    let id = share(&engine, dir.path(), "Notes", 300).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let app = router(engine.clone(), Access::Local);
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    let api = ApiClient::new(&url, None, None).unwrap();
+
+    let request = PublishRequest {
+        tracker: tracker.clone(),
+        listing: ListingEdit::default(),
+        invite: None,
+    };
+    api.publish(id, &request).await.unwrap();
+    listed(&tracker, &id).await;
+    let transfer = api.transfer(id).await.unwrap();
+    assert!(transfer.published.contains(&tracker));
+
+    let transfer = api.unpublish(id, &tracker).await.unwrap();
+    assert!(transfer.published.is_empty());
+    let catalog = TrackerClient::new(Duration::from_secs(5)).unwrap();
+    let gone = |result: Result<Listing, TrackerError>| {
+        matches!(result, Err(TrackerError::Refused { status: 404, .. }))
+    };
+    assert!(gone(catalog.listing(&tracker, None, &id).await));
+    // Past a few announce intervals, it stays withdrawn.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(gone(catalog.listing(&tracker, None, &id).await));
+
+    // Withdrawing again changes nothing; an unknown transfer is refused.
+    api.unpublish(id, &tracker).await.unwrap();
+    let unknown = api.unpublish(BundleId::new([7; 32]), &tracker).await;
+    assert!(matches!(unknown, Err(ClientError::Refused(e)) if e.error == "not_found"));
     engine.shutdown().await;
 }

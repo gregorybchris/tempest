@@ -193,6 +193,7 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
                 Action::Settings(settings) => {
                     client.set_transfer_settings(id, &settings).await.map(drop)
                 }
+                Action::Unpublish(tracker) => client.unpublish(id, &tracker).await.map(drop),
             };
             result.map(|()| Reply::Done).map_err(|e| e.to_string())
         }

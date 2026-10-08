@@ -402,8 +402,11 @@ impl EngineTask {
                 let _ = reply.send(result);
             }
             Command::SetSettings(id, settings, reply) => {
-                let result = match self.config.transfer(&settings) {
-                    Ok(_) => {
+                let kind = self.transfers.get(&id).map(|t| t.row.kind);
+                let result = match kind.map_or(Ok(()), |kind| {
+                    self.config.transfer(kind, &settings).map(drop)
+                }) {
+                    Ok(()) => {
                         self.change(id, |t| {
                             t.row.settings = settings;
                             Ok(())
@@ -1004,7 +1007,7 @@ impl EngineTask {
         let t = self.transfers.get_mut(&id).expect("launching a transfer");
         t.recheck = false;
         let Some(manifest) = t.manifest.clone() else {
-            let session = match self.config.transfer(&t.row.settings) {
+            let session = match self.config.transfer(t.row.kind, &t.row.settings) {
                 Ok(transfer) => transfer.session,
                 Err(error) => return self.fail(id, error.to_string()),
             };
@@ -1118,7 +1121,7 @@ impl EngineTask {
             return;
         }
         let t = self.transfers.get_mut(&id).expect("checked above");
-        let session = match self.config.transfer(&t.row.settings) {
+        let session = match self.config.transfer(t.row.kind, &t.row.settings) {
             Ok(transfer) => transfer.session,
             Err(error) => return self.fail(id, error.to_string()),
         };
@@ -1163,13 +1166,13 @@ impl EngineTask {
             lan.watch(&handle).await;
         }
         let limits = handle.limits().clone();
-        let sharing = match self.config.transfer(&t.row.settings) {
+        let sharing = match self.config.transfer(t.row.kind, &t.row.settings) {
             Ok(transfer) => {
                 limits.download.set_rate(transfer.limits.download);
                 limits.upload.set_rate(transfer.limits.upload);
                 transfer.sharing
             }
-            Err(_) => SharingLimits::default(),
+            Err(_) => SharingLimits::NONE,
         };
         let (stop, stop_receiver) = watch::channel(false);
         let (checkpoint, checkpoint_receiver) = mpsc::channel(1);
@@ -1346,7 +1349,7 @@ impl EngineTask {
             let (Live::Running(run) | Live::Stopping(run)) = &mut t.live else {
                 continue;
             };
-            if let Ok(transfer) = self.config.transfer(&t.row.settings) {
+            if let Ok(transfer) = self.config.transfer(t.row.kind, &t.row.settings) {
                 run.limits.download.set_rate(transfer.limits.download);
                 run.limits.upload.set_rate(transfer.limits.upload);
                 run.sharing = transfer.sharing;
@@ -1482,6 +1485,7 @@ impl EngineTask {
         };
         // The manifest may have arrived since the last tick.
         learn_manifest(&mut t.manifest, &mut t.row, &run.status.borrow());
+        let mut removed = false;
         match result {
             Ok(summary) => {
                 t.row.uploaded = run.base_uploaded + summary.uploaded;
@@ -1492,14 +1496,21 @@ impl EngineTask {
                 }
                 if summary.complete {
                     t.row.completed.get_or_insert_with(now_millis);
-                    // It stopped sharing by itself: lingering is over (D-065).
+                    // It stopped sharing by itself: the idle timeout passed (D-065), and the
+                    // action for a sharing limit applies (D-224).
                     t.row.done |= !asked;
+                    removed = !asked && run.sharing.action == SharingAction::Remove;
                 }
             }
             Err(error) => t.row.error = Some(error.to_string()),
         }
         let _ = self.store.save_transfer(&t.row);
-        self.after_stop(id).await;
+        if removed {
+            let (reply, _) = oneshot::channel();
+            self.remove(id, false, reply);
+        } else {
+            self.after_stop(id).await;
+        }
         self.reschedule().await;
     }
 

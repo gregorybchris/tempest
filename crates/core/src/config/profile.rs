@@ -2,7 +2,6 @@
 
 use std::fmt;
 use std::str::FromStr;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +18,7 @@ pub enum Profile {
     /// The classic BitTorrent client, as a baseline: one-chunk requests with a fixed pipeline,
     /// classic endgame, and the same upload strategy once complete.
     Classic,
-    /// For trusted swarms: serve everyone and keep sharing.
+    /// For trusted swarms: serve everyone.
     Cooperative,
     /// Polite background sharing: fewer connections, fewer uploads at once.
     Background,
@@ -62,13 +61,11 @@ impl Profile {
             }
             Self::Cooperative => {
                 config.strategies.upload = Upload::Cooperative;
-                config.lingering.keep_sharing = true;
             }
             Self::Background => {
                 config.connections.max = 20;
                 config.upload.parallel_responses = 2;
                 config.upload.reciprocal_slots = 2;
-                config.lingering.idle_timeout = Duration::from_secs(120);
             }
             Self::Streaming => {
                 config.strategies.chunk_selection = ChunkSelection::Streaming;

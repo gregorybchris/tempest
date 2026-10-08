@@ -411,8 +411,10 @@ fn a_transfers_limits_keep_its_other_settings() {
     press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Tab);
     type_keys(&mut app, "none");
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    // Past the time and the idle timeout to the action.
+    for _ in 0..3 {
+        press(&mut app, KeyCode::Tab);
+    }
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Right);
     let request = press(&mut app, KeyCode::Enter);

@@ -12,7 +12,7 @@ use tempest_core::io::PathKind;
 use tempest_core::{ConnId, StreamId};
 use tempest_protocol::message::{GoodbyeReason, PeerRecord};
 use tempest_protocol::{Address, Message, PeerId};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use super::bundle::Report;
@@ -148,10 +148,16 @@ async fn first_some<T>(
     }
 }
 
+/// How long a closing end waits for the other to acknowledge the end of the control stream,
+/// and a receiver waits for the Goodbye after it (D-224).
+pub(super) const LEAVE_GRACE: Duration = Duration::from_secs(2);
+
 /// How a connection's task ended.
 enum End {
     /// The connection ended, or the bundle closed it.
     Closed,
+    /// The other peer finished its control stream, which it does before a Goodbye.
+    Finished,
     /// The other peer broke the protocol.
     Violation(String),
 }
@@ -164,22 +170,25 @@ pub(super) struct ConnTask {
     pub rtt_interval: Duration,
     /// What Data sent on request streams draws from.
     pub throttle: Throttle,
+    /// Told once the control stream is finished and acknowledged, or the wait is over.
+    pub drained: Option<oneshot::Sender<()>>,
 }
 
 impl ConnTask {
     /// Runs until the connection ends, the other peer breaks the protocol on the control stream,
     /// or the bundle drops `outbox`'s sender, which it does when it closes the connection.
     pub(super) async fn run(
-        self,
+        mut self,
         send: SendStream,
         recv: RecvStream,
         outbox: mpsc::Receiver<Message>,
     ) {
+        let drained = self.drained.take();
         // Each part loops until the connection is done, so none is cancelled partway through a
         // frame.
         let end = tokio::select! {
             end = self.read_control(recv) => end,
-            end = write_control(send, outbox) => end,
+            end = write_control(send, outbox, drained) => end,
             end = self.accept_requests() => end,
             end = self.report_rtt() => end,
         };
@@ -199,6 +208,24 @@ impl ConnTask {
                     closed,
                 }
             }
+            // A peer that is leaving finishes the stream and closes once it is acknowledged.
+            End::Finished => {
+                match tokio::time::timeout(LEAVE_GRACE, self.connection.closed()).await {
+                    Ok(error) => {
+                        let Some(closed) = closed_cause(&error) else {
+                            return;
+                        };
+                        Report::Closed {
+                            conn: self.conn,
+                            closed,
+                        }
+                    }
+                    Err(_) => Report::Violation {
+                        conn: self.conn,
+                        message: "the control stream ended".to_owned(),
+                    },
+                }
+            }
         };
         let _ = self.inbox.send(report).await;
     }
@@ -215,7 +242,7 @@ impl ConnTask {
                         return End::Closed;
                     }
                 }
-                Ok(None) => return End::Violation("the control stream ended".to_owned()),
+                Ok(None) => return End::Finished,
                 Err(ReadMessageError::Read(ReadError::Reset(_))) => {
                     return End::Violation("the control stream was reset".to_owned());
                 }
@@ -256,8 +283,15 @@ impl ConnTask {
     }
 }
 
-/// Writes the session's control messages in order.
-async fn write_control(mut send: SendStream, mut outbox: mpsc::Receiver<Message>) -> End {
+/// Writes the session's control messages in order. Once the bundle drops its sender, which it
+/// does when it closes the connection, writes what is queued, finishes the stream and waits,
+/// for a while, for the other peer to acknowledge it, since closing the connection at once
+/// would drop what is still unsent (D-224). Then it tells `drained`.
+async fn write_control(
+    mut send: SendStream,
+    mut outbox: mpsc::Receiver<Message>,
+    drained: Option<oneshot::Sender<()>>,
+) -> End {
     while let Some(message) = outbox.recv().await {
         match write_message(&mut send, &message).await {
             Ok(()) => {}
@@ -266,6 +300,12 @@ async fn write_control(mut send: SendStream, mut outbox: mpsc::Receiver<Message>
             }
             Err(_) => break,
         }
+    }
+    if send.finish().is_ok() {
+        let _ = tokio::time::timeout(LEAVE_GRACE, send.stopped()).await;
+    }
+    if let Some(drained) = drained {
+        let _ = drained.send(());
     }
     End::Closed
 }

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use tempest_engine::TransferInfo;
+use tempest_engine::{Kind, TransferInfo};
 
 use super::App;
 use super::modal::{FormKind, Modal};
@@ -18,6 +18,7 @@ const DOWNLOAD: (&str, &str) = ("limits.download", "Download");
 const UPLOAD: (&str, &str) = ("limits.upload", "Upload");
 const RATIO: (&str, &str) = ("sharing.ratio", "Ratio");
 const TIME: (&str, &str) = ("sharing.time", "Time");
+const IDLE: (&str, &str) = ("sharing.idle_timeout", "Idle timeout");
 const ACTION: (&str, &str) = ("sharing.action", "At the limit");
 
 /// The choices for what happens at a sharing limit, the engine's first.
@@ -45,7 +46,10 @@ impl App {
             .settings
             .as_ref()
             .map(|view| serde_json::to_value(view.settings.sharing).expect("settings serialize"));
+        // A share has no limits unless it sets its own (D-224).
+        let share = transfer.kind == Kind::Share;
         let engine_says = |key: &str| match engine.as_ref().map(|e| &e[key]) {
+            _ if share => "no limit of its own".to_owned(),
             Some(Value::Null) => "the engine's: none".to_owned(),
             Some(Value::String(text)) => format!("the engine's: {text}"),
             Some(value) if !value.is_null() => format!("the engine's: {value}"),
@@ -61,6 +65,7 @@ impl App {
             Field::text(UPLOAD.1, &shown(own, UPLOAD.0), "no limit of its own"),
             Field::text(RATIO.1, &shown(own, RATIO.0), engine_says("ratio")),
             Field::text(TIME.1, &shown(own, TIME.0), engine_says("time")),
+            Field::text(IDLE.1, &shown(own, IDLE.0), engine_says("idle_timeout")),
             Field::choice(ACTION.1, ACTIONS.map(str::to_owned).to_vec(), action),
         ]);
         let target = Target {
@@ -78,7 +83,7 @@ impl App {
             .transfer(&target.id)
             .map(|t| t.settings.clone())
             .unwrap_or_default();
-        for (key, _) in [DOWNLOAD, UPLOAD, RATIO, TIME, ACTION] {
+        for (key, _) in [DOWNLOAD, UPLOAD, RATIO, TIME, IDLE, ACTION] {
             settings.remove(key);
         }
         for (key, label) in [DOWNLOAD, UPLOAD] {
@@ -87,7 +92,11 @@ impl App {
             }
         }
         // Empty leaves the engine's setting; `none` overrides it with no limit.
-        for ((key, label), kind) in [(RATIO, ValueKind::Ratio), (TIME, ValueKind::Duration)] {
+        for ((key, label), kind) in [
+            (RATIO, ValueKind::Ratio),
+            (TIME, ValueKind::Duration),
+            (IDLE, ValueKind::Duration),
+        ] {
             let text = form.text(label);
             if !text.is_empty() {
                 let value = kind

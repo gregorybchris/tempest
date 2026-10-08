@@ -81,7 +81,7 @@ A file's **first chunk** is the sum of the chunk counts of all files before it. 
 
 Each connection has one **control stream** and any number of **request streams**. All streams are bidirectional. Peers MUST NOT open unidirectional streams.
 
-- The **control stream** is QUIC stream 0, the first bidirectional stream opened by the dialing peer. It stays open for the whole connection and carries the messages in [Control messages](#control-messages).
+- The **control stream** is QUIC stream 0, the first bidirectional stream opened by the dialing peer. It stays open for the whole connection, except that a peer that is leaving MAY finish its side first (see [Closing a connection](#closing-a-connection)). It carries the messages in [Control messages](#control-messages).
 - A **request stream** is any other bidirectional stream, opened by either peer acting as requester. The requester sends exactly one Request or ManifestRequest and then finishes its side of the stream. The provider sends exactly one response (Data, Manifest or Reject) and then finishes its side.
 - A requester MAY cancel a request by resetting its stream. A provider that sees a request stream reset SHOULD stop preparing the response, and owes no answer.
 
@@ -215,7 +215,8 @@ PeerRecord {
 }
 ```
 
-- A peer MUST NOT include more than 50 PeerRecords in one Peers message, and SHOULD NOT send Peers more often than once per minute on a connection.
+- A peer MUST NOT include more than 50 PeerRecords in one Peers message, and SHOULD NOT send Peers more often than once per minute on a connection. The last Peers a peer sends before leaving the swarm is exempt from the rate limit.
+- A leaving peer SHOULD send that last Peers on each connection, listing peers it is connected to first, then others it knows. A peer that knew the swarm only through the leaver would otherwise have no one left to find.
 - A PeerRecord's `addresses` MAY include the addresses that peer advertised in its Hello, and the source address of a direct connection with it. They MUST NOT include a relay address: relay addresses go only in `relay`.
 - A PeerRecord's `relay` MUST contain at most one address.
 
@@ -251,10 +252,11 @@ A peer closes a connection with QUIC's application CONNECTION_CLOSE frame ([RFC 
 | 6 | `too_many_connections` | The sender has reached its connection limit |
 
 - A receiver MUST treat an unknown reason code like `done`, and not as an error.
+- A peer that sends messages just before leaving, such as the last Peers, finishes its side of the control stream after them, waits for the other peer to acknowledge it, and then sends the Goodbye. A receiver MUST NOT treat a finished control stream as a violation; it expects a Goodbye. A peer SHOULD close the connection with `protocol_violation` if none follows within a few seconds.
 - Closing a connection ends all of its streams. Requests that were open on it are abandoned, and the requester MAY re-request them elsewhere.
 - "Close the connection with `protocol_violation`" anywhere in this specification means a Goodbye with that reason.
 
-**Rationale.** QUIC discards stream data that hasn't been delivered when a connection closes. A goodbye sent as a stream message right before closing would usually be lost. The CONNECTION_CLOSE frame is delivered reliably as part of closing.
+**Rationale.** QUIC discards stream data that hasn't been delivered when a connection closes. A goodbye sent as a stream message right before closing would usually be lost. The CONNECTION_CLOSE frame is delivered reliably as part of closing. A message that must arrive before it is sent on the control stream, which is then finished and acknowledged before the close.
 
 ## Request messages
 

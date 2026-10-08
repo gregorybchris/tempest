@@ -41,7 +41,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `PUT /v1/transfers/{id}/name` | `{"name": "..."}`, or `null` for the bundle's own | The transfer |
 | `PUT /v1/transfers/{id}/tags` | `{"tags": [...]}` | The transfer |
 | `PUT /v1/transfers/{id}/category` | `{"category": "..."}`, or `null` | The transfer |
-| `PUT /v1/transfers/{id}/settings` | The transfer's own settings by dotted key, replacing what it had: session settings, `limits.download` and `limits.upload`, and `sharing.*` | The transfer |
+| `PUT /v1/transfers/{id}/settings` | The transfer's own settings by dotted key, replacing what it had: session settings, `limits.download` and `limits.upload`, and `sharing.*` (`sharing.idle_timeout` applies when the transfer next starts) | The transfer |
 | `POST /v1/transfers/{id}/queue` | `{"to": "top" \| "up" \| "down" \| "bottom" \| <place>}` | Every transfer, in the new order |
 | `POST /v1/transfers/{id}/publish` | `{"tracker", "listing", "invite"}`: a tracker's URL, the listing's fields as the catalog's `PUT /catalog/v1/listings/{bundle}` takes them, and an optional invite | The listing, after the engine signed in with its key and set it; from then on the transfer announces there with `listing` (D-129) |
 | `DELETE /v1/transfers/{id}/publish?tracker=…` | | The transfer, after the engine signed in with its key and withdrew the listing through the catalog's `DELETE /catalog/v1/listings/{bundle}`; from then on it announces there without `listing`, or not at all if only publishing put it there. A listing the catalog doesn't have counts as withdrawn |
@@ -61,7 +61,7 @@ A chunk map's cells cover consecutive chunks in order, their sizes differing by 
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link, dates and the trackers it is published on.
 
-Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers, relays, port mapping and the clients' `ui` settings (D-195) apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`. At start the daemon logs each config-file key that a stored setting overrides, and how to reset it (D-231).
+Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers, relays, port mapping and the clients' `ui` settings (D-195) apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. The sharing limits are a ratio, a time sharing and an idle timeout, whichever comes first, and an action at the limit; a share starts with none, so its link keeps working, and only limits set on the share apply (D-224). Session settings under `lingering.` are refused, with a pointer to the `sharing.` setting that replaces them. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`. At start the daemon logs each config-file key that a stored setting overrides, and how to reset it (D-231).
 
 ## Events
 

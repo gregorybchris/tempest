@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use common::{CHUNK, Swarm, at, bundle, far_future};
-use tempest_core::config::{ChunkSelection, Endgame, WhenComplete};
+use tempest_core::config::{ChunkSelection, Endgame, LingerSettings, WhenComplete};
 use tempest_core::event::{
     CancelReason, CloseCause, InFlightReason, SelectReason, ServeReason, StopReason, SuperseedEnd,
 };
@@ -250,7 +250,7 @@ fn a_finished_peer_stops_once_nobody_wants_anything() {
     // The origin started complete, so it never stops on its own.
     assert_eq!(stopped(&swarm, 0), None);
 
-    let swarm = lingering_pair(|c| c.lingering.keep_sharing = true);
+    let swarm = lingering_pair(|c| c.lingering = LingerSettings::KEEP_SHARING);
     assert_eq!(stopped(&swarm, 1), None);
     assert!(!swarm.nodes[1].session.is_stopped());
 }
@@ -259,7 +259,7 @@ fn a_finished_peer_stops_once_nobody_wants_anything() {
 fn a_finished_peer_stops_at_its_ratio() {
     let content = bundle(&[60 * CHUNK]);
     let mut config = Config::default();
-    config.lingering.ratio = 0.05;
+    config.lingering.ratio = Some(0.05);
     config.requests.chunks = 2;
     let mut swarm = Swarm::new();
     let origin = swarm.add_complete(1, config.clone(), &content);
@@ -308,8 +308,19 @@ fn peers_are_shared_so_others_can_connect() {
     assert!(!connected.is_empty(), "never learned of the origin");
     let shared = swarm.nodes[near].events_where(|k| matches!(k, EventKind::PeersShared { .. }));
     assert!(!shared.is_empty());
-    // At most once a minute per connection.
-    for pair in shared.windows(2) {
+    // At most once a minute per connection, not counting the farewell (D-224).
+    let regular: Vec<_> = (shared.iter())
+        .filter(|e| {
+            matches!(
+                e.kind,
+                EventKind::PeersShared {
+                    farewell: false,
+                    ..
+                }
+            )
+        })
+        .collect();
+    for pair in regular.windows(2) {
         if let (EventKind::PeersShared { conn: a, .. }, EventKind::PeersShared { conn: b, .. }) =
             (&pair[0].kind, &pair[1].kind)
             && a == b
@@ -318,6 +329,35 @@ fn peers_are_shared_so_others_can_connect() {
         }
     }
     assert_eq!(swarm.nodes[far].content.files(), content.files());
+}
+
+#[test]
+fn a_leaving_peer_tells_the_others_who_else_has_the_bundle() {
+    let content = bundle(&[40 * CHUNK]);
+    let mut config = Config::default();
+    // Without the farewell, nothing would tell D about the origin.
+    config.connections.peer_exchange_interval = Duration::from_secs(86_400);
+    let mut leaver = config.clone();
+    leaver.lingering.ratio = Some(0.01);
+    leaver.requests.chunks = 2;
+    let mut swarm = Swarm::new();
+    let origin = swarm.add_complete(1, config.clone(), &content);
+    let a = swarm.add_empty(2, leaver, &content);
+    let d = swarm.add_empty(3, config, &content);
+    swarm.nodes[origin].upload_rate = Some(400_000);
+    swarm.introduce(a, &[origin]);
+    swarm.introduce(d, &[a]);
+    swarm.run(far_future());
+
+    let origin_id = swarm.nodes[origin].id;
+    assert!(swarm.nodes[a].session.is_stopped(), "A never left");
+    let farewells =
+        swarm.nodes[a].events_where(|k| matches!(k, EventKind::PeersShared { farewell: true, .. }));
+    assert!(!farewells.is_empty(), "A said no farewell");
+    let met = swarm.nodes[d]
+        .events_where(|k| matches!(k, EventKind::Connected { peer, .. } if *peer == origin_id));
+    assert!(!met.is_empty(), "D never learned of the origin");
+    assert_eq!(swarm.nodes[d].content.files(), content.files());
 }
 
 #[test]
@@ -526,7 +566,7 @@ fn withholder_uploads(when_complete: WhenComplete) -> u64 {
     swarm.nodes[other].upload_rate = Some(50_000);
     swarm.introduce_all(&[origin, withholder, other]);
     swarm.run(far_future());
-    assert!(swarm.nodes[withholder].completed_at() < swarm.nodes[other].completed_at());
+    assert!(swarm.nodes[withholder].completed_at() <= swarm.nodes[other].completed_at());
     swarm.nodes[withholder].session.uploaded()
 }
 

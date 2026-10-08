@@ -6,7 +6,7 @@ duration: 10m
 seeds: 10
 bundle: { files: [{ size: 64MiB }] }
 network: { latency: 25ms }
-settings: { overrides: { lingering.keep_sharing: true } }
+settings: { overrides: { lingering.ratio: null, lingering.idle_timeout: null } }
 peers:
   - class: origin
     starts: complete

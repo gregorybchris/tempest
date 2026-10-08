@@ -12,13 +12,16 @@ use tempest_core::{
     Action, ChunkCell, ChunkSet, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response,
     Session, StreamId, Time,
 };
-use tempest_protocol::message::{Hello, ManifestMessage, PeerRecord, Reject, RejectReason};
+use tempest_protocol::message::{
+    GoodbyeReason, Hello, ManifestMessage, PeerRecord, Reject, RejectReason,
+};
 use tempest_protocol::{Address, BundleId, Message, PeerId, RangeList};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-use super::conn::{self, ConnTask};
+use super::conn::{self, ConnTask, LEAVE_GRACE};
 use super::request::{self, Answer};
 use super::{Destination, DriverError, NodeConfig, PeerDetail, Status, Summary};
 use crate::endpoint::{Connection, Endpoint};
@@ -103,6 +106,9 @@ struct Conn {
     path: PathKind,
     /// Messages for the control stream.
     control: mpsc::Sender<Message>,
+    /// Resolves once the control stream is finished and acknowledged, after `control` is
+    /// dropped.
+    drained: oneshot::Receiver<()>,
 }
 
 /// The bundle task's state.
@@ -128,6 +134,8 @@ pub(super) struct BundleTask {
     status: watch::Sender<Status>,
     /// Why the bundle stopped, if storage failed.
     failure: Option<StorageError>,
+    /// Connections being closed once what is queued for them has been sent.
+    leaving: JoinSet<()>,
 }
 
 impl BundleTask {
@@ -175,6 +183,7 @@ impl BundleTask {
             events,
             status,
             failure: None,
+            leaving: JoinSet::new(),
         })
     }
 
@@ -214,6 +223,8 @@ impl BundleTask {
             }
         }
 
+        // Let the last messages, such as the farewell list, reach the peers before returning.
+        while self.leaving.join_next().await.is_some() {}
         let closed = match self.storage.take() {
             Some(storage) => storage.close().await.map(Some),
             None => Ok(None),
@@ -363,12 +374,14 @@ impl BundleTask {
         let conn = ConnId(self.next_conn);
         self.next_conn += 1;
         let (control, outbox) = mpsc::channel(self.config.control_queue.max(1));
+        let (drain, drained) = oneshot::channel();
         let task = ConnTask {
             conn,
             connection: connection.clone(),
             inbox: self.inbox.clone(),
             rtt_interval: self.config.rtt_interval,
             throttle: self.throttle.clone(),
+            drained: Some(drain),
         };
         tokio::spawn(task.run(send, recv, outbox));
         self.conns.insert(
@@ -377,6 +390,7 @@ impl BundleTask {
                 connection: connection.clone(),
                 path: connection.path(),
                 control,
+                drained,
             },
         );
 
@@ -426,10 +440,9 @@ impl BundleTask {
                 // A closed outbox means the connection task has ended, and it reports why.
                 if let Err(TrySendError::Full(_)) = entry.control.try_send(message) {
                     // The other peer isn't reading its control stream.
-                    entry.connection.close(
-                        tempest_protocol::message::GoodbyeReason::Done,
-                        "control stream backed up",
-                    );
+                    entry
+                        .connection
+                        .close(GoodbyeReason::Done, "control stream backed up");
                     self.forget(conn);
                     let now = self.now();
                     self.session.handle_closed(now, conn, Closed::Lost);
@@ -476,8 +489,14 @@ impl BundleTask {
                 reason,
                 message,
             } => {
-                if let Some(entry) = self.conns.get(&conn) {
-                    entry.connection.close(reason, &message);
+                if let Some(Conn {
+                    connection,
+                    control,
+                    drained,
+                    ..
+                }) = self.conns.remove(&conn)
+                {
+                    self.close_after_sending(connection, control, drained, reason, message);
                 }
                 self.forget(conn);
             }
@@ -512,6 +531,29 @@ impl BundleTask {
                 }
             }
         }
+    }
+
+    /// Closes a connection with a Goodbye once its control stream has sent what is queued and
+    /// the other peer has acknowledged it, within a bound. Closing at once would drop the
+    /// unsent data, such as the farewell Peers (D-224). A protocol violation closes at once.
+    fn close_after_sending(
+        &mut self,
+        connection: Connection,
+        control: mpsc::Sender<Message>,
+        drained: oneshot::Receiver<()>,
+        reason: GoodbyeReason,
+        message: String,
+    ) {
+        // Dropping the sender ends the writer, which finishes the stream.
+        drop(control);
+        if reason == GoodbyeReason::ProtocolViolation {
+            connection.close(reason, &message);
+            return;
+        }
+        self.leaving.spawn(async move {
+            let _ = tokio::time::timeout(2 * LEAVE_GRACE, drained).await;
+            connection.close(reason, &message);
+        });
     }
 
     /// Starts a hole punch with `peer`, connected through `conn`. The address the peer's packets

@@ -37,7 +37,7 @@ These apply to both the TUI and the client web UI (D-118).
 | --- | --- |
 | Transfer controls | Start/stop, force start (bypasses the queue), remove (keep or delete files), rename, open download folder, recheck data |
 | Queue | Limits on active downloads and uploads; reorder queued transfers |
-| Limits | Global and per-transfer speed limits; alternative-limits mode (toggle or schedule); sharing limits (ratio or time) |
+| Limits | Global and per-transfer speed limits; alternative-limits mode (toggle or schedule); sharing limits (ratio, time or idle timeout) |
 | Organizing | Tags (many per transfer), categories (one per transfer, each with a default save folder), move storage |
 | Finding | Filter by name or tag; filter by status; sort by name, size, progress, status, ↓, ↑, peers serving us, time left, ratio, date added; custom columns; saved views |
 | Sharing | Create a bundle from a file or folder and get a `tempest:` link |

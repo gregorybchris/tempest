@@ -103,6 +103,8 @@ pub struct Sharing {
     pub ratio: Option<f64>,
     /// Time spent sharing while complete, as the engine writes durations: `12h`.
     pub time: Option<String>,
+    /// How long no peer may want anything before a finished download stops, as `10m`.
+    pub idle_timeout: Option<String>,
     /// What happens at the limit: `stop` or `remove`.
     pub action: String,
 }
@@ -129,6 +131,8 @@ pub mod keys {
     pub const RATIO: &str = "sharing.ratio";
     /// The sharing time limit.
     pub const TIME: &str = "sharing.time";
+    /// The sharing idle timeout.
+    pub const IDLE_TIMEOUT: &str = "sharing.idle_timeout";
     /// What happens at a sharing limit.
     pub const ACTION: &str = "sharing.action";
     /// The default download folder.
@@ -265,7 +269,7 @@ mod tests {
                 "peers": { "port": 4777 },
                 "queue": { "max_active_downloads": 2, "max_active_uploads": null },
                 "limits": { "alternative": { "schedule": { "from": "09:00", "to": "17:00" } } },
-                "sharing": { "ratio": 2.0, "time": "12h", "action": "remove" },
+                "sharing": { "ratio": 2.0, "time": "12h", "idle_timeout": "5m", "action": "remove" },
                 "ui": { "theme": "amber" }
             },
             "alternative_limits_active": true,
@@ -274,6 +278,7 @@ mod tests {
         .unwrap();
         assert_eq!(info.settings.queue.max_active_downloads, Some(2));
         assert_eq!(info.settings.sharing.time.as_deref(), Some("12h"));
+        assert_eq!(info.settings.sharing.idle_timeout.as_deref(), Some("5m"));
         assert_eq!(info.settings.ui.theme, "amber");
         let schedule = info.settings.limits.alternative.schedule.unwrap();
         assert_eq!(schedule.days.len(), 7);

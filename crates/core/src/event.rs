@@ -194,6 +194,8 @@ pub enum EventKind {
         peer: PeerId,
         /// How many peers it was told about.
         count: u32,
+        /// Whether this was the last Peers before leaving the swarm (D-224).
+        farewell: bool,
     },
     /// This peer stopped sharing the bundle and closed every connection (D-065, D-066).
     StoppedSharing {
@@ -615,8 +617,17 @@ impl fmt::Display for EventKind {
             Self::SuperseedingEnded { reason } => {
                 write!(f, "stopped superseeding because {reason}")
             }
-            Self::PeersShared { conn, peer, count } => {
-                write!(f, "{conn}: told {} about {count} peers", short(peer))
+            Self::PeersShared {
+                conn,
+                peer,
+                count,
+                farewell,
+            } => {
+                write!(f, "{conn}: told {} about {count} peers", short(peer))?;
+                if *farewell {
+                    write!(f, " before leaving")?;
+                }
+                Ok(())
             }
             Self::StoppedSharing { reason } => write!(f, "stopped sharing because {reason}"),
         }

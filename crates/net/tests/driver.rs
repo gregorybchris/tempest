@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use quinn::{RecvStream, SendStream};
+use tempest_core::config::LingerSettings;
 use tempest_core::event::CloseCause;
 use tempest_core::io::Closed;
 use tempest_core::{Event, EventKind};
@@ -792,7 +793,7 @@ async fn peers_dialing_each_other_keep_one_connection() {
         let targets = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
         // They keep sharing, so the lower peer stays to serve the higher one once complete.
         let mut keep_sharing = config();
-        keep_sharing.session.lingering.keep_sharing = true;
+        keep_sharing.session.lingering = LingerSettings::KEEP_SHARING;
         let nodes = [start_node(keep_sharing.clone()), start_node(keep_sharing)];
         let mut handles = Vec::new();
         for (node, target) in nodes.iter().zip(&targets) {

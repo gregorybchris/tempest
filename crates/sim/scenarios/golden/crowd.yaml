@@ -9,7 +9,7 @@ bundle:
   files: [{ size: 4MiB }]
 
 network: { latency: 25ms }
-settings: { overrides: { lingering.keep_sharing: true } }
+settings: { overrides: { lingering.ratio: null, lingering.idle_timeout: null } }
 
 peers:
   - class: origin

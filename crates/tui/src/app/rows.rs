@@ -246,6 +246,13 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
                     "Stop sharing after this long complete.",
                 ),
                 Row::setting(
+                    "Idle timeout",
+                    "sharing.idle_timeout",
+                    shown(&sharing["idle_timeout"]),
+                    Edit::Value(ValueKind::Duration),
+                    "Stop sharing a finished download once no peer has wanted anything for this long.",
+                ),
+                Row::setting(
                     "At the limit",
                     "sharing.action",
                     match settings.sharing.action {

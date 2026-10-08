@@ -4,12 +4,12 @@
 
 use leptos::html::Input;
 use leptos::prelude::*;
-use tempest_api::TransferInfo;
 use tempest_api::columns::Column;
 use tempest_api::finding::Finding;
 use tempest_api::prefs;
 use tempest_api::settings::parse_tags;
 use tempest_api::ui::SavedView;
+use tempest_api::{Kind, TransferInfo};
 use tempest_protocol::BundleId;
 use tempest_ui_kit::components::{
     Button, ButtonKind, Checkbox, Chip, Dialog as Modal, Radio, SelectField, Tone,
@@ -419,28 +419,29 @@ fn Limits(id: BundleId) -> impl IntoView {
         RwSignal::new(form.upload),
         RwSignal::new(form.ratio),
         RwSignal::new(form.time),
+        RwSignal::new(form.idle_timeout),
     ];
+    // A share has no limits unless it sets its own (D-224).
+    let share = transfer.kind == Kind::Share;
     let action = RwSignal::new(form.action);
     let problem = RwSignal::new(None::<String>);
     // What the engine's settings say, for the placeholders.
     let engine = config.info.get_untracked().map(|i| i.settings.sharing);
-    let engine_ratio = engine
-        .as_ref()
-        .and_then(|s| s.ratio)
-        .map_or("the engine's: none".to_owned(), |r| {
-            format!("the engine's: {r}")
-        });
-    let engine_time = engine
-        .and_then(|s| s.time)
-        .map_or("the engine's: none".to_owned(), |t| {
-            format!("the engine's: {t}")
-        });
+    let engine_says = |value: Option<String>| match (share, value) {
+        (true, _) => "no limit of its own".to_owned(),
+        (false, Some(value)) => format!("the engine's: {value}"),
+        (false, None) => "the engine's: none".to_owned(),
+    };
+    let engine_ratio = engine_says(engine.as_ref().and_then(|s| s.ratio).map(|r| r.to_string()));
+    let engine_time = engine_says(engine.as_ref().and_then(|s| s.time.clone()));
+    let engine_idle = engine_says(engine.as_ref().and_then(|s| s.idle_timeout.clone()));
     let save = move || {
         let form = LimitsForm {
             download: fields[0].get_untracked(),
             upload: fields[1].get_untracked(),
             ratio: fields[2].get_untracked(),
             time: fields[3].get_untracked(),
+            idle_timeout: fields[4].get_untracked(),
             action: action.get_untracked(),
         };
         let current = self::transfer(id).map(|t| t.settings).unwrap_or_default();
@@ -485,6 +486,7 @@ fn Limits(id: BundleId) -> impl IntoView {
                 <h3 class="form-grid__title">"Sharing"</h3>
                 {input(2, "Ratio", engine_ratio.clone())}
                 {input(3, "Time", engine_time.clone())}
+                {input(4, "Idle timeout", engine_idle.clone())}
                 <div class="form-grid__wide">
                     <SelectField
                         label="At the limit"
@@ -494,7 +496,7 @@ fn Limits(id: BundleId) -> impl IntoView {
                 </div>
                 <button type="submit" hidden=true></button>
             </form>
-            <p class="dim note">"Speeds such as 500K or 2.5M, within the engine's limits; times such as 12h. Empty keeps the engine's setting; none means no limit of its own."</p>
+            <p class="dim note">"Speeds such as 500K or 2.5M, within the engine's limits; times such as 12h. Empty keeps the engine's setting (a share has none); none means no limit of its own."</p>
             {problem_line(problem)}
         </Modal>
     }

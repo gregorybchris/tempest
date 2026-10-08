@@ -14,7 +14,7 @@ fn copies_only_grow_while_everyone_stays() {
 name: spread
 sample_interval: 200ms
 bundle: { files: [{ size: 4MiB }] }
-settings: { overrides: { lingering.keep_sharing: true } }
+settings: { overrides: { lingering.ratio: null, lingering.idle_timeout: null } }
 peers:
   - { class: origin, starts: complete, bandwidth: { up: 10Mbps, down: 10Mbps } }
   - { class: home, count: 8, bandwidth: { up: 5Mbps, down: 50Mbps } }

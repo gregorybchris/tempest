@@ -10,13 +10,14 @@ use std::time::Duration;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use tempest_core::Config;
-use tempest_core::config::Settings;
+use tempest_core::config::{LingerSettings, Settings};
 use tempest_net::{PortMappingConfig, RelayChoice};
 use tempest_protocol::RelayIdentity;
 
 pub use tempest_api::ui::{SavedView, UiSettings};
 
 use crate::schedule::{LocalTime, Schedule};
+use crate::store::Kind;
 
 /// The engine's settings, as read from its config file.
 ///
@@ -124,9 +125,13 @@ impl SpeedLimitSettings {
     }
 }
 
-/// When a complete transfer stops sharing: at a ratio, after a time sharing, or whichever comes
-/// first. With neither it shares until stopped, or until its session stops on its own.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+/// When a complete transfer stops sharing: at a ratio, after a time sharing, after no peer has
+/// wanted anything for a while, or whichever comes first (D-224). With none it shares until
+/// stopped.
+///
+/// The engine counts the ratio and the time across runs. The idle timeout is the session's
+/// (D-065), which counts only within a run and applies only to a download that finished in it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SharingLimits {
     /// Bytes sent per byte received (or per byte of the bundle, if it received none).
@@ -134,8 +139,22 @@ pub struct SharingLimits {
     /// Time spent sharing while complete, such as `"12h"`.
     #[serde(with = "optional_duration")]
     pub time: Option<Duration>,
+    /// How long no connected peer may want anything before a finished download stops.
+    #[serde(with = "optional_duration")]
+    pub idle_timeout: Option<Duration>,
     /// What happens at the limit.
     pub action: SharingAction,
+}
+
+impl Default for SharingLimits {
+    fn default() -> Self {
+        Self {
+            ratio: Some(1.0),
+            time: None,
+            idle_timeout: Some(Duration::from_secs(600)),
+            action: SharingAction::Stop,
+        }
+    }
 }
 
 /// What happens to a transfer that reaches a sharing limit.
@@ -150,6 +169,14 @@ pub enum SharingAction {
 }
 
 impl SharingLimits {
+    /// No limits: a share starts with these, so a link keeps working (D-156, D-224).
+    pub const NONE: Self = Self {
+        ratio: None,
+        time: None,
+        idle_timeout: None,
+        action: SharingAction::Stop,
+    };
+
     /// Whether a transfer that has sent `ratio` and shared for `time` has reached a limit.
     pub fn reached(&self, ratio: Option<f64>, time: Duration) -> bool {
         let by_ratio = matches!((self.ratio, ratio), (Some(limit), Some(ratio)) if ratio >= limit);
@@ -170,7 +197,7 @@ pub struct NotificationSettings {
 /// A transfer's settings: the config's, with its own over them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransferConfig {
-    /// Session settings.
+    /// Session settings, with the idle timeout from `sharing`.
     pub session: Config,
     /// Its own speed limits, within the limits over every transfer.
     pub limits: RateLimits,
@@ -628,7 +655,11 @@ impl EngineConfig {
 
     /// The session settings every transfer starts from.
     pub fn session(&self) -> Result<Config, ConfigError> {
-        let config = self.settings.resolve()?;
+        for key in self.settings.overrides.keys() {
+            check_not_lingering(key)?;
+        }
+        let mut config = self.settings.resolve()?;
+        set_lingering(&mut config, &self.sharing);
         config.validate()?;
         Ok(config)
     }
@@ -639,14 +670,23 @@ impl EngineConfig {
     /// applied after the profile and the config's overrides.
     pub fn transfer(
         &self,
+        kind: Kind,
         overrides: &BTreeMap<String, Value>,
     ) -> Result<TransferConfig, ConfigError> {
         let mut session = self.session()?;
+        // A share has no limits unless it sets its own, so its link keeps working (D-224).
         let mut own = TransferOverrides {
             limits: RateLimits::default(),
-            sharing: self.sharing,
+            sharing: match kind {
+                Kind::Download => self.sharing,
+                Kind::Share => SharingLimits {
+                    action: self.sharing.action,
+                    ..SharingLimits::NONE
+                },
+            },
         };
         for (key, value) in overrides {
+            check_not_lingering(key)?;
             match TRANSFER_PREFIXES
                 .iter()
                 .any(|prefix| key.starts_with(prefix))
@@ -658,6 +698,7 @@ impl EngineConfig {
         session.validate()?;
         check_rates("limits", own.limits)?;
         check_sharing("sharing", &own.sharing)?;
+        set_lingering(&mut session, &own.sharing);
         Ok(TransferConfig {
             session,
             limits: own.limits,
@@ -722,6 +763,27 @@ fn check_rates(prefix: &str, limits: RateLimits) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Makes the session stop at the idle timeout. The engine enforces the other limits itself.
+fn set_lingering(session: &mut Config, sharing: &SharingLimits) {
+    session.lingering = LingerSettings {
+        ratio: None,
+        idle_timeout: sharing.idle_timeout,
+        direct_send: false,
+    };
+}
+
+/// Rejects a session setting under `lingering.`, which the `sharing.` settings replace.
+fn check_not_lingering(key: &str) -> Result<(), ConfigError> {
+    let Some(name) = key.strip_prefix("lingering.") else {
+        return Ok(());
+    };
+    let message = match name {
+        "ratio" | "idle_timeout" => format!("use sharing.{name}"),
+        _ => "the engine sets it".to_owned(),
+    };
+    Err(invalid(key, message))
+}
+
 fn check_sharing(prefix: &str, sharing: &SharingLimits) -> Result<(), ConfigError> {
     if sharing
         .ratio
@@ -732,11 +794,16 @@ fn check_sharing(prefix: &str, sharing: &SharingLimits) -> Result<(), ConfigErro
             "must be a number above 0, or null for no limit",
         ));
     }
-    if sharing.time == Some(Duration::ZERO) {
-        return Err(invalid(
-            &format!("{prefix}.time"),
-            "must be longer than 0, or null for no limit",
-        ));
+    for (name, limit) in [
+        ("time", sharing.time),
+        ("idle_timeout", sharing.idle_timeout),
+    ] {
+        if limit == Some(Duration::ZERO) {
+            return Err(invalid(
+                &format!("{prefix}.{name}"),
+                "must be longer than 0, or null for no limit",
+            ));
+        }
     }
     Ok(())
 }
@@ -895,7 +962,7 @@ publish: [https://catalog.example.org]
         assert_eq!(session.upload.reciprocal_slots, 7);
 
         let transfer = BTreeMap::from([("upload.reciprocal_slots".to_owned(), json!(9))]);
-        let session = config.transfer(&transfer).unwrap().session;
+        let session = config.transfer(Kind::Download, &transfer).unwrap().session;
         assert_eq!(session.upload.reciprocal_slots, 9);
         assert_eq!(session.connections.max, background.connections.max);
 
@@ -968,10 +1035,15 @@ notifications: { command: [sh, -c, "echo done"] }
     #[test]
     fn a_transfer_overrides_its_limits_and_sharing() {
         let config = EngineConfig::from_yaml("sharing: { ratio: 2, time: 1h }").unwrap();
-        let defaults = config.transfer(&BTreeMap::new()).unwrap();
+        let defaults = config.transfer(Kind::Download, &BTreeMap::new()).unwrap();
         assert_eq!(defaults.limits, RateLimits::default());
         assert_eq!(defaults.sharing, config.sharing);
         assert_eq!(defaults.session, config.session().unwrap());
+        assert_eq!(defaults.session.lingering.ratio, None);
+        assert_eq!(
+            defaults.session.lingering.idle_timeout,
+            config.sharing.idle_timeout
+        );
 
         let overrides = BTreeMap::from([
             ("limits.upload".to_owned(), json!(4096)),
@@ -979,7 +1051,7 @@ notifications: { command: [sh, -c, "echo done"] }
             ("sharing.action".to_owned(), json!("remove")),
             ("upload.reciprocal_slots".to_owned(), json!(9)),
         ]);
-        let transfer = config.transfer(&overrides).unwrap();
+        let transfer = config.transfer(Kind::Download, &overrides).unwrap();
         assert_eq!(transfer.limits.upload, Some(4096));
         assert_eq!(transfer.sharing.ratio, None);
         assert_eq!(transfer.sharing.time, Some(Duration::from_secs(3600)));
@@ -988,12 +1060,50 @@ notifications: { command: [sh, -c, "echo done"] }
 
         let error = |key: &str, value| {
             let overrides = BTreeMap::from([(key.to_owned(), value)]);
-            config.transfer(&overrides).unwrap_err().to_string()
+            config
+                .transfer(Kind::Download, &overrides)
+                .unwrap_err()
+                .to_string()
         };
         assert!(error("limits.upload", json!(0)).contains("limits.upload"));
         assert!(error("limits.nope", json!(1)).contains("limits.nope"));
         assert!(error("sharing.ratio", json!(-1)).contains("sharing.ratio"));
         assert!(error("sharing.time", json!("soon")).contains("sharing.time"));
+        assert!(error("sharing.idle_timeout", json!("0s")).contains("sharing.idle_timeout"));
+        assert!(error("lingering.ratio", json!(2)).contains("sharing.ratio"));
+        assert!(error("lingering.idle_timeout", json!("1m")).contains("sharing.idle_timeout"));
+    }
+
+    #[test]
+    fn a_share_has_no_limits_of_its_own_unless_it_sets_them() {
+        let config = EngineConfig::from_yaml("sharing: { action: remove }").unwrap();
+        let share = config.transfer(Kind::Share, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            share.sharing,
+            SharingLimits {
+                action: SharingAction::Remove,
+                ..SharingLimits::NONE
+            }
+        );
+        assert_eq!(share.session.lingering.idle_timeout, None);
+        let own = BTreeMap::from([("sharing.ratio".to_owned(), json!(3))]);
+        let share = config.transfer(Kind::Share, &own).unwrap();
+        assert_eq!(share.sharing.ratio, Some(3.0));
+        assert_eq!(share.sharing.time, None);
+    }
+
+    #[test]
+    fn session_lingering_settings_are_refused_in_the_config() {
+        let error = |yaml: &str| EngineConfig::from_yaml(yaml).unwrap_err().to_string();
+        assert!(error("settings: { overrides: { lingering.ratio: 2 } }").contains("sharing.ratio"));
+        let mut config = EngineConfig::default();
+        let refused = config.set("settings.lingering.idle_timeout", json!("1m"));
+        assert!(
+            refused
+                .unwrap_err()
+                .to_string()
+                .contains("sharing.idle_timeout")
+        );
     }
 
     #[test]
@@ -1021,12 +1131,12 @@ notifications: { command: [sh, -c, "echo done"] }
         let limits = SharingLimits {
             ratio: Some(2.0),
             time: Some(hour),
-            action: SharingAction::Stop,
+            ..SharingLimits::NONE
         };
         assert!(!limits.reached(Some(1.9), hour / 2));
         assert!(limits.reached(Some(2.0), Duration::ZERO));
         assert!(limits.reached(None, hour));
-        assert!(!SharingLimits::default().reached(Some(100.0), hour * 1000));
+        assert!(!SharingLimits::NONE.reached(Some(100.0), hour * 1000));
     }
 
     #[test]

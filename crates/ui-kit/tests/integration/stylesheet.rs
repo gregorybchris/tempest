@@ -7,7 +7,7 @@ use std::path::Path;
 
 use tempest_ui_kit::Theme;
 
-const CSS: &str = include_str!("../style/tempest.css");
+const CSS: &str = include_str!("../../style/tempest.css");
 
 /// Colors that text is drawn in.
 const TEXT: [&str; 7] = ["fg", "dim", "down", "up", "hot", "warn", "bad"];

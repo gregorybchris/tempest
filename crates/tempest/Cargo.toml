@@ -5,7 +5,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
 rust-version.workspace = true
+
+[package.metadata.wix]
+upgrade-guid = "ACF1CC25-897A-4D20-931A-8641B989B273"
+path-guid = "A925FF6E-AD49-43EF-B81D-4E89FC9F2BDD"
+license = false
+eula = false
 
 [dependencies]
 tempest-catalog-api.workspace = true

@@ -8,6 +8,8 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/gregorybchris/tempest"
+homepage = "https://github.com/gregorybchris/tempest"
+authors = ["Chris Gregory"]
 rust-version = "1.99"
 
 [workspace.dependencies]
@@ -130,3 +132,8 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

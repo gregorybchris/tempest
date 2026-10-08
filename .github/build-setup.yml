@@ -1,0 +1,12 @@
+# Runs before dist builds the binaries: the web UIs are embedded in them (D-201).
+- name: Install trunk and the WebAssembly target
+  shell: bash
+  run: |
+    rustup target add wasm32-unknown-unknown
+    cargo install trunk --locked
+- name: Build the web UIs
+  shell: bash
+  run: |
+    for ui in web sim-web catalog-web; do
+      (cd "crates/$ui" && trunk build --release --cargo-profile web)
+    done

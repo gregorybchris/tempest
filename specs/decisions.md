@@ -3365,3 +3365,22 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `crates/tempest/tests/catalog_web.rs` drives headless Chrome through ChromeDriver: search with a typo, category and tag facets, the keyboard, and sign-in with `tempest catalog sign-in`. It passes with a note when the UI isn't built or `CHROMEDRIVER` isn't set; CI's web job sets both.
 
 **Rationale:** Embedding keeps the one-binary promise, and hash routes need nothing from the tracker but `/`. Numbered pages give every result a link and work with `[`/`]`. Showing the command, with the origin the signer must use, turns a code into one paste. WebDriver needs no new dependencies or toolchains, and CI's runners already have ChromeDriver.
+
+---
+
+## D-211: Release configuration
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-133 chooses cargo-dist. Its configuration leaves some details open.
+
+**Options:** **Web UIs in release builds:** build them in a setup step before dist builds the binaries (chosen); commit their output. **Trunk in CI:** `cargo install trunk`, which is slow but needs no pinned download; a prebuilt install action. **Tap:** `gregorybchris/homebrew-tap`. **Updater:** none; the installers rerun instead.
+
+**Decision:**
+
+- `dist-workspace.toml` configures dist and `.github/workflows/release.yml` is generated from it; `dist generate --check` verifies they agree. Only `tempest` is a distributable app; the web crates are `publish = false`.
+- Releases build when a version tag is pushed. Pull requests only run `dist plan`, which builds and publishes nothing.
+- `.github/build-setup.yml` builds the three web UIs before every platform build, so release binaries embed them (D-201).
+- Binaries install into `CARGO_HOME`'s `bin` folder, with no self-updater.
+
+**Rationale:** Committing build output would drift; a setup step keeps one source. Installing trunk with cargo is the least to maintain, and release builds are rare enough to absorb its time.

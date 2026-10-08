@@ -5,7 +5,8 @@
 //!
 //! - The node task accepts connections and keeps the table of bundles. Each incoming connection
 //!   gets a routing task, which reads Hello from the control stream and hands the connection to
-//!   the bundle it names, or closes it with `unknown_bundle`.
+//!   the bundle it names, or closes it with `unknown_bundle`. Connections beyond the limits on
+//!   those still opening are refused before the handshake.
 //! - A bundle task owns a [`Session`](tempest_core::Session) and the bundle's [`Storage`]. It
 //!   feeds the session what happened, carries out its actions, and sleeps until its next timer.
 //! - A connection task per connection reads the control stream, writes what the session sends
@@ -19,6 +20,7 @@
 
 mod bundle;
 mod conn;
+mod opening;
 mod request;
 
 use std::collections::{HashMap, hash_map};
@@ -35,6 +37,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 use self::bundle::{BundleTask, Outputs, Report, Start};
+use self::opening::{Opening, Openings};
 use crate::endpoint::{Connection, Endpoint, Incoming};
 use crate::home::HomeRelay;
 use crate::limit::{SpeedLimits, Throttle};
@@ -60,6 +63,11 @@ pub struct NodeConfig {
     pub punch_time: Option<Duration>,
     /// How long an accepted connection may take to send Hello.
     pub hello_timeout: Duration,
+    /// How many incoming connections may be opening at once: completing the handshake or
+    /// waiting for Hello. More are refused without a handshake.
+    pub max_opening: usize,
+    /// How many of them may come from one IP address, or one IPv6 /64 prefix.
+    pub max_opening_per_source: usize,
     /// How often each connection reports QUIC's round-trip time to its session.
     pub rtt_interval: Duration,
     /// How many reports may wait for a bundle task.
@@ -80,6 +88,8 @@ impl Default for NodeConfig {
             dial_timeout: Duration::from_secs(10),
             punch_time: Some(Duration::from_secs(5)),
             hello_timeout: Duration::from_secs(10),
+            max_opening: 256,
+            max_opening_per_source: 16,
             rtt_interval: Duration::from_secs(1),
             inbox: 1024,
             control_queue: 256,
@@ -360,6 +370,7 @@ impl Node {
         let (commands, receiver) = mpsc::channel(64);
         let task = NodeTask {
             endpoint: endpoint.clone(),
+            openings: Openings::new(config.max_opening, config.max_opening_per_source),
             config: config.clone(),
             commands: commands.downgrade(),
             bundles: HashMap::new(),
@@ -519,6 +530,8 @@ impl Node {
 struct NodeTask {
     endpoint: Endpoint,
     config: Arc<NodeConfig>,
+    /// The incoming connections not yet handed to a bundle.
+    openings: Openings,
     /// For routing tasks to reach the node. Weak, so the task ends once every [`Node`] is gone.
     commands: mpsc::WeakSender<Command>,
     bundles: HashMap<BundleId, Entry>,
@@ -542,7 +555,14 @@ impl NodeTask {
                 incoming = self.endpoint.accept(), if self.shutdown.is_none() => {
                     let Some(incoming) = incoming else { break };
                     let Some(commands) = self.commands.upgrade() else { break };
-                    tokio::spawn(route(incoming, commands, self.config.hello_timeout));
+                    let source = opening::source(&self.endpoint, incoming.remote_address());
+                    match self.openings.try_open(source) {
+                        Some(opening) => {
+                            let timeout = self.config.hello_timeout;
+                            tokio::spawn(route(incoming, opening, commands, timeout));
+                        }
+                        None => incoming.refuse(),
+                    }
                 }
             }
         }
@@ -594,8 +614,13 @@ impl NodeTask {
 }
 
 /// Completes an incoming connection's handshake, reads its Hello, and hands it to the bundle
-/// Hello names.
-async fn route(incoming: Incoming, commands: mpsc::Sender<Command>, hello_timeout: Duration) {
+/// Hello names. Holds the connection's `place` among those opening until then.
+async fn route(
+    incoming: Incoming,
+    place: Opening,
+    commands: mpsc::Sender<Command>,
+    hello_timeout: Duration,
+) {
     let Ok(connection) = incoming.accept().await else {
         return;
     };
@@ -635,6 +660,7 @@ async fn route(incoming: Incoming, commands: mpsc::Sender<Command>, hello_timeou
             if inbox.send(accepted).await.is_err() {
                 connection.close(GoodbyeReason::ShuttingDown, "");
             }
+            drop(place);
         }
         Ok(Route::Unknown) => connection.close(GoodbyeReason::UnknownBundle, ""),
         Ok(Route::ShuttingDown) | Err(_) => connection.close(GoodbyeReason::ShuttingDown, ""),

@@ -3442,3 +3442,21 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - An address equal to the record's relay address is dropped rather than the record rejected. It is the only relay address a receiver can recognize, and the rest of the record is still useful.
 
 **Rationale:** Sources each know part of a peer's addresses, and none is more authoritative. Newest first means dials try fresh addresses before stale ones.
+
+---
+
+## D-216: Limits on incoming connections before Hello
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The node spawned a routing task for every incoming connection and waited up to `hello_timeout` for Hello. The session's connection limits apply only once Hello names a bundle, so anyone could hold any number of handshakes and tasks open.
+
+**Options:** accept the handshake and close with Goodbye (`too_many_connections`); refuse the attempt before the handshake.
+
+**Decision:**
+
+- `NodeConfig` bounds the incoming connections still opening (handshake and Hello), in all and per source (`max_opening`, `max_opening_per_source`).
+- A source is the IP address, an IPv6 address's /64 prefix, or for a connection through the home relay, the sender's address as the relay reports it.
+- Attempts beyond a limit are refused without a handshake (QUIC `CONNECTION_REFUSED`), not closed with Goodbye.
+
+**Rationale:** Refusing costs no TLS work, which is the point of the limit. Before the handshake there is no authenticated channel to carry a Goodbye reason. A /64 is what one host commonly holds. The per-source default leaves room for one peer to open a connection per bundle for many bundles at once.

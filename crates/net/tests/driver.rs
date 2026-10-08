@@ -12,8 +12,9 @@ use tempest_core::event::CloseCause;
 use tempest_core::io::Closed;
 use tempest_core::{Event, EventKind};
 use tempest_net::{
-    BundleHandle, Connection, Destination, DriverError, Endpoint, EndpointConfig, Identity, Node,
-    NodeConfig, Storage, StorageConfig, StorageError, closed_cause, read_message, write_message,
+    BundleHandle, Connection, Destination, DriverError, Endpoint, EndpointConfig, HandshakeError,
+    Identity, Node, NodeConfig, Storage, StorageConfig, StorageError, closed_cause, read_message,
+    write_message,
 };
 use tempest_protocol::message::{
     Data, GoodbyeReason, Have, Hello, ManifestMessage, PeerRecord, Request, Serving, Want,
@@ -652,6 +653,71 @@ async fn request_streams_are_bounded_and_freed() {
         assert!(read_message(&mut recv).await.unwrap().is_none());
         fifth.await.unwrap().unwrap();
         seeder.shutdown().await;
+    })
+    .await;
+}
+
+/// Whether a dial failed because the other peer refused it before the handshake.
+fn refused(result: &Result<Connection, HandshakeError>) -> bool {
+    matches!(
+        result,
+        Err(HandshakeError::Connection(quinn::ConnectionError::ConnectionClosed(close)))
+            if close.error_code == quinn::TransportErrorCode::CONNECTION_REFUSED
+    )
+}
+
+/// Fills a node's places for opening connections with connections that never send Hello,
+/// checks that one more is refused, and that closing one makes room again.
+async fn openings_are_bounded(config: NodeConfig, limit: usize) {
+    let node = start_node(config);
+    let peer = Endpoint::bind(Identity::generate().unwrap(), &EndpointConfig::localhost()).unwrap();
+    let addr = node.endpoint().local_addrs()[0];
+    let expected = Some(node.endpoint().peer_id());
+    let mut silent = Vec::new();
+    for _ in 0..limit {
+        silent.push(peer.dial(addr, expected).await.unwrap());
+    }
+    // Refused promptly, from another endpoint on the same address too.
+    let other =
+        Endpoint::bind(Identity::generate().unwrap(), &EndpointConfig::localhost()).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), other.dial(addr, expected))
+        .await
+        .expect("refused promptly");
+    assert!(refused(&result), "{result:?}");
+
+    // Once a silent connection is gone, there is room again.
+    silent.pop().unwrap().close(GoodbyeReason::Done, "");
+    loop {
+        let result = other.dial(addr, expected).await;
+        if !refused(&result) {
+            result.unwrap();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    node.shutdown().await;
+}
+
+#[tokio::test]
+async fn connections_waiting_for_hello_are_bounded() {
+    within(async {
+        let config = NodeConfig {
+            max_opening: 3,
+            ..config()
+        };
+        openings_are_bounded(config, 3).await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn connections_waiting_for_hello_are_bounded_per_source() {
+    within(async {
+        let config = NodeConfig {
+            max_opening_per_source: 2,
+            ..config()
+        };
+        openings_are_bounded(config, 2).await;
     })
     .await;
 }

@@ -22,6 +22,7 @@ mod present;
 mod request;
 mod rows;
 mod share;
+mod signin;
 mod state;
 mod store;
 mod stream;

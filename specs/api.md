@@ -6,6 +6,8 @@ The engine (D-079) serves an HTTP + JSON API with a stream of server-sent events
 
 - By default the API is plain HTTP on a loopback address, TCP 4776 (D-126), and needs no credentials. It answers only requests addressed to a loopback host, and requests from web pages only if the page is on a loopback host too. This keeps other websites out, including through DNS rebinding.
 - Remote access is opt-in (D-125). It serves HTTPS, with a configured certificate or a self-signed one the engine makes, and every request, local or not, must carry the access token as `Authorization: Bearer <token>`. Without it the answer is 401. The engine makes the token if there is none and keeps it, like the certificate, in its data directory. On startup the daemon prints the certificate's SHA-256 fingerprint for remote clients to check.
+- A browser can't send the header on its event stream, and the web UI never holds the token. With remote access on, the web UI shows a sign-in page (D-222). `POST /v1/session` takes the token and answers with a session in a cookie that is `HttpOnly`, `Secure` and `SameSite=Strict`, which then authorizes requests and the event stream like the header does. The CLI and TUI keep using the header.
+- A session is stateless: its cookie holds an expiry and a MAC of it keyed by the access token. Sessions expire after a fixed lifetime, survive an engine restart, and all end when the token changes. `DELETE /v1/session` clears the cookie. Bodies must be JSON, so no cross-site form can sign in.
 - While the API runs, the engine records its URL, and its certificate when remote access is on, in a file in the data directory. Local clients find the API there, whatever its port, and trust exactly that certificate.
 
 The settings are under `api` in the config file.
@@ -51,6 +53,9 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `PUT /v1/categories/{name}` | `{"save_folder": "..."}` | The category |
 | `DELETE /v1/categories/{name}` | | 204; transfers in it have none |
 | `GET /v1/events?after=N` | | The event stream |
+| `GET /v1/session` | | `{"required", "signed_in"}`: whether the engine wants a sign-in and whether the request has one. Answered without credentials |
+| `POST /v1/session` | `{"token": "..."}` | As `GET`, after the token matched, with the session cookie set; 401 otherwise. Answered without credentials |
+| `DELETE /v1/session` | | 204, with the session cookie cleared |
 
 A chunk map's cells cover consecutive chunks in order, their sizes differing by at most one, so its size stays bounded however large the bundle. A cell's availability is the fewest connected peers holding any one of its chunks. A transfer that isn't running has nothing in flight and every availability 0, and says so with `"running": false` (D-193).
 

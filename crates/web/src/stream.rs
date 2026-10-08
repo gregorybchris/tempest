@@ -111,6 +111,14 @@ impl Follower {
         follower
     }
 
+    /// Closes the stream for good, such as when the page signs out.
+    pub fn stop(&self) {
+        if let Some(retry) = self.0.borrow_mut().retry.take() {
+            retry.clear();
+        }
+        self.close();
+    }
+
     /// Tries again now rather than after the backoff.
     pub fn retry_now(&self) {
         if let Some(retry) = self.0.borrow_mut().retry.take() {

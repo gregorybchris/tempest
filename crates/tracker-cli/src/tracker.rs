@@ -260,6 +260,10 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         Some(command) => return operate(command, &mut std::io::stdout().lock()),
         None => {}
     }
+    // Otherwise peers that announce on schedule are told to slow down.
+    if args.min_interval > args.interval {
+        anyhow::bail!("--min-interval must not be longer than --interval");
+    }
     let catalog = args.catalog.open()?;
     let config = TrackerConfig {
         interval: Duration::from_secs(args.interval.max(1)),

@@ -278,14 +278,14 @@ impl AsyncUdpSocket for RelaySocket {
             let mut state = self.state();
             if !state.queue.is_empty() {
                 let mut count = 0;
+                // Fills slots from the front, since quinn reads the first `count` of them.
                 for (buf, meta) in bufs.iter_mut().zip(meta.iter_mut()) {
-                    let Some((addr, packet)) = state.queue.pop_front() else {
+                    // A packet too large for quinn's buffers is dropped.
+                    let next = std::iter::from_fn(|| state.queue.pop_front())
+                        .find(|(_, packet)| packet.len() <= buf.len());
+                    let Some((addr, packet)) = next else {
                         break;
                     };
-                    // A packet too large for quinn's buffers is dropped.
-                    if packet.len() > buf.len() {
-                        continue;
-                    }
                     buf[..packet.len()].copy_from_slice(&packet);
                     *meta = RecvMeta {
                         addr,
@@ -381,6 +381,31 @@ mod tests {
         assert_eq!(addrs.route(second, later(4)), None);
         assert_eq!(addrs.route(first, later(4)), Some(route(1)));
         assert_eq!(addrs.route(third, later(4)), Some(route(3)));
+    }
+
+    #[tokio::test]
+    async fn oversized_packets_leave_no_gaps_in_what_quinn_reads() {
+        use quinn::Runtime;
+
+        let udp = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let inner = quinn::TokioRuntime.wrap_udp_socket(udp).unwrap();
+        let socket = RelaySocket::new(inner).unwrap();
+        let relay = route(0).relay;
+        let from = route(1).from;
+        socket.deliver(relay, from, &[1; 4]);
+        socket.deliver(relay, from, &[2; 64]);
+        socket.deliver(relay, from, &[3; 6]);
+
+        let mut storage = [[0u8; 16]; 2];
+        let [first, second] = &mut storage;
+        let mut bufs = [IoSliceMut::new(first), IoSliceMut::new(second)];
+        let mut meta = [RecvMeta::default(), RecvMeta::default()];
+        let received = std::future::poll_fn(|cx| socket.poll_recv(cx, &mut bufs, &mut meta))
+            .await
+            .unwrap();
+        assert_eq!(received, 2);
+        assert_eq!((meta[0].len, meta[1].len), (4, 6));
+        assert_eq!((bufs[0][0], bufs[1][0]), (1, 3));
     }
 
     proptest! {

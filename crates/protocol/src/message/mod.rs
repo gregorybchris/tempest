@@ -16,7 +16,7 @@ use crate::frame::{self, Frame};
 use crate::hash::HASH_LEN;
 use crate::manifest::MAX_MANIFEST_LEN;
 use crate::tree::CHUNK_SIZE;
-use crate::wire::{DecodeError, Reader, Writer};
+use crate::wire::{Decode, DecodeError, Reader};
 
 /// The largest frame length of any control message: 16 MiB.
 pub const MAX_CONTROL_FRAME: u32 = 16 * 1024 * 1024;
@@ -198,6 +198,18 @@ fn check_count(field: &'static str, count: usize, max: usize) -> Result<(), Mess
     Ok(())
 }
 
+/// Reads a `list<T>` that may have at most `max` entries, failing on the count before decoding
+/// any of them.
+fn list_at_most<T: Decode>(
+    r: &mut Reader<'_>,
+    field: &'static str,
+    max: usize,
+) -> Result<Vec<T>, DecodeError> {
+    let count = r.clone().u32()?;
+    check_count(field, count as usize, max)?;
+    r.list()
+}
+
 /// Fails with [`MessageError::TooLong`] if `len` exceeds `max`.
 pub(crate) fn check_len(field: &'static str, len: usize, max: usize) -> Result<(), MessageError> {
     if len > max {
@@ -253,22 +265,26 @@ impl Message {
     ///
     /// If the frame would be 4 GiB or longer, which no valid message is.
     pub fn encode_frame(&self) -> Vec<u8> {
-        let mut w = Writer::new();
-        match self {
-            Self::Hello(m) => m.encode_body(&mut w),
-            Self::Have(m) => m.encode_body(&mut w),
-            Self::HaveUpdate(m) => m.encode_body(&mut w),
-            Self::Want(m) => m.encode_body(&mut w),
-            Self::Serving(m) => m.encode_body(&mut w),
-            Self::Peers(m) => m.encode_body(&mut w),
-            Self::Candidates(m) => m.encode_body(&mut w),
-            Self::Request(m) => m.encode_body(&mut w),
-            Self::Data(m) => m.encode_body(&mut w),
-            Self::Reject(m) => m.encode_body(&mut w),
+        // Room for the bulk of the large messages, so their bytes are copied once.
+        let body_len = match self {
+            Self::Data(m) => 4 + m.proof.len() * HASH_LEN + 4 + m.chunks.len(),
+            Self::Manifest(m) => 4 + m.manifest.len(),
+            _ => 64,
+        };
+        frame::encode_frame_with(self.message_type().code(), body_len, |w| match self {
+            Self::Hello(m) => m.encode_body(w),
+            Self::Have(m) => m.encode_body(w),
+            Self::HaveUpdate(m) => m.encode_body(w),
+            Self::Want(m) => m.encode_body(w),
+            Self::Serving(m) => m.encode_body(w),
+            Self::Peers(m) => m.encode_body(w),
+            Self::Candidates(m) => m.encode_body(w),
+            Self::Request(m) => m.encode_body(w),
+            Self::Data(m) => m.encode_body(w),
+            Self::Reject(m) => m.encode_body(w),
             Self::ManifestRequest => {}
-            Self::Manifest(m) => m.encode_body(&mut w),
-        }
-        frame::encode_frame(self.message_type().code(), &w.into_bytes())
+            Self::Manifest(m) => m.encode_body(w),
+        })
     }
 
     /// Decodes a frame's message, rejecting anything that is a protocol violation.
@@ -345,7 +361,7 @@ mod tests {
     use crate::address::Address;
     use crate::hash::Hash;
     use crate::range::RangeList;
-    use crate::wire::Encode;
+    use crate::wire::{Encode, Writer};
 
     #[test]
     fn codes_round_trip() {
@@ -659,6 +675,40 @@ mod tests {
                 assert_eq!(result, invalid(error.clone()));
             }
             assert_eq!(over_limit.validate(), Err(error));
+        }
+    }
+
+    #[test]
+    fn list_limits_are_checked_before_the_entries() {
+        // Counts over the limit fail on the count alone, though no entries follow.
+        let mut peers = Writer::new();
+        peers.u32(u32::MAX);
+        let bytes = frame::encode_frame(MessageType::Peers.code(), &peers.into_bytes());
+        assert_eq!(
+            decode_bytes(&bytes),
+            invalid(MessageError::TooMany {
+                field: "peers",
+                count: u32::MAX as usize,
+                max: MAX_PEER_RECORDS,
+            })
+        );
+        let bytes = frame::encode_frame(MessageType::Candidates.code(), &[0, 0, 0, 17]);
+        assert_eq!(
+            decode_bytes(&bytes),
+            invalid(MessageError::TooMany {
+                field: "addresses",
+                count: 17,
+                max: MAX_CANDIDATES,
+            })
+        );
+    }
+
+    #[test]
+    fn frames_encode_like_their_bodies() {
+        for message in samples() {
+            let bytes = message.encode_frame();
+            let body = &bytes[frame::HEADER_LEN..];
+            assert_eq!(bytes, frame::encode_frame(bytes[4], body));
         }
     }
 

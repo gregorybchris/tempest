@@ -28,6 +28,10 @@ use crate::portmap::PortMapping;
 /// The largest response body read from a tracker.
 pub const MAX_RESPONSE: usize = 1 << 20;
 
+/// The longest a tracker can make the client wait between announces, whatever interval or
+/// retry-after it gives. Longer waits are cut to this, so they can't overflow the clock either.
+const MAX_WAIT: Duration = Duration::from_secs(24 * 3600);
+
 /// Why a tracker request failed.
 #[derive(Debug, thiserror::Error)]
 pub enum TrackerError {
@@ -334,7 +338,7 @@ impl Schedule {
         self.pending = None;
         self.failures = 0;
         self.succeeded_at = Some(now);
-        self.next_update = now + interval;
+        self.next_update = now + interval.min(MAX_WAIT);
         self.not_before = now;
     }
 
@@ -348,7 +352,7 @@ impl Schedule {
         };
         let wait = retry_after.unwrap_or_else(backoff);
         self.failures += 1;
-        self.not_before = now + wait;
+        self.not_before = now + wait.min(MAX_WAIT);
     }
 
     /// Something the tracker should hear changed, such as this peer's relay or external
@@ -596,6 +600,12 @@ mod tests {
         assert_eq!(s.due(), t + Duration::from_secs(7));
         s.succeeded(t, Duration::from_secs(300));
         assert_eq!(s.due(), t + Duration::from_secs(300));
+
+        // A tracker's huge waits are cut short rather than overflowing the clock.
+        s.succeeded(t, Duration::MAX);
+        assert_eq!(s.due(), t + MAX_WAIT);
+        s.failed(t, Some(Duration::MAX), &config);
+        assert_eq!(s.due(), t + MAX_WAIT);
     }
 
     #[test]

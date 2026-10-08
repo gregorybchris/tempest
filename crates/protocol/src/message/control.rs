@@ -1,6 +1,8 @@
 //! Control messages, sent on the control stream (`protocol/messages.md`, Control messages).
 
-use super::{MAX_CANDIDATES, MAX_PEER_RECORDS, MAX_REQUEST_CHUNKS, MessageError, check_count};
+use super::{
+    MAX_CANDIDATES, MAX_PEER_RECORDS, MAX_REQUEST_CHUNKS, MessageError, check_count, list_at_most,
+};
 use crate::address::Address;
 use crate::hash::PeerId;
 use crate::manifest::BundleId;
@@ -167,7 +169,9 @@ impl Peers {
     }
 
     pub(super) fn decode_body(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
-        Ok(Self { peers: r.list()? })
+        Ok(Self {
+            peers: list_at_most(r, "peers", MAX_PEER_RECORDS)?,
+        })
     }
 }
 
@@ -191,6 +195,9 @@ impl Encode for PeerRecord {
 }
 
 impl Decode for PeerRecord {
+    /// A peer ID and two empty lists.
+    const MIN_LEN: usize = 32 + 4 + 4;
+
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             peer_id: r.hash()?,
@@ -218,7 +225,7 @@ impl Candidates {
 
     pub(super) fn decode_body(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
-            addresses: r.list()?,
+            addresses: list_at_most(r, "addresses", MAX_CANDIDATES)?,
         })
     }
 }
@@ -230,7 +237,6 @@ fn encode_relay(w: &mut Writer, relay: Option<Address>) {
 
 /// Decodes a `list<Address>` that must have zero or one entries.
 fn decode_relay(r: &mut Reader<'_>) -> Result<Option<Address>, DecodeError> {
-    let mut relay: Vec<Address> = r.list()?;
-    check_count("relay", relay.len(), 1)?;
+    let mut relay: Vec<Address> = list_at_most(r, "relay", 1)?;
     Ok(relay.pop())
 }

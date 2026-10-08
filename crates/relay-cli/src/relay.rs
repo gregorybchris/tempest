@@ -39,7 +39,7 @@ pub struct RelayArgs {
     /// The most peers registered at once.
     #[arg(long, default_value_t = RelayConfig::localhost().max_registrations)]
     max_peers: usize,
-    /// The most peers registered at once from one IP address.
+    /// The most peers registered at once from one IP address, or one IPv6 /64.
     #[arg(long, default_value_t = RelayConfig::localhost().max_per_ip)]
     max_per_ip: usize,
     /// The most bytes per second forwarded for each peer in each direction. Unlimited by

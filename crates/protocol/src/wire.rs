@@ -77,6 +77,10 @@ pub trait Encode {
 
 /// A value that can be decoded from its wire encoding.
 pub trait Decode: Sized {
+    /// The fewest bytes any encoding of this type takes. [`Reader::list`] uses it to bound the
+    /// memory it reserves for a count read from the input.
+    const MIN_LEN: usize = 1;
+
     /// Reads one value from `r`, leaving any following bytes unread.
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError>;
 
@@ -88,6 +92,9 @@ pub trait Decode: Sized {
         Ok(value)
     }
 }
+
+/// The most items [`Reader::list`] reserves room for before decoding them.
+const MAX_LIST_RESERVE: usize = 4096;
 
 /// Reads primitives from a byte slice, failing on anything that isn't a valid encoding.
 #[derive(Debug, Clone)]
@@ -187,9 +194,10 @@ impl<'a> Reader<'a> {
     /// Reads a `list<T>`: a `u32` count, then that many values.
     pub fn list<T: Decode>(&mut self) -> Result<Vec<T>, DecodeError> {
         let count = self.u32()? as usize;
-        // Every listed type takes at least one byte, so a count larger than the remaining input
-        // is already invalid. Capping the allocation stops a forged count from reserving memory.
-        let mut items = Vec::with_capacity(count.min(self.remaining()));
+        // A forged count must not reserve memory: reserve no more than the remaining input could
+        // hold, and no more than a modest amount up front. A longer list grows as it decodes.
+        let fits = self.remaining() / T::MIN_LEN.max(1);
+        let mut items = Vec::with_capacity(count.min(fits).min(MAX_LIST_RESERVE));
         for _ in 0..count {
             items.push(T::decode(self)?);
         }
@@ -207,6 +215,13 @@ impl Writer {
     /// Creates an empty writer.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates an empty writer with room for `capacity` bytes.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(capacity),
+        }
     }
 
     /// The bytes written so far.
@@ -293,6 +308,8 @@ impl Encode for Hash {
 }
 
 impl Decode for Hash {
+    const MIN_LEN: usize = HASH_LEN;
+
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         r.hash()
     }
@@ -305,6 +322,8 @@ impl Encode for String {
 }
 
 impl Decode for String {
+    const MIN_LEN: usize = 4;
+
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         r.string().map(str::to_owned)
     }

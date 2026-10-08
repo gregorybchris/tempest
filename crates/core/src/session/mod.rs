@@ -29,7 +29,7 @@ use tempest_protocol::tree::{VerifyError, verify_data};
 use tempest_protocol::{Address, BundleId, Manifest, Message, PeerId, RangeList};
 
 use self::bundle::Bundle;
-use self::conn::{Conn, Holdings, buffer_update, have_as_update};
+use self::conn::{Conn, Holdings, have_as_update};
 use self::superseed::Superseed;
 use crate::Rng;
 use crate::chunks::ChunkSet;
@@ -89,6 +89,8 @@ pub struct Session {
     next_conn_review: Time,
     /// The one ManifestRequest in flight, if any.
     manifest_request: Option<(ConnId, RequestId)>,
+    /// When the ManifestRequest in flight is next checked for an answer.
+    manifest_deadline: Time,
     next_request: u64,
     /// The chunk a media player is at, for the streaming strategy.
     position: u32,
@@ -119,6 +121,10 @@ pub struct Session {
     actions: Vec<Action>,
     events: Vec<Event>,
 }
+
+/// How long a connection may take to complete the opening sequence. A peer that never sends
+/// Hello and Have would otherwise hold a connection slot, and a dial slot, forever.
+pub const OPENING_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The most addresses kept for one known peer. Merging records from several sources keeps the
 /// newest.
@@ -198,6 +204,7 @@ impl Session {
             next_dial: None,
             next_conn_review: Time::ZERO,
             manifest_request: None,
+            manifest_deadline: Time::ZERO,
             next_request: 0,
             position: 0,
             endgame: false,
@@ -413,16 +420,22 @@ impl Session {
                 .chunk_requests()
                 .next()
                 .map(|_| c.progress_at + self.config.requests.snub_timeout);
-            [c.retry_at, snub, c.next_peers]
+            let opening = (!c.is_open()).then(|| c.connected_at + OPENING_TIMEOUT);
+            [c.retry_at, snub, c.next_peers, opening]
         });
         let review = self.uploader.next_review();
         let dial = self.next_dial.filter(|_| self.may_dial());
         let conn_review =
             (self.at_connection_limit() && !self.complete).then_some(self.next_conn_review);
         let linger = self.linger_deadline();
+        let manifest = self.manifest_request.map(|_| self.manifest_deadline);
         per_conn
             .flatten()
-            .chain([review, dial, conn_review, linger].into_iter().flatten())
+            .chain(
+                [review, dial, conn_review, linger, manifest]
+                    .into_iter()
+                    .flatten(),
+            )
             .min()
     }
 
@@ -443,7 +456,16 @@ impl Session {
         for id in due {
             self.fill(now, id);
         }
+        let stalled: Vec<ConnId> = (self.conns.iter())
+            .filter(|(_, c)| !c.is_open() && c.connected_at + OPENING_TIMEOUT <= now)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in stalled {
+            let message = "the opening sequence did not complete in time".to_owned();
+            self.close(now, id, GoodbyeReason::ProtocolViolation, message);
+        }
         self.check_snubs(now);
+        self.check_manifest_request(now);
         self.request_manifest(now);
         if self.uploader.next_review().is_some_and(|t| t <= now) {
             self.review_serving(now);
@@ -982,14 +1004,8 @@ impl Session {
             // A peer that has chunks has the manifest.
             conn.lacks_manifest = false;
         }
-        if self.bundle.is_none() {
-            if !buffer_update(&mut conn.holdings, update, max) {
-                return Err(Fail {
-                    reason: GoodbyeReason::Done,
-                    message: "too many Have ranges before the manifest".to_owned(),
-                });
-            }
-            return Ok(());
+        if let Holdings::Pending(pending) = &mut conn.holdings {
+            return pending.apply(&update, max);
         }
         self.apply_holdings(id, &update)
     }

@@ -275,6 +275,17 @@ impl Sockets {
     }
 }
 
+/// Whether `ip` is on the local network: on one of `interfaces`' networks, this machine, or a
+/// link-local address, which no router forwards.
+fn on_lan<'a>(mut interfaces: impl Iterator<Item = &'a Interface>, ip: IpAddr) -> bool {
+    let ip = ip.to_canonical();
+    let link_local = match ip {
+        IpAddr::V4(v4) => v4.is_link_local(),
+        IpAddr::V6(v6) => v6.is_unicast_link_local(),
+    };
+    link_local || ip.is_loopback() || interfaces.any(|i| i.contains(ip))
+}
+
 /// A socket on the group port of one family, shared with other clients on the machine.
 fn listening_socket(ipv4: bool, port: u16) -> io::Result<Socket> {
     let (domain, wildcard) = if ipv4 {
@@ -458,6 +469,12 @@ impl LanTask {
     }
 
     async fn receive(&mut self, datagram: Datagram) {
+        // Only sources on one of this host's networks are on the LAN. Others reached the
+        // listener from beyond it, and could steer this peer's dials anywhere.
+        let interfaces = self.sockets.senders.iter().map(|s| &s.interface);
+        if !on_lan(interfaces, datagram.source.ip()) {
+            return;
+        }
         let now = Instant::now();
         let received = self.state.receive(now, datagram.source, &datagram.bytes);
         if let Some(source) = received.reply_to
@@ -921,6 +938,19 @@ mod tests {
         assert!(wildcard[0].contains("192.168.1.99".parse().unwrap()));
         assert!(!wildcard[0].contains("192.168.2.99".parse().unwrap()));
         assert!(wildcard[1].contains("2001:db8::99".parse().unwrap()));
+        for (ip, local) in [
+            ("192.168.1.99", true),
+            ("::ffff:192.168.1.99", true),
+            ("2001:db8::99", true),
+            ("127.0.0.1", true),
+            ("169.254.3.4", true),
+            ("fe80::7", true),
+            ("192.168.2.99", false),
+            ("203.0.113.9", false),
+            ("2001:db8:1::99", false),
+        ] {
+            assert_eq!(on_lan(wildcard.iter(), ip.parse().unwrap()), local, "{ip}");
+        }
 
         let loopback = select_interfaces(&[source("127.0.0.1:5000")], &system);
         assert_eq!(loopback[0].address.to_string(), "127.0.0.1:5000");

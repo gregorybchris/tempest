@@ -4,7 +4,8 @@ use proptest::prelude::*;
 use tempest_protocol::frame::{encode_frame, split_frame};
 use tempest_protocol::message::split_message_frame;
 use tempest_protocol::tree::{
-    CHUNK_SIZE, ChunkTree, RootHasher, TreeNode, chunk_count, root, tree_width, verify_data,
+    CHUNK_SIZE, ChunkTree, RootHasher, TreeNode, chunk_count, leaf_hashes, root, tree_width,
+    verify_data, verify_data_leaves,
 };
 use tempest_protocol::{Address, Decode, DecodeError, Encode, Hash, RangeList, Reader, Writer};
 
@@ -122,9 +123,10 @@ proptest! {
                 let proof = tree.proof(node);
                 let start = position as usize * CHUNK_SIZE;
                 let end = (start + count as usize * CHUNK_SIZE).min(size);
+                let slice = &data[start..end];
                 prop_assert_eq!(
-                    verify_data(size as u64, &file_root, position, count, &proof, &data[start..end]),
-                    Ok(())
+                    verify_data_leaves(size as u64, &file_root, position, count, &proof, slice),
+                    Ok(leaf_hashes(slice))
                 );
                 position += count;
             }

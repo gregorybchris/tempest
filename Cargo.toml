@@ -59,6 +59,8 @@ igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"
 netdev = { version = "0.46", default-features = false, features = ["gateway"] }
 # For O_NOFOLLOW when opening downloaded files.
 libc = "0.2"
+# Raising the limit on open files without unsafe code.
+rustix = { version = "1", default-features = false, features = ["process", "std"] }
 pem-rfc7468 = { version = "1", features = ["std"] }
 # QUIC over tokio with rustls on ring (D-018, D-084); no platform certificate verifier, since
 # peers authenticate with raw public keys (D-020).
@@ -71,6 +73,10 @@ socket2 = { version = "0.6", features = ["all"] }
 # HTTP for trackers (D-043): axum serves, reqwest asks. Both use only HTTP/1.1 and tokio; reqwest
 # gets rustls on ring with the platform's certificate verifier, like the rest of the TLS stack.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# The tracker serves its routes through hyper itself, for timeouts and a connection cap that
+# axum::serve doesn't offer.
+hyper = { version = "1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["http1", "server", "server-graceful", "service", "tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls-platform-verifier = "0.7"
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }

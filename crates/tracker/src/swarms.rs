@@ -8,7 +8,6 @@ use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use rand::SeedableRng;
-use rand::seq::IteratorRandom;
 use rand_chacha::ChaCha8Rng;
 use tempest_protocol::tracker::{
     AnnounceEvent, AnnounceRequest, AnnounceResponse, BundleStats, ErrorCode, ErrorResponse,
@@ -49,6 +48,13 @@ impl Default for TrackerConfig {
             relays: Vec::new(),
         }
     }
+}
+
+/// `at + after`, or a time about a century after `at` if that overflows, so no setting can make
+/// the arithmetic panic.
+pub(crate) fn later(at: Instant, after: Duration) -> Instant {
+    const CENTURY: Duration = Duration::from_secs(100 * 365 * 24 * 3600);
+    at.checked_add(after.min(CENTURY)).unwrap_or(at)
 }
 
 /// How long a full tracker asks new peers to wait before trying again.
@@ -96,14 +102,38 @@ struct Listing {
 }
 
 /// One bundle's swarm.
-#[derive(Debug, Default)]
+///
+/// Its peers are kept in a list, indexed by peer ID, so a response can sample them in time
+/// proportional to its size rather than the swarm's.
+#[derive(Debug)]
 struct Swarm {
-    peers: HashMap<PeerId, Listing>,
+    peers: Vec<(PeerId, Listing)>,
+    index: HashMap<PeerId, usize>,
     complete: u64,
+    /// No peer expires before this, so until then the swarm needs no expiry pass and its
+    /// counts are exact. Re-announces only move expiries later, so it stays a lower bound.
+    earliest_expiry: Instant,
 }
 
 impl Swarm {
-    fn stats(&self) -> BundleStats {
+    fn new(now: Instant) -> Self {
+        Self {
+            peers: Vec::new(),
+            index: HashMap::new(),
+            complete: 0,
+            earliest_expiry: later(now, Duration::MAX),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+
+    fn get(&self, peer: &PeerId) -> Option<&Listing> {
+        self.index.get(peer).map(|&i| &self.peers[i].1)
+    }
+
+    fn counts(&self) -> BundleStats {
         BundleStats {
             complete: self.complete,
             incomplete: self.peers.len() as u64 - self.complete,
@@ -112,30 +142,65 @@ impl Swarm {
 
     fn insert(&mut self, peer: PeerId, listing: Listing) {
         self.complete += u64::from(listing.complete);
-        if let Some(old) = self.peers.insert(peer, listing) {
-            self.complete -= u64::from(old.complete);
+        self.earliest_expiry = self.earliest_expiry.min(listing.expires);
+        match self.index.get(&peer) {
+            Some(&i) => {
+                let old = std::mem::replace(&mut self.peers[i].1, listing);
+                self.complete -= u64::from(old.complete);
+            }
+            None => {
+                self.index.insert(peer, self.peers.len());
+                self.peers.push((peer, listing));
+            }
         }
     }
 
     fn remove(&mut self, peer: &PeerId) -> bool {
-        let Some(old) = self.peers.remove(peer) else {
+        let Some(i) = self.index.remove(peer) else {
             return false;
         };
+        let (_, old) = self.peers.swap_remove(i);
+        if let Some((moved, _)) = self.peers.get(i) {
+            self.index.insert(*moved, i);
+        }
         self.complete -= u64::from(old.complete);
         true
     }
 
     /// Forgets the peers that expired by `now`, and returns how many.
     fn expire(&mut self, now: Instant) -> usize {
+        if now < self.earliest_expiry {
+            return 0;
+        }
         let before = self.peers.len();
-        let mut complete = 0;
-        self.peers.retain(|_, listing| {
-            let keep = listing.expires > now;
-            complete += u64::from(keep && listing.complete);
-            keep
-        });
-        self.complete = complete;
+        self.peers.retain(|(_, listing)| listing.expires > now);
+        self.index = (self.peers.iter().enumerate())
+            .map(|(i, (peer, _))| (*peer, i))
+            .collect();
+        self.complete = self.peers.iter().filter(|(_, l)| l.complete).count() as u64;
+        self.earliest_expiry = (self.peers.iter())
+            .map(|(_, listing)| listing.expires)
+            .min()
+            .unwrap_or_else(|| later(now, Duration::MAX));
         before - self.peers.len()
+    }
+
+    /// Up to `wanted` peers other than `except`, chosen at random.
+    fn sample(&self, rng: &mut ChaCha8Rng, wanted: usize, except: &PeerId) -> Vec<PeerEntry> {
+        // One more than wanted, in case `except` is among them.
+        let amount = (wanted + 1).min(self.peers.len());
+        let mut entries: Vec<PeerEntry> = rand::seq::index::sample(rng, self.peers.len(), amount)
+            .into_iter()
+            .map(|i| &self.peers[i])
+            .filter(|(peer, _)| peer != except)
+            .map(|(peer, listing)| PeerEntry {
+                peer: *peer,
+                addrs: listing.addrs.clone(),
+                relay: listing.relay,
+            })
+            .collect();
+        entries.truncate(wanted);
+        entries
     }
 }
 
@@ -203,13 +268,13 @@ impl Swarms {
         // Canonical, so an IPv4 client seen through a dual-stack socket reads as IPv4.
         let observed = Address::new(observed_ip, request.port);
 
-        let swarm = self.swarms.entry(request.bundle).or_default();
+        let swarm = (self.swarms.entry(request.bundle)).or_insert_with(|| Swarm::new(now));
         self.listed -= swarm.expire(now);
-        let known = swarm.peers.get(&request.peer);
+        let known = swarm.get(&request.peer);
         if let Some(listing) = known
             && request.event == AnnounceEvent::Update
         {
-            let allowed_at = listing.last_announce + config.min_interval;
+            let allowed_at = later(listing.last_announce, config.min_interval);
             if now < allowed_at {
                 let refusal = Refusal::new(ErrorCode::RateLimited, "announcing too often");
                 return Err(refusal.retry_after(allowed_at - now));
@@ -224,7 +289,7 @@ impl Swarms {
         } else {
             if known.is_none() {
                 if self.listed >= config.max_peers {
-                    if swarm.peers.is_empty() {
+                    if swarm.is_empty() {
                         self.swarms.remove(&request.bundle);
                     }
                     let refusal = Refusal::new(ErrorCode::Unavailable, "the tracker is full");
@@ -243,26 +308,15 @@ impl Swarms {
                 relay: request.relay,
                 complete: request.complete,
                 last_announce: now,
-                expires: now + 2 * config.interval,
+                expires: later(now, config.interval.saturating_mul(2)),
             };
             swarm.insert(request.peer, listing);
             let wanted = request.num_want.min(config.max_num_want) as usize;
-            swarm
-                .peers
-                .iter()
-                .filter(|(peer, _)| **peer != request.peer)
-                .choose_multiple(&mut self.rng, wanted)
-                .into_iter()
-                .map(|(peer, listing)| PeerEntry {
-                    peer: *peer,
-                    addrs: listing.addrs.clone(),
-                    relay: listing.relay,
-                })
-                .collect()
+            swarm.sample(&mut self.rng, wanted, &request.peer)
         };
 
-        let stats = swarm.stats();
-        if swarm.peers.is_empty() {
+        let stats = swarm.counts();
+        if swarm.is_empty() {
             self.swarms.remove(&request.bundle);
         }
         Ok(AnnounceResponse {
@@ -280,8 +334,11 @@ impl Swarms {
         let Some(swarm) = self.swarms.get(bundle) else {
             return BundleStats::default();
         };
-        let live = swarm.peers.values().filter(|listing| listing.expires > now);
-        let (complete, incomplete) = live.fold((0, 0), |(c, i), listing| {
+        if now < swarm.earliest_expiry {
+            return swarm.counts();
+        }
+        let live = (swarm.peers.iter()).filter(|(_, listing)| listing.expires > now);
+        let (complete, incomplete) = live.fold((0, 0), |(c, i), (_, listing)| {
             if listing.complete {
                 (c + 1, i)
             } else {
@@ -298,7 +355,7 @@ impl Swarms {
     pub fn is_complete(&self, now: Instant, bundle: &BundleId, peer: &PeerId) -> bool {
         self.swarms
             .get(bundle)
-            .and_then(|swarm| swarm.peers.get(peer))
+            .and_then(|swarm| swarm.get(peer))
             .is_some_and(|listing| listing.complete && listing.expires > now)
     }
 
@@ -327,7 +384,7 @@ impl Swarms {
         let mut forgotten = 0;
         self.swarms.retain(|_, swarm| {
             forgotten += swarm.expire(now);
-            !swarm.peers.is_empty()
+            !swarm.is_empty()
         });
         self.listed -= forgotten;
     }
@@ -368,6 +425,23 @@ mod tests {
 
     fn ip() -> IpAddr {
         IP.parse().unwrap()
+    }
+
+    #[test]
+    fn huge_intervals_do_not_overflow() {
+        let config = TrackerConfig {
+            interval: Duration::MAX,
+            min_interval: Duration::MAX,
+            ..TrackerConfig::default()
+        };
+        let mut s = Swarms::new(config, 7);
+        let t = Instant::now();
+        s.announce(t, &request(1, AnnounceEvent::Started), ip())
+            .unwrap();
+        let refusal = s
+            .announce(t, &request(1, AnnounceEvent::Update), ip())
+            .unwrap_err();
+        assert_eq!(refusal.body.error, ErrorCode::RateLimited);
     }
 
     #[test]
@@ -582,8 +656,13 @@ mod tests {
         let mut listed = 0;
         for swarm in s.swarms.values() {
             assert!(!swarm.peers.is_empty());
-            let complete = swarm.peers.values().filter(|l| l.complete).count();
+            let complete = swarm.peers.iter().filter(|(_, l)| l.complete).count();
             assert_eq!(swarm.complete, complete as u64);
+            assert_eq!(swarm.index.len(), swarm.peers.len());
+            for (i, (peer, listing)) in swarm.peers.iter().enumerate() {
+                assert_eq!(swarm.index[peer], i);
+                assert!(swarm.earliest_expiry <= listing.expires);
+            }
             listed += swarm.peers.len();
         }
         assert_eq!(s.listed, listed);

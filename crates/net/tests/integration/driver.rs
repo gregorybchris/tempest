@@ -264,6 +264,54 @@ async fn a_single_file_lands_in_the_directory_and_never_replaces_one() {
     .await;
 }
 
+/// Two different single-file bundles with the same file name, downloaded into one directory at
+/// once: one gets the name, and the other stops rather than writing over it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn same_named_single_files_never_share_a_file() {
+    within(async {
+        let target = tempfile::tempdir().unwrap();
+        let leecher = start_node(config());
+        let mut downloads = Vec::new();
+        let mut keep = Vec::new();
+        for seed in [1, 2] {
+            let source = tempfile::tempdir().unwrap();
+            let manifest = make_bundle(
+                source.path(),
+                &[("one.bin", contents(50_000, seed))],
+                vec![],
+            );
+            let seeder = start_node(config());
+            let (seeding, _) = share(&seeder, source.path(), &manifest).await;
+            let download = leecher.download(
+                manifest.bundle_id(),
+                Destination::NewFolderIn(target.path().to_owned()),
+                vec![record(seeder.endpoint())],
+            );
+            downloads.push(download);
+            keep.push((source, seeder, seeding));
+        }
+        let mut results = Vec::new();
+        for download in downloads {
+            let mut handle = download.await.unwrap();
+            let _ = handle.status.wait_for(|s| s.complete).await;
+            handle.shutdown();
+            results.push(handle.finished().await);
+        }
+        let failed: Vec<_> = results.iter().filter_map(|r| r.as_ref().err()).collect();
+        assert_eq!(failed.len(), 1, "{results:?}");
+        assert!(
+            matches!(failed[0], DriverError::Storage(StorageError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::AlreadyExists),
+            "{failed:?}"
+        );
+        leecher.shutdown().await;
+        for (_, seeder, _) in keep {
+            seeder.shutdown().await;
+        }
+    })
+    .await;
+}
+
 /// On several threads, as the client runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn three_peers_share_a_bundle() {

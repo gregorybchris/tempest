@@ -429,6 +429,9 @@ impl Encode for Entry {
 
 /// Decodes an entry's fields only. Path rules are checked by [`Manifest`]'s decoding.
 impl Decode for Entry {
+    /// A directory: its kind and an empty path.
+    const MIN_LEN: usize = 5;
+
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let kind = r.u8()?;
         let path = r.string()?.to_owned();

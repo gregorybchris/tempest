@@ -12,8 +12,8 @@ use tempest_core::event::ServeReason;
 use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
 use tempest_core::upload::{ServeDecision, UploadContext, UploadStrategy};
 use tempest_core::{
-    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_PEER_ADDRESSES, Reply, RequestId,
-    Response, Rng, Session, StreamId, Time,
+    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_PEER_ADDRESSES, OPENING_TIMEOUT,
+    Reply, RequestId, Response, Rng, Session, StreamId, Time,
 };
 use tempest_protocol::message::{
     Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, PeerRecord, Peers,
@@ -274,6 +274,46 @@ fn holdings_before_the_manifest_are_checked_when_it_arrives() {
     let actions = session.poll_actions();
     assert!(matches!(actions[0], Action::StoreManifest { .. }));
     assert_eq!(closes(&actions), [GoodbyeReason::ProtocolViolation]);
+}
+
+#[test]
+fn an_unanswered_manifest_request_moves_to_another_peer() {
+    const D: ConnId = ConnId(8);
+    let manifest_requests = |actions: &[Action]| -> Vec<ConnId> {
+        (actions.iter())
+            .filter_map(|a| match a {
+                Action::Request {
+                    conn,
+                    message: OutRequest::Manifest,
+                    ..
+                } => Some(*conn),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut session = fresh(content().manifest().bundle_id());
+    open_peer(&mut session, C, 9);
+    assert_eq!(manifest_requests(&session.poll_actions()), [C]);
+
+    // Alone, a slow peer is waited for.
+    let timeout = Config::default().requests.snub_timeout;
+    let mut now = Time::ZERO + timeout;
+    session.handle_timer(now);
+    assert!(session.poll_actions().is_empty());
+
+    // With another peer to ask, the silent one is given up on.
+    open_peer(&mut session, D, 10);
+    session.poll_actions();
+    now += timeout;
+    assert!(session.next_timer().is_some_and(|t| t <= now));
+    session.handle_timer(now);
+    let actions = session.poll_actions();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Cancel { conn: C, .. }))
+    );
+    assert_eq!(manifest_requests(&actions), [D]);
 }
 
 #[test]
@@ -916,6 +956,62 @@ fn a_new_peer_record_never_holds_its_relay_address_as_a_direct_one() {
             relay: Some(addr(9)),
         }]
     );
+}
+
+#[test]
+fn an_opening_that_never_completes_is_closed() {
+    let bundle_id = content().manifest().bundle_id();
+    let mut session = complete(Config::default());
+    connect(&mut session, C, peer_id(10), Direction::Dialed);
+    // Hello arrives, but never Have.
+    control(&mut session, C, Message::Hello(hello(bundle_id)));
+    session.poll_actions();
+    let deadline = Time::ZERO + OPENING_TIMEOUT;
+    assert!(session.next_timer().is_some_and(|t| t <= deadline));
+    session.handle_timer(deadline);
+    let closed = session.poll_actions().into_iter().any(|a| {
+        matches!(
+            a,
+            Action::Close {
+                conn: C,
+                reason: GoodbyeReason::ProtocolViolation,
+                ..
+            }
+        )
+    });
+    assert!(closed);
+}
+
+#[test]
+fn a_hello_with_many_addresses_is_shared_with_a_few() {
+    const D: ConnId = ConnId(8);
+    let bundle_id = content().manifest().bundle_id();
+    let mut session = complete(Config::default());
+    let addr = |n: u16| Address::from(std::net::SocketAddr::from(([192, 0, 2, 1], n)));
+    let crowded = Hello {
+        addresses: (1..=10_000).map(addr).collect(),
+        ..hello(bundle_id)
+    };
+    connect(&mut session, C, peer_id(10), Direction::Accepted);
+    control(&mut session, C, Message::Hello(crowded));
+    control(&mut session, C, Message::Have(Have::default()));
+    connect(&mut session, D, peer_id(11), Direction::Accepted);
+    control(&mut session, D, Message::Hello(hello(bundle_id)));
+    control(&mut session, D, Message::Have(Have::default()));
+    let shared: Vec<PeerRecord> = session
+        .poll_actions()
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Send {
+                conn,
+                message: Message::Peers(peers),
+            } if conn == D => Some(peers.peers),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].addresses.len(), MAX_PEER_ADDRESSES);
 }
 
 #[test]

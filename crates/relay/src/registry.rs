@@ -3,7 +3,7 @@
 //! The rules live here without I/O, with time passed in, so they can be tested directly:
 //!
 //! - Only allowlisted peers may register, if there is an allowlist (`not_allowed`).
-//! - Each source IP may hold a limited number of registrations (`full`).
+//! - Each source IP, or IPv6 /64, may hold a limited number of registrations (`full`).
 //! - Lent sockets, held or kept, are limited in number (`full`). A kept socket is given up
 //!   before a newcomer is turned away.
 //! - A peer that registers again within [`KEEP_FOR`] of leaving gets its socket back, so its
@@ -19,6 +19,8 @@ use tempest_protocol::PeerId;
 use tempest_protocol::relay::{RelayReject, RelayRejectReason};
 use tokio::time::Instant;
 
+use crate::permissions::source;
+
 /// How long a peer's lent socket is kept after it disconnects (`protocol/relays.md`: 5 minutes).
 pub const KEEP_FOR: Duration = Duration::from_secs(5 * 60);
 
@@ -29,7 +31,7 @@ pub struct Limits {
     pub allowlist: Option<HashSet<PeerId>>,
     /// The most lent sockets, held or kept.
     pub max_registrations: usize,
-    /// The most registrations held from one source IP address.
+    /// The most registrations held from one source IP address, or one IPv6 /64.
     pub max_per_ip: usize,
 }
 
@@ -110,7 +112,7 @@ impl<S: Clone, C> Registry<S, C> {
         let from_ip = self
             .held
             .iter()
-            .filter(|(id, held)| **id != peer && held.ip == ip)
+            .filter(|(id, held)| **id != peer && source(held.ip) == source(ip))
             .count();
         if from_ip >= self.limits.max_per_ip {
             return Err(reject(
@@ -274,6 +276,14 @@ mod tests {
         assert!(test.admit(peer(3), OTHER_IP, "c").is_ok());
         // Registering again doesn't count against the peer itself.
         assert!(test.admit(peer(1), IP, "a2").is_ok());
+
+        // An IPv6 /64 counts as one source.
+        let mut test = Test::new(limits());
+        let v6 = |s: &str| s.parse::<IpAddr>().unwrap();
+        test.admit(peer(1), v6("2001:db8::1"), "a").unwrap();
+        test.admit(peer(2), v6("2001:db8::2"), "b").unwrap();
+        assert!(test.admit(peer(3), v6("2001:db8::3"), "c").is_err());
+        assert!(test.admit(peer(3), v6("2001:db8:0:1::3"), "c").is_ok());
     }
 
     #[test]

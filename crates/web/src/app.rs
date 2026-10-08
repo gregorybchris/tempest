@@ -536,25 +536,32 @@ fn Meters() -> impl IntoView {
     }
 }
 
-/// Says when the engine can't be reached, and offers to try again now.
+/// Says when the engine can't be reached, and offers to try again now. Between tries the
+/// stream is briefly connecting again, which doesn't count as reached, so the banner and its
+/// live region stay put until the engine answers.
 #[component]
 fn LinkBanner() -> impl IntoView {
     let store = expect_context::<Store>();
-    move || match store.link.get() {
-        Link::Lost { retry_in } => view! {
-            <div class="banner tone--bad" role="alert">
-                <span>
-                    "Can't reach the engine. "
-                    {format!("Trying again in {} s.", retry_in.as_secs().max(1))}
-                    " Is it still running?"
-                </span>
-                <Button small=true on_click=move || retry_now()>"Retry now"</Button>
-            </div>
-        }
-        .into_any(),
-        Link::Connecting if store.loaded.get_untracked() => {
+    let lost = RwSignal::new(false);
+    Effect::new(move |_| match store.link.get() {
+        Link::Lost { .. } => lost.set(true),
+        Link::Live => lost.set(false),
+        Link::Connecting => {}
+    });
+    let banner = move || {
+        if lost.get() {
+            view! {
+                <div class="banner tone--bad">
+                    <span>"Can't reach the engine. Trying again by itself; is it still running?"</span>
+                    <Button small=true on_click=move || retry_now()>"Retry now"</Button>
+                </div>
+            }
+            .into_any()
+        } else if store.link.get() == Link::Connecting && store.loaded.get_untracked() {
             view! { <div class="banner tone--warn">"Reconnecting to the engine…"</div> }.into_any()
+        } else {
+            ().into_any()
         }
-        _ => ().into_any(),
-    }
+    };
+    view! { <div role="status">{banner}</div> }
 }

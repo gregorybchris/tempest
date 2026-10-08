@@ -3613,6 +3613,9 @@ This revises D-065, D-156 and D-184.
 - `tempest tracker` gains commands to hide a listing and to ban a key, which also hides its listings, and to undo either.
 - Each listing page has a Report link. Reports are recorded for the operator; nothing happens automatically.
 - First come still owns a listing. Revisit if squatting appears.
+- The commands are `tempest tracker hide`, `unhide`, `ban`, `unban` and `reports`, each taking `--catalog FILE`. They change the catalog database directly, as `tempest tracker invite` does, so they work with the tracker stopped or running, and need no operator login or route. The running tracker checks the database when it serves, so a change applies at once, search facets included.
+- A hidden listing is treated as missing for everyone but its publisher, and so is every listing of a banned key. A ban is a flag on the key's account, so unbanning restores its listings, except those hidden on their own. A banned key can't list, edit, vote, comment or report, and its announces list nothing.
+- A report is a signed-in key's reason for a listing. Each key has one report per listing; a later one replaces it. Reports have their own per-IP limit, `report` (D-217).
 
 **Rationale:** Operators carry the risk and need the minimum tools to act. Side-by-side listings and author keys are larger changes to make only if squatting turns out to be a problem.
 

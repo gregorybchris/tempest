@@ -673,6 +673,12 @@ a.tag:hover {
   min-width: 0;
 }
 
+
+.listing__report {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
 .prose {
   max-width: 78ch;
 }

@@ -5,7 +5,7 @@
 //! created and upgraded by numbered migrations, tracked in SQLite's `user_version`, as the
 //! engine's is. Times are seconds since the Unix epoch.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -80,7 +80,43 @@ CREATE TABLE downloads (
 ) STRICT;
 CREATE INDEX downloads_by_day ON downloads (day);
 ",
+    "
+ALTER TABLE listings ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN banned INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE reports (
+    id INTEGER PRIMARY KEY,
+    bundle BLOB NOT NULL REFERENCES listings (bundle) ON DELETE CASCADE,
+    reporter BLOB NOT NULL REFERENCES accounts (key) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    created INTEGER NOT NULL,
+    UNIQUE (bundle, reporter)
+) STRICT;
+",
 ];
+
+/// SQL over `listings l` that holds when the operator has taken the listing down: hidden, or
+/// its publisher banned.
+const BLOCKED: &str = "(l.hidden = 1
+    OR EXISTS (SELECT 1 FROM accounts b WHERE b.key = l.publisher AND b.banned = 1))";
+
+/// A report of a listing, as the operator reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    /// Its identifier.
+    pub id: u64,
+    /// The listing reported.
+    pub bundle: BundleId,
+    /// The listing's publisher.
+    pub publisher: PeerId,
+    /// Whether the operator has hidden the listing, or banned its publisher.
+    pub blocked: bool,
+    /// Who reported it.
+    pub reporter: PeerId,
+    /// Why.
+    pub reason: String,
+    /// When, in seconds since the Unix epoch.
+    pub created: u64,
+}
 
 /// Why the catalog's database failed.
 #[derive(Debug, thiserror::Error)]
@@ -193,6 +229,8 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // The operator's commands write while a tracker runs on the same file.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let mut store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -590,7 +628,7 @@ impl Store {
     /// What the search index holds of `bundle`, if it is listed.
     pub fn indexed(&self, bundle: &BundleId) -> Result<Option<Indexed>, StoreError> {
         Ok(self
-            .indexed_where("AND bundle = ?1", &[&bundle.as_bytes().as_slice()])?
+            .indexed_where("AND l.bundle = ?1", &[&bundle.as_bytes().as_slice()])?
             .pop())
     }
 
@@ -605,8 +643,8 @@ impl Store {
         filter_params: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<Indexed>, StoreError> {
         let sql = format!(
-            "SELECT bundle, title, description, category, content_name, created FROM listings
-             WHERE status = 'listed' {filter}"
+            "SELECT l.bundle, l.title, l.description, l.category, l.content_name, l.created
+             FROM listings l WHERE l.status = 'listed' AND NOT {BLOCKED} {filter}"
         );
         let mut statement = self.conn.prepare_cached(&sql)?;
         let rows = statement.query_map(filter_params, |row| {
@@ -701,6 +739,117 @@ impl Store {
             votes.insert(hash_of(bundle)?, counts);
         }
         Ok(votes)
+    }
+
+    // The operator's tools.
+
+    /// Hides or shows `bundle`'s listing. Returns whether it has one.
+    pub fn set_hidden(&self, bundle: &BundleId, hidden: bool) -> Result<bool, StoreError> {
+        let changed = self.conn.execute(
+            "UPDATE listings SET hidden = ?2 WHERE bundle = ?1",
+            params![bundle.as_bytes(), hidden],
+        )?;
+        Ok(changed == 1)
+    }
+
+    /// Bans or unbans `key`. Returns whether it has an account.
+    pub fn set_banned(&self, key: &PeerId, banned: bool) -> Result<bool, StoreError> {
+        let changed = self.conn.execute(
+            "UPDATE accounts SET banned = ?2 WHERE key = ?1",
+            params![key.as_bytes(), banned],
+        )?;
+        Ok(changed == 1)
+    }
+
+    /// Whether `key` is banned.
+    pub fn is_banned(&self, key: &PeerId) -> Result<bool, StoreError> {
+        let banned: Option<bool> = self
+            .conn
+            .query_row(
+                "SELECT banned FROM accounts WHERE key = ?1",
+                [key.as_bytes()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(banned.unwrap_or(false))
+    }
+
+    /// Whether `bundle`'s listing is hidden, or its publisher banned.
+    pub fn is_blocked(&self, bundle: &BundleId) -> Result<bool, StoreError> {
+        let sql = format!("SELECT {BLOCKED} FROM listings l WHERE l.bundle = ?1");
+        let blocked: Option<bool> = self
+            .conn
+            .query_row(&sql, [bundle.as_bytes()], |row| row.get(0))
+            .optional()?;
+        Ok(blocked.unwrap_or(false))
+    }
+
+    /// The bundles whose listings are hidden, or whose publishers are banned.
+    pub fn blocked(&self) -> Result<HashSet<BundleId>, StoreError> {
+        let sql = format!("SELECT l.bundle FROM listings l WHERE {BLOCKED}");
+        let mut statement = self.conn.prepare_cached(&sql)?;
+        let rows = statement.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
+        rows.map(|row| hash_of(row?)).collect()
+    }
+
+    /// The bundles `key` published.
+    pub fn bundles_of(&self, key: &PeerId) -> Result<Vec<BundleId>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare_cached("SELECT bundle FROM listings WHERE publisher = ?1")?;
+        let rows = statement.query_map([key.as_bytes()], |row| row.get::<_, Vec<u8>>(0))?;
+        rows.map(|row| hash_of(row?)).collect()
+    }
+
+    /// Records `reporter`'s report of `bundle`, replacing their earlier one.
+    pub fn add_report(
+        &self,
+        bundle: &BundleId,
+        reporter: &PeerId,
+        reason: &str,
+        now: u64,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO reports (bundle, reporter, reason, created) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (bundle, reporter) DO UPDATE SET reason = ?3, created = ?4",
+            params![bundle.as_bytes(), reporter.as_bytes(), reason, to_i64(now)],
+        )?;
+        Ok(())
+    }
+
+    /// The reports, newest first, of `bundle` only if given.
+    pub fn reports(&self, bundle: Option<&BundleId>) -> Result<Vec<Report>, StoreError> {
+        let sql = format!(
+            "SELECT r.id, r.bundle, l.publisher, {BLOCKED}, r.reporter, r.reason, r.created
+             FROM reports r JOIN listings l ON l.bundle = r.bundle
+             WHERE ?1 IS NULL OR r.bundle = ?1 ORDER BY r.created DESC, r.id DESC"
+        );
+        let mut statement = self.conn.prepare_cached(&sql)?;
+        let rows = statement.query_map([bundle.map(|b| b.as_bytes().as_slice())], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, Vec<u8>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?;
+        let mut reports = Vec::new();
+        for row in rows {
+            let (id, bundle, publisher, blocked, reporter, reason, created) = row?;
+            reports.push(Report {
+                id: to_u64(id),
+                bundle: hash_of(bundle)?,
+                publisher: hash_of(publisher)?,
+                blocked,
+                reporter: hash_of(reporter)?,
+                reason,
+                created: to_u64(created),
+            });
+        }
+        Ok(reports)
     }
 
     // Votes and comments.

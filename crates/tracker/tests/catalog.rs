@@ -789,3 +789,162 @@ async fn announces_over_the_limits_succeed_but_list_less() {
     let answer = announce_listed(&router, &alice, &bundle(1)).await;
     assert_eq!(answer.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn reports_reach_the_operator_one_per_key_and_listing() {
+    let tracker = tracker();
+    let router = tracker.router();
+    let (alice, bob) = (Key::new(1), Key::new(2));
+    let (alice_auth, bob_auth) = (sign_in(&router, &alice).await, sign_in(&router, &bob).await);
+    list(
+        &tracker,
+        &alice,
+        &alice_auth,
+        1,
+        json!({ "title": "Weather" }),
+    )
+    .await;
+    let path = format!("/catalog/v1/listings/{}/reports", bundle(1));
+    let bob_h = [("authorization", bob_auth.as_str())];
+    let report = async |reason: &str| {
+        let body = json!({ "reason": reason });
+        call(&router, Method::POST, &path, &bob_h, body)
+            .await
+            .status
+    };
+
+    let body = json!({ "reason": "spam" });
+    let anonymous = call(&router, Method::POST, &path, &[], body.clone()).await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(report("  ").await, StatusCode::BAD_REQUEST);
+    let missing = format!("/catalog/v1/listings/{}/reports", bundle(9));
+    let none = call(&router, Method::POST, &missing, &bob_h, body).await;
+    assert_eq!(none.status, StatusCode::NOT_FOUND);
+
+    assert_eq!(report("spam").await, StatusCode::CREATED);
+    assert_eq!(report("actually malware").await, StatusCode::CREATED);
+    let catalog = tracker.catalog_handle().unwrap();
+    let catalog = catalog.lock().unwrap();
+    let reports = catalog.reports(None).unwrap();
+    assert_eq!(
+        reports.len(),
+        1,
+        "a key's later report replaces its earlier one"
+    );
+    assert_eq!(reports[0].reason, "actually malware");
+    assert_eq!(reports[0].bundle, bundle(1));
+    assert_eq!(reports[0].reporter, bob.id());
+    assert_eq!(reports[0].publisher, alice.id());
+    assert!(!reports[0].blocked);
+    assert!(catalog.reports(Some(&bundle(2))).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reports_are_rate_limited() {
+    let mut limits = CatalogLimits::none();
+    limits.rates.insert(Action::Report, Rate::new(1, 60));
+    let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
+    let tracker = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .catalog_limits(limits)
+        .with_catalog(catalog);
+    let router = tracker.router();
+    let (alice, bob) = (Key::new(1), Key::new(2));
+    let (alice_auth, bob_auth) = (sign_in(&router, &alice).await, sign_in(&router, &bob).await);
+    list(&tracker, &alice, &alice_auth, 1, json!({})).await;
+    let path = format!("/catalog/v1/listings/{}/reports", bundle(1));
+    let headers = [("authorization", bob_auth.as_str())];
+    let body = json!({ "reason": "spam" });
+    let first = call(&router, Method::POST, &path, &headers, body.clone()).await;
+    assert_eq!(first.status, StatusCode::CREATED);
+    let second = call(&router, Method::POST, &path, &headers, body).await;
+    assert_eq!(second.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(second.body["error"], "rate_limited");
+}
+
+/// The operator's commands run in another process on the catalog's file: a second `Catalog` on
+/// the same file stands in for it, and the running tracker must obey at once.
+#[tokio::test]
+async fn hiding_and_banning_take_effect_in_a_running_tracker() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("catalog.db");
+    let catalog = Catalog::open(&file, CatalogConfig::default()).unwrap();
+    let tracker = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .with_catalog(catalog);
+    let router = tracker.router();
+    let mut op = Catalog::open(&file, CatalogConfig::default()).unwrap();
+    let (alice, bob) = (Key::new(1), Key::new(2));
+    let (alice_auth, bob_auth) = (sign_in(&router, &alice).await, sign_in(&router, &bob).await);
+    let alice_h = [("authorization", alice_auth.as_str())];
+    let bob_h = [("authorization", bob_auth.as_str())];
+    let titled = |title: &str| json!({ "title": title });
+    list(&tracker, &alice, &alice_auth, 1, titled("Weather")).await;
+    list(&tracker, &alice, &alice_auth, 2, titled("Weather models")).await;
+    list(&tracker, &bob, &bob_auth, 3, titled("Weather bob")).await;
+    let page = |id: u8| format!("/catalog/v1/listings/{}", bundle(id));
+    let status = async |auth: &[(&str, &str)], id: u8| {
+        let answer = call(&router, Method::GET, &page(id), auth, Value::Null).await;
+        answer.status
+    };
+    let act = async |method: Method, auth: &[(&str, &str)], id: u8, what: &str, body: Value| {
+        let path = format!("{}/{what}", page(id));
+        call(&router, method, &path, auth, body).await.status
+    };
+    assert_eq!(search(&router, "q=weather").await.0.len(), 3);
+
+    // Hiding a listing takes it off the pages and out of search, for all but its publisher.
+    op.set_hidden(&bundle(1), true).unwrap();
+    assert_eq!(status(&[], 1).await, StatusCode::NOT_FOUND);
+    assert_eq!(status(&bob_h, 1).await, StatusCode::NOT_FOUND);
+    assert_eq!(status(&alice_h, 1).await, StatusCode::OK);
+    let (found, results) = search(&router, "q=weather").await;
+    assert_eq!(found.len(), 2);
+    assert_eq!(results["total"], 2);
+    let vote = json!({ "vote": "up" });
+    let status_vote = act(Method::PUT, &bob_h, 1, "vote", vote).await;
+    assert_eq!(status_vote, StatusCode::NOT_FOUND);
+    let comment = json!({ "body": "hi" });
+    let status_comment = act(Method::POST, &bob_h, 1, "comments", comment).await;
+    assert_eq!(status_comment, StatusCode::NOT_FOUND);
+    let reason = json!({ "reason": "x" });
+    let status_report = act(Method::POST, &bob_h, 1, "reports", reason).await;
+    assert_eq!(status_report, StatusCode::NOT_FOUND);
+    op.set_hidden(&bundle(1), false).unwrap();
+    assert_eq!(status(&[], 1).await, StatusCode::OK);
+    assert_eq!(search(&router, "q=weather").await.0.len(), 3);
+    assert!(op.set_hidden(&bundle(7), true).is_err(), "no such listing");
+
+    // Banning a key hides everything it listed, and stops it acting.
+    op.set_banned(&alice.id(), true).unwrap();
+    assert!(op.is_banned(&alice.id()).unwrap());
+    assert_eq!(status(&[], 1).await, StatusCode::NOT_FOUND);
+    assert_eq!(status(&[], 2).await, StatusCode::NOT_FOUND);
+    assert_eq!(status(&[], 3).await, StatusCode::OK);
+    assert_eq!(search(&router, "q=weather").await.0, vec![3]);
+    let edit = call(&router, Method::PUT, &page(1), &alice_h, titled("New")).await;
+    assert_eq!(edit.status, StatusCode::FORBIDDEN);
+    let vote = json!({ "vote": "up" });
+    let voted = act(Method::PUT, &alice_h, 3, "vote", vote).await;
+    assert_eq!(voted, StatusCode::FORBIDDEN);
+    // A banned key's announces list nothing.
+    announce_listed(&router, &alice, &bundle(4)).await;
+    assert!(!op.knows_listing(&bundle(4)).unwrap());
+
+    // Lifting the ban restores them, but not a listing hidden on its own.
+    op.set_hidden(&bundle(2), true).unwrap();
+    op.set_banned(&alice.id(), false).unwrap();
+    assert_eq!(status(&[], 1).await, StatusCode::OK);
+    assert_eq!(status(&[], 2).await, StatusCode::NOT_FOUND);
+    assert_eq!(search(&router, "q=weather").await.0.len(), 2);
+    let stranger = Key::new(9).id();
+    assert!(op.set_banned(&stranger, true).is_err(), "no such account");
+
+    // A restart rebuilds the index without what is hidden.
+    let restarted = Catalog::open(&file, CatalogConfig::default()).unwrap();
+    let router = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .with_catalog(restarted)
+        .router();
+    assert_eq!(search(&router, "q=weather").await.0.len(), 2);
+}

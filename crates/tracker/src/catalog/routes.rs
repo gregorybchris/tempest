@@ -22,7 +22,7 @@ use axum::routing::{delete, get, post, put};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tempest_catalog_api::account::{AccountEdit, Poll, PollResponse, SignIn, normalize_authority};
-use tempest_catalog_api::listing::{ListingEdit, NewComment, VoteRequest};
+use tempest_catalog_api::listing::{ListingEdit, NewComment, NewReport, VoteRequest};
 use tempest_catalog_api::query::{DEFAULT_LIMIT, ListingQuery};
 use tempest_catalog_api::{PREFIX, SESSION_COOKIE};
 use tempest_protocol::tracker::ErrorCode;
@@ -59,6 +59,7 @@ pub(crate) fn router(tracker: &Tracker) -> Router<Tracker> {
             &route("listings/{bundle}/comments"),
             get(comments).post(comment),
         )
+        .route(&route("listings/{bundle}/reports"), post(report))
         .route(&route("comments/{id}"), delete(delete_comment))
         .route_layer(middleware::from_fn_with_state(tracker.clone(), limit))
         .layer(DefaultBodyLimit::max(MAX_BODY))
@@ -77,6 +78,7 @@ fn action(method: &Method, path: &str) -> Option<Action> {
         (&Method::POST, "challenges/poll" | "sessions") => Action::SignIn,
         (&Method::PUT, "listings/{bundle}/vote") => Action::Vote,
         (&Method::POST, "listings/{bundle}/comments") => Action::Comment,
+        (&Method::POST, "listings/{bundle}/reports") => Action::Report,
         (&Method::GET | &Method::HEAD, _) => Action::Browse,
         _ => Action::Edit,
     })
@@ -404,6 +406,21 @@ async fn comment(
         let comment: NewComment = body(&headers, raw)?;
         let comment = tracker.catalog().comment(now(), &id, &key, &comment)?;
         Ok(json(StatusCode::CREATED, &comment))
+    })())
+}
+
+async fn report(
+    State(tracker): State<Tracker>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    raw: Result<Bytes, BytesRejection>,
+) -> Response {
+    answer((|| {
+        let id = bundle(&id)?;
+        let key = signed_in(&tracker, &headers)?;
+        let report: NewReport = body(&headers, raw)?;
+        tracker.catalog().report(now(), &id, &key, &report)?;
+        Ok(json(StatusCode::CREATED, &serde_json::json!({})))
     })())
 }
 

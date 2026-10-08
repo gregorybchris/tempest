@@ -201,6 +201,13 @@ pub struct NewComment {
     pub body: String,
 }
 
+/// The body of `POST /catalog/v1/listings/{bundle}/reports`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewReport {
+    /// Why the listing needs the operator's attention. See [`crate::text::clean_report`].
+    pub reason: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

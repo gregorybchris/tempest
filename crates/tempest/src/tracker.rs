@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tempest_catalog_api::Category;
 use tempest_net::FetchLimits;
-use tempest_protocol::{BundleId, RelayIdentity};
+use tempest_protocol::{BundleId, PeerId, RelayIdentity};
 use tempest_relay::RelayConfig;
 use tempest_tracker::limits::Action;
 use tempest_tracker::{
@@ -115,7 +115,7 @@ struct CatalogArgs {
     fetch_give_up: u64,
     /// Change a per-IP rate limit, as `action=BURST/SECONDS` (BURST at once, then one per
     /// SECONDS) or `action=off`. Actions: challenge, sign-in, browse, publish, edit, vote,
-    /// comment, download. Repeat for more. See specs/tracker.md for the defaults.
+    /// comment, report, download. Repeat for more. See specs/tracker.md for the defaults.
     #[arg(long, value_name = "ACTION=RATE", value_parser = parse_limit, requires = "catalog")]
     catalog_limit: Vec<(Action, Option<Rate>)>,
     /// The most sign-in codes outstanding for one IP address.
@@ -132,6 +132,51 @@ enum TrackerCommand {
         #[arg(long, value_name = "FILE")]
         catalog: PathBuf,
     },
+    /// Hide a listing from everyone but its publisher.
+    Hide {
+        /// The bundle ID of the listing.
+        bundle: BundleId,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+    /// Show a hidden listing again.
+    Unhide {
+        /// The bundle ID of the listing.
+        bundle: BundleId,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+    /// Ban a key: its listings are hidden, and it can't list, edit, vote, comment or report.
+    Ban {
+        /// The key, as 64 hexadecimal characters.
+        key: PeerId,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+    /// Lift a key's ban, which shows its listings again.
+    Unban {
+        /// The key, as 64 hexadecimal characters.
+        key: PeerId,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+    /// List the reports of listings, newest first.
+    Reports {
+        /// Only the reports of this bundle.
+        #[arg(long, value_name = "BUNDLE")]
+        bundle: Option<BundleId>,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+}
+
+/// Which catalog an operator command acts on. The commands change the database itself, so they
+/// work whether or not a tracker is running on it.
+#[derive(Debug, clap::Args)]
+struct CatalogFile {
+    /// The catalog's SQLite file, as given to `tempest tracker --catalog`.
+    #[arg(long, value_name = "FILE")]
+    catalog: PathBuf,
 }
 
 fn parse_category(text: &str) -> Result<Category, String> {
@@ -217,8 +262,10 @@ impl CatalogArgs {
 }
 
 pub fn tracker(args: TrackerArgs) -> Result<()> {
-    if let Some(TrackerCommand::Invite { catalog }) = &args.command {
-        return invite(catalog);
+    match &args.command {
+        Some(TrackerCommand::Invite { catalog }) => return invite(catalog),
+        Some(command) => return operate(command, &mut std::io::stdout().lock()),
+        None => {}
     }
     let catalog = args.catalog.open()?;
     let relay_identity = args
@@ -304,6 +351,78 @@ fn invite(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The time now, in seconds since the Unix epoch.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// An existing catalog, for the operator's commands: they never create one.
+fn open_existing(path: &Path) -> Result<Catalog> {
+    anyhow::ensure!(path.is_file(), "there is no catalog at {}", path.display());
+    Catalog::open(path, CatalogConfig::default())
+        .with_context(|| format!("cannot open the catalog at {}", path.display()))
+}
+
+/// Runs an operator command (see [`TrackerCommand`]) on its catalog, and says what it did.
+fn operate(command: &TrackerCommand, out: &mut impl std::io::Write) -> Result<()> {
+    let refused = |refusal: tempest_tracker::Refusal| anyhow::anyhow!(refusal.body.message);
+    match command {
+        TrackerCommand::Invite { .. } => unreachable!("handled by the caller"),
+        TrackerCommand::Hide { bundle, file } | TrackerCommand::Unhide { bundle, file } => {
+            let hide = matches!(command, TrackerCommand::Hide { .. });
+            open_existing(&file.catalog)?
+                .set_hidden(bundle, hide)
+                .map_err(refused)?;
+            let done = if hide { "hid" } else { "showed" };
+            writeln!(out, "{done} {bundle}")?;
+        }
+        TrackerCommand::Ban { key, file } | TrackerCommand::Unban { key, file } => {
+            let ban = matches!(command, TrackerCommand::Ban { .. });
+            open_existing(&file.catalog)?
+                .set_banned(key, ban)
+                .map_err(refused)?;
+            let done = if ban { "banned" } else { "unbanned" };
+            writeln!(out, "{done} {key}")?;
+        }
+        TrackerCommand::Reports { bundle, file } => {
+            let catalog = open_existing(&file.catalog)?;
+            let reports = catalog.reports(bundle.as_ref())?;
+            let now = unix_now();
+            for report in &reports {
+                let taken_down = if report.blocked { "  (taken down)" } else { "" };
+                writeln!(out, "bundle     {}{taken_down}", report.bundle)?;
+                writeln!(out, "publisher  {}", report.publisher)?;
+                writeln!(out, "reporter   {}", report.reporter)?;
+                writeln!(
+                    out,
+                    "reported   {} ago",
+                    ago(now.saturating_sub(report.created))
+                )?;
+                for line in report.reason.lines() {
+                    writeln!(out, "  {line}")?;
+                }
+                writeln!(out)?;
+            }
+            if reports.is_empty() {
+                writeln!(out, "no reports")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A span of `secs` seconds as its largest whole unit.
+fn ago(secs: u64) -> String {
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    }
+}
+
 /// Binds `ip`, or else IPv6's wildcard address, which takes IPv4 too on most systems, falling
 /// back to IPv4's where IPv6 is unavailable.
 async fn bind(ip: Option<IpAddr>, port: u16) -> Result<TcpListener> {
@@ -325,6 +444,14 @@ async fn bind(ip: Option<IpAddr>, port: u16) -> Result<TcpListener> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spans_show_their_largest_unit() {
+        assert_eq!(ago(5), "5s");
+        assert_eq!(ago(150), "2m");
+        assert_eq!(ago(7_300), "2h");
+        assert_eq!(ago(200_000), "2d");
+    }
 
     #[test]
     fn limits_parse() {

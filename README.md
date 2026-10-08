@@ -72,7 +72,7 @@ tempest-sim run crates/sim/scenarios/flash-crowd.yaml   # simulates a swarm, int
 tempest-sim web                                         # browses and compares the results
 ```
 
-Building the web UIs needs [trunk](https://trunkrs.dev); a binary built without them serves a page that says so. In the TUI and the web UI, `1`-`3` switch between Transfers, Share and Settings, `:` finds any command (TUI), and `?` lists the keys of the screen you are on.
+Building the web UIs needs [trunk](https://trunk-rs.github.io/trunk/); a binary built without them serves a page that says so. In the TUI and the web UI, `1`-`3` switch between Transfers, Share and Settings, `:` finds any command (TUI), and `?` lists the keys of the screen you are on.
 
 While a daemon runs, `share` and `get` hand their transfers to it. Peers on the same local network also find each other without a tracker, and each peer asks its router to forward its port with PCP, NAT-PMP or UPnP-IGD; `share` and `get` turn these off with `--no-lan` and `--no-port-mapping`. `tempest <command> --help`, `tempest-tracker --help` and `tempest-relay --help` list each command's options. The engine's API is described in [`specs/api.md`](specs/api.md). Running a public tracker: see [`specs/tracker.md`](specs/tracker.md).
 

@@ -91,6 +91,32 @@ jobs:
           CHROMEDRIVER: ${{ env.CHROMEWEBDRIVER }}/chromedriver
         run: cargo test --target wasm32-unknown-unknown -p tempest-ui-gallery -- --nocapture
 
+  # The release targets that CI's Linux x86_64 jobs don't build (D-212). Windows and Linux on
+  # arm64 swap in different code paths. The web UIs' output is absent, which the binary allows
+  # (D-210).
+  platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p tempest --all-targets -- -D warnings
+      - run: cargo test -p tempest-net -p tempest-engine
+
+  # The release configuration and its generated workflow agree, and dist can plan a release.
+  dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dist
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh"
+      - run: dist generate --check
+      - run: dist plan
+
   deny:
     runs-on: ubuntu-latest
     steps:

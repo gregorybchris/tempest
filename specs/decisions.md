@@ -3384,3 +3384,19 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Binaries install into `CARGO_HOME`'s `bin` folder, with no self-updater.
 
 **Rationale:** Committing build output would drift; a setup step keeps one source. Installing trunk with cargo is the least to maintain, and release builds are rare enough to absorb its time.
+
+## D-212: Cross-platform checks in CI
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** Releases (D-211) build on Windows and on Linux for arm64. Locally, `cargo check --target x86_64-pc-windows-msvc -p tempest` fails: `ring` compiles C and needs the target's headers, which a Mac lacks. A review of the code that differs by platform found each case gated or given a Windows implementation: file permissions, `O_NOFOLLOW`, positioned reads and writes, symlinks, `SO_REUSEPORT`, signals and the data directory.
+
+**Options:** **Windows check:** cross-compile locally (not possible here); a Windows runner in CI (chosen). **Scope:** `cargo check` only; clippy over all targets plus the tests of the crates holding platform code (chosen). **Dist drift:** rely on the generated workflow's own `dist plan` on pull requests; also run `dist generate --check` in CI (chosen), so a hand edit of the config or workflow fails.
+
+**Decision:**
+
+- CI's `platforms` job runs clippy for `tempest` and the `tempest-net` and `tempest-engine` tests on Windows, Linux arm64 and macOS.
+- CI's `dist` job runs `dist generate --check` and `dist plan`.
+- `cargo build --profile dist -p tempest` was built on the host and the binary runs.
+
+**Rationale:** Only a native runner compiles the C dependencies and runs the platform code, and it fails before a tag does.

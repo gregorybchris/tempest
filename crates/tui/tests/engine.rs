@@ -12,7 +12,7 @@ use tempest_engine::api::client::{ApiClient, EventStream};
 use tempest_engine::api::server::ApiServer;
 use tempest_engine::config::{ApiSettings, LanSettings, PeerSettings};
 use tempest_engine::{Engine, EngineConfig, TransferInfo};
-use tempest_tui::app::{App, Origin};
+use tempest_tui::app::{App, Modal, Origin};
 use tempest_tui::carry_out;
 use tempest_tui::theme::Theme;
 use tempest_tui::ui;
@@ -243,7 +243,22 @@ async fn the_areas_share_change_settings_and_keep_the_theme() {
     let mut events = client.events(None).await.unwrap();
     let request = app.load_settings().unwrap();
     let result = carry_out(&client, &request).await;
-    app.finished(&request, result);
+    // The first run says what the network defaults share, and the engine remembers it did.
+    let recorded = app.finished(&request, result).unwrap();
+    assert_eq!(app.modal, Some(Modal::Network));
+    let result = carry_out(&client, &recorded).await;
+    app.finished(&recorded, result);
+    assert!(
+        client
+            .settings()
+            .await
+            .unwrap()
+            .settings
+            .ui
+            .network_explained
+    );
+    press(&mut app, &client, &[KeyCode::Esc]).await;
+    assert_eq!(app.modal, None);
 
     // Share a file from the Share area.
     let file = dir.path().join("field-notes.txt");
@@ -291,7 +306,8 @@ async fn the_areas_share_change_settings_and_keep_the_theme() {
     let mut next = App::new(Origin::Daemon, Theme::default());
     let request = next.load_settings().unwrap();
     let result = carry_out(&client, &request).await;
-    next.finished(&request, result);
+    assert_eq!(next.finished(&request, result), None, "said once");
+    assert_eq!(next.modal, None);
     assert_eq!(next.theme, Theme::AMBER);
 
     engine.shutdown().await;

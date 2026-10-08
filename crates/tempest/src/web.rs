@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::assets::{self, show};
 use crate::daemon;
 use crate::engine::{EngineArgs, Target};
+use crate::handoff::Daemon;
 
 /// The UI's files, by their path in the page, as `crates/web/dist` held them at build time.
 static ASSETS: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
@@ -56,12 +57,16 @@ pub struct WebArgs {
 /// as the daemon would, until Ctrl-C.
 pub fn web(args: WebArgs) -> Result<()> {
     let mut config = args.engine.load()?;
-    for (key, value) in args.set {
+    for (key, value) in args.set.clone() {
         config
             .set(&key, value)
             .with_context(|| format!("--set {key}"))?;
     }
     let open = !args.no_open;
+    let hand_off = Daemon {
+        engine: args.engine.clone(),
+        set: args.set.clone(),
+    };
     if !built() {
         eprintln!("note: this binary was built without the web UI; the page says how to add it");
     }
@@ -71,10 +76,14 @@ pub fn web(args: WebArgs) -> Result<()> {
             show(client.url(), open);
             return Ok(());
         }
-        daemon::run(config, move |url| {
-            eprintln!("no daemon is running, so the engine runs here until Ctrl-C");
-            show(url, open);
-        })
+        daemon::run(
+            config,
+            move |url| {
+                eprintln!("no daemon is running, so the engine runs here until Ctrl-C");
+                show(url, open);
+            },
+            Some(hand_off),
+        )
         .await
     })
 }

@@ -325,7 +325,7 @@ impl EngineTask {
                 let _ = reply.send(self.inside(id));
             }
             Command::AddLink(link, options, reply) => {
-                let result = self.add_link(link, options).await;
+                let result = self.add_link(link, *options).await;
                 let _ = reply.send(result);
             }
             Command::AddShare(share, reply) => {
@@ -657,6 +657,7 @@ impl EngineTask {
         };
         let mut link = Link::new(id);
         link.name = Some(manifest.name().to_owned());
+        link.trackers = options.trackers;
         row.link = self.share_link(&link).to_string();
         self.store.save_transfer(&row)?;
         self.insert(row, Some(Arc::new(manifest)), link).await
@@ -758,7 +759,7 @@ impl EngineTask {
         }
     }
 
-    /// A share's link: the bundle, this peer and its addresses, and the config's trackers.
+    /// A share's link: the bundle, this peer and its addresses, and its trackers: those it was shared with, then the config's.
     fn share_link(&self, link: &Link) -> Link {
         let mut link = link.clone();
         link.peer = Some(self.peer_id);
@@ -768,7 +769,11 @@ impl EngineTask {
             .port_mapping()
             .advertise(&self.addresses);
         link.relay = self.node.endpoint().relay_address();
-        link.trackers = self.config.trackers.clone();
+        for tracker in &self.config.trackers {
+            if !link.trackers.contains(tracker) {
+                link.trackers.push(tracker.clone());
+            }
+        }
         link
     }
 

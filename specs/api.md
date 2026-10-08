@@ -25,7 +25,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | --- | --- | --- |
 | `GET /v1/engine` | | The engine's version, peer ID, advertised addresses, home relay and port mapping |
 | `GET /v1/transfers` | | Every transfer, in queue order |
-| `POST /v1/transfers` | `link`, or an absolute `path` to share; optionally `category`, `tags`; for a link `save_folder`, `stopped`; for a path `name`, `comment` | 201 and the transfer |
+| `POST /v1/transfers` | `link`, or an absolute `path` to share; optionally `category`, `tags`, `trackers`; for a link `save_folder`, `stopped`; for a path `name`, `comment`, `created` | 201 and the transfer |
 | `GET /v1/transfers/{id}` | | The transfer |
 | `DELETE /v1/transfers/{id}?delete_files=true` | | 204, once removed (and its files deleted, if asked) |
 | `GET /v1/transfers/{id}/files` | | Each file's path, size, chunks and chunks stored; none before the manifest arrives |
@@ -56,6 +56,8 @@ A chunk map's cells cover consecutive chunks in order, their sizes differing by 
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link, dates and the trackers it is published on.
 
+The `ui` settings include whether the first-run account of the network defaults was shown (D-227), so it is said once per data directory, whichever client is first.
+
 Settings changed through the API are kept in the state database and apply over the config file, which the engine never rewrites. Queue, speed and sharing limits, notifications, trackers, relays, port mapping and the clients' `ui` settings (D-195) apply at once, session settings when a transfer next starts, and `peers`, `lan` and `api` when the engine restarts. `data_dir` is only set in the file. Switching the alternative speed limits on and off is a setting like any other, `limits.alternative.enabled`.
 
 ## Events
@@ -80,6 +82,8 @@ Settings changed through the API are kept in the state database and apply over t
 
 `tempest list`, `start`, `stop` and `remove` use the API of the daemon on the same data directory. When no daemon answers, they open the engine's state themselves without running any transfer, make the change, and say so. Only one engine uses a data directory at a time.
 
-`tempest share` and `tempest get` hand their transfer to the daemon when one answers: `share` prints the link and returns, and `get` follows the download to completion. Options that only make sense for a process of its own, such as `--port` or `--identity`, and `--standalone`, run them without the daemon as before (D-175).
+`tempest share` and `tempest get` hand their transfer to the daemon when one answers: `share` prints the link and returns, and `get` follows the download to completion. Every option that describes the transfer itself, such as `--tracker` or `--created`, goes to the daemon in the add request (D-228). Only `--standalone` and the options of a separate process (its port, identity, binding, relay and LAN settings) run them without the daemon (D-175).
+
+A `tempest tui` or `tempest web` with no daemon runs an engine of its own. Quitting it while transfers are active asks whether to hand them to a daemon or stop them. Handing over shuts the engine down and starts a daemon in the background on the same data directory, which resumes them (D-228).
 
 `tempest share --publish <tracker>` also lists the share on that tracker's catalog, through the daemon's `publish` route or, standalone, by signing in itself. `tempest catalog publish` does the same for a transfer already added, `tempest catalog unpublish` withdraws it, and `tempest catalog sign-in <tracker> --code` signs in a browser showing the catalog. All of them sign with the engine's key.

@@ -221,7 +221,7 @@ fn trackers_and_relays_are_added_and_removed() {
 
     // In the relays section, `a` adds a relay.
     press(&mut app, KeyCode::Tab);
-    assert_eq!(app.current_row().unwrap().key, Some("relays.from_trackers"));
+    assert_eq!(app.current_row().unwrap().edit, Edit::NewRelay);
     press(&mut app, KeyCode::Char('a'));
     let key = "ab".repeat(32);
     type_keys(&mut app, &format!("{key}@relay.example.org"));

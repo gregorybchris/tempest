@@ -7,7 +7,7 @@ Tempest's user-facing interfaces and the quality bar they share. Decisions refer
 | Interface | Built with | Talks to |
 | --- | --- | --- |
 | Client web UI | Leptos (D-117) | Engine API (HTTP + JSON, event stream) |
-| Terminal UI | ratatui (D-090) | Engine API, or an embedded engine |
+| Terminal UI | ratatui (D-090) | Engine API, or an engine of its own that it can hand to a daemon on quitting (D-228) |
 | CLI | The `tempest` binary's subcommands (D-079) | Engine API, or an embedded engine |
 | Tracker catalog | Same framework as the client web UI | Tracker server |
 | Simulation results UI | Same framework as the client web UI | The results API over the DuckDB results database (D-204) |
@@ -41,7 +41,8 @@ These apply to both the TUI and the client web UI (D-118).
 | Organizing | Tags (many per transfer), categories (one per transfer, each with a default save folder), move storage |
 | Finding | Filter by name or tag; filter by status; sort by name, size, progress, status, ↓, ↑, peers serving us, time left, ratio, date added; custom columns; saved views |
 | Sharing | Create a bundle from a file or folder and get a `tempest:` link |
-| Notifications | On completion and on error |
+| Notifications | A notice in each UI on completion and on error (D-226) |
+| Network defaults | Port mapping, relays from trackers and LAN discovery, each a switch with a sentence on what it shares; the first run says it once (D-227) |
 
 **Statuses:** downloading, sharing, stalled, queued, stopped, completed, errored, checking, moving.
 
@@ -148,6 +149,8 @@ The key map in outline:
 | Detail | `tab` or `h`/`l` tabs, `j`/`k` scroll, `c` chunk map, `g` rates chart; the transfer and queue keys still apply |
 | Share | `a` fills in the form and `enter` shares; `j`/`k` choose a share, `y` copy its link, `enter` show it in Transfers |
 | Catalog, Settings | `j`/`k` move, `tab` next section, `enter` change, `a` add, `x` remove or reset |
+
+Quitting a TUI that runs its own engine, while transfers are active, asks whether to hand them to a daemon or stop them (D-228). `tempest web` asks the same on Ctrl-C.
 
 The TUI is minimal but powerful, giving quick access to every essential feature.
 

@@ -31,15 +31,16 @@ pub struct ShareArgs {
     /// A description of the bundle.
     #[arg(long, default_value = "")]
     comment: String,
-    /// Serve it from here even if a daemon is running, as --created, --tracker, --port,
-    /// --identity, --bind, --relay, --no-lan and --lan-port also do.
+    /// Serve it from here even if a daemon is running, as --port, --identity, --bind, --relay,
+    /// --no-lan and --lan-port also do.
     #[arg(long)]
     standalone: bool,
     /// The bundle's creation time, in milliseconds since the Unix epoch. Defaults to now.
     #[arg(long, allow_hyphen_values = true)]
     created: Option<i64>,
     /// A tracker to announce the bundle to, and to name in the link, such as
-    /// `https://tracker.example.org`. Repeat for more. The daemon uses its config's trackers.
+    /// `https://tracker.example.org`. Repeat for more. A daemon also uses its config's
+    /// trackers.
     #[arg(long, value_name = "URL")]
     tracker: Vec<String>,
     /// List the bundle on the catalog of the tracker at this URL, signing in with this
@@ -71,11 +72,7 @@ impl ShareArgs {
 
     /// Whether to serve from here rather than through a daemon.
     fn standalone(&self) -> bool {
-        self.standalone
-            || self.created.is_some()
-            || !self.tracker.is_empty()
-            || self.port.is_some()
-            || self.peer.any_given()
+        self.standalone || self.port.is_some() || self.peer.any_given()
     }
 }
 
@@ -119,6 +116,8 @@ async fn through_daemon(client: &ApiClient, args: &ShareArgs) -> Result<()> {
         path: Some(path),
         name: args.name.clone(),
         comment: args.comment.clone(),
+        trackers: args.trackers(),
+        created: args.created,
         ..AddRequest::default()
     };
     let added = client.add(&request).await?;

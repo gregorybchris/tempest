@@ -32,8 +32,10 @@ pub(super) fn categories(names: &[&str]) -> BTreeMap<String, PathBuf> {
 
 /// The engine's default settings.
 pub(super) fn settings() -> SettingsView {
+    let mut settings = tempest_engine::EngineConfig::default();
+    settings.ui.network_explained = true;
     SettingsView {
-        settings: tempest_engine::EngineConfig::default(),
+        settings,
         changed: BTreeMap::new(),
         restart_required: Vec::new(),
         alternative_limits_active: false,
@@ -802,4 +804,115 @@ fn hints_follow_the_screen() {
 
 fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
     tempest_engine::TransferInfo::example(seed, name, position)
+}
+
+#[test]
+fn completing_or_failing_shows_a_notice_once() {
+    let mut app = three();
+    assert_eq!(app.notice, None, "the first look says nothing");
+
+    let mut done = app.model.transfers()[0].clone();
+    done.status = Status::Sharing;
+    done.completed = Some(1);
+    app.apply(ApiEvent::Transfer(Box::new(done.clone())));
+    let notice = app.notice.take().unwrap();
+    assert_eq!(
+        notice.text,
+        "alpha is complete. Every chunk is on disk and checked."
+    );
+    assert!(!notice.error);
+    // The same state again says nothing more.
+    app.apply(ApiEvent::Transfer(Box::new(done)));
+    assert_eq!(app.notice, None);
+
+    let mut failed = app.model.transfers()[1].clone();
+    failed.status = Status::Errored {
+        reason: "The disk is full.".to_owned(),
+    };
+    app.apply(ApiEvent::Transfer(Box::new(failed)));
+    let notice = app.notice.take().unwrap();
+    assert_eq!(notice.text, "beta stopped. The disk is full.");
+    assert!(notice.error);
+
+    // A transfer that arrives already complete, such as a new share, is not news.
+    let mut new = transfer(9, "delta", 3);
+    new.completed = Some(1);
+    app.apply(ApiEvent::Transfer(Box::new(new)));
+    assert_eq!(app.notice, None);
+}
+
+#[test]
+fn the_first_run_explains_the_network_defaults_once() {
+    let mut app = App::new(Origin::Daemon, Theme::default());
+    let mut view = settings();
+    view.settings.ui.network_explained = false;
+    let _ = app.load_settings();
+    let reply = Reply::Loaded(Box::new(view.clone()), categories(&[]));
+    let recorded = app.finished(&Request::Settings, Ok(reply)).unwrap();
+    assert_eq!(app.modal, Some(Modal::Network));
+    let Request::ChangeSettings { changes, .. } = &recorded else {
+        panic!("{recorded:?}");
+    };
+    assert_eq!(changes.get("ui.network_explained"), Some(&json!(true)));
+
+    // Any key closes it, and the engine's answer settles it.
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(app.modal, None);
+    view.settings.ui.network_explained = true;
+    let answer = Reply::Settings(Box::new(view.clone()));
+    app.finished(&recorded, Ok(answer));
+    let _ = app.load_settings();
+    let reply = Reply::Loaded(Box::new(view), categories(&[]));
+    assert_eq!(app.finished(&Request::Settings, Ok(reply)), None);
+    assert_eq!(app.modal, None);
+}
+
+#[test]
+fn quitting_an_embedded_engine_asks_what_to_do_with_active_transfers() {
+    // On a daemon, quitting leaves the transfers alone.
+    let mut app = three();
+    press(&mut app, KeyCode::Char('q'));
+    assert!(app.quit);
+    assert_eq!(app.exit(), Exit::Stop);
+
+    // On the TUI's own engine, two transfers are active, and the question is asked.
+    let mut app = three();
+    app.origin = Origin::Embedded;
+    assert_eq!(app.active(), 2);
+    press(&mut app, KeyCode::Char('q'));
+    assert!(!app.quit);
+    assert_eq!(app.modal, Some(Modal::Quit { active: 2 }));
+    // Esc stays; other keys leave the question open.
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.modal, Some(Modal::Quit { active: 2 }));
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.quit && app.modal.is_none());
+
+    press(&mut app, KeyCode::Char('q'));
+    press(&mut app, KeyCode::Char('d'));
+    assert!(app.quit);
+    assert_eq!(app.exit(), Exit::HandOff);
+
+    let mut app = three();
+    app.origin = Origin::Embedded;
+    press(&mut app, KeyCode::Char('q'));
+    press(&mut app, KeyCode::Char('s'));
+    assert!(app.quit);
+    assert_eq!(app.exit(), Exit::Stop);
+
+    // With nothing active, there is nothing to ask.
+    let mut app = app_with(vec![transfer(1, "idle", 0)]);
+    app.origin = Origin::Embedded;
+    press(&mut app, KeyCode::Char('q'));
+    assert!(app.quit);
+
+    // Ctrl-C asks too, and a second one stops everything.
+    let mut app = three();
+    app.origin = Origin::Embedded;
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    app.key(ctrl_c);
+    assert!(!app.quit && app.modal.is_some());
+    app.key(ctrl_c);
+    assert!(app.quit);
+    assert_eq!(app.exit(), Exit::Stop);
 }

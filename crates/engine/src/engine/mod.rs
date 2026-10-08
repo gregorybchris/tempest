@@ -174,6 +174,8 @@ pub struct AddOptions {
     pub tags: BTreeSet<String>,
     /// Add it stopped rather than started.
     pub stopped: bool,
+    /// Trackers to find peers through, besides those the link names and the config's.
+    pub trackers: Vec<String>,
 }
 
 /// How to share a file or folder.
@@ -187,6 +189,10 @@ pub struct ShareOptions {
     pub category: Option<String>,
     /// The transfer's tags.
     pub tags: BTreeSet<String>,
+    /// Trackers to announce to and name in the link, besides the config's.
+    pub trackers: Vec<String>,
+    /// The bundle's creation time, in milliseconds since the Unix epoch. Defaults to now.
+    pub created: Option<i64>,
 }
 
 /// A handle to the engine. Clones share it. Once every handle is dropped the engine shuts down
@@ -208,7 +214,7 @@ type Reply<T> = oneshot::Sender<Result<T, EngineError>>;
 enum Command {
     List(oneshot::Sender<Vec<TransferInfo>>),
     Inside(BundleId, Reply<Inside>),
-    AddLink(Link, AddOptions, Reply<TransferInfo>),
+    AddLink(Link, Box<AddOptions>, Reply<TransferInfo>),
     AddShare(Box<NewShare>, Reply<TransferInfo>),
     Start(BundleId, bool, Reply<TransferInfo>),
     Stop(BundleId, Reply<TransferInfo>),
@@ -562,8 +568,16 @@ impl Engine {
         link: &str,
         options: AddOptions,
     ) -> Result<TransferInfo, EngineError> {
-        let link: Link = link.parse()?;
-        self.call(|reply| Command::AddLink(link, options, reply))
+        let mut link: Link = link.parse()?;
+        for tracker in &options.trackers {
+            if !crate::config::is_http_url(tracker) {
+                return Err(EngineError::InvalidTracker(tracker.clone()));
+            }
+            if !link.trackers.contains(tracker) {
+                link.trackers.push(tracker.clone());
+            }
+        }
+        self.call(|reply| Command::AddLink(link, Box::new(options), reply))
             .await
     }
 
@@ -574,10 +588,15 @@ impl Engine {
         path: &Path,
         options: ShareOptions,
     ) -> Result<TransferInfo, EngineError> {
+        if let Some(tracker) = (options.trackers.iter()).find(|t| !crate::config::is_http_url(t)) {
+            return Err(EngineError::InvalidTracker(tracker.clone()));
+        }
         let info = BundleInfo {
             name: options.name.clone(),
             comment: options.comment.clone(),
-            created: unix_millis(SystemTime::now()),
+            created: options
+                .created
+                .unwrap_or_else(|| unix_millis(SystemTime::now())),
         };
         let path = path.to_owned();
         let built = tokio::task::spawn_blocking(move || {

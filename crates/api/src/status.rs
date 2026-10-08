@@ -33,6 +33,12 @@ pub enum Status {
 }
 
 impl Status {
+    /// Whether it runs or will run once the queue lets it: every status but stopped, completed
+    /// and errored.
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::Stopped | Self::Completed | Self::Errored { .. })
+    }
+
     /// The status's name, as the API's `state` field gives it.
     pub fn name(&self) -> &'static str {
         match self {

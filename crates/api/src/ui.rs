@@ -21,6 +21,9 @@ pub struct UiSettings {
     /// No glow, scanlines or animation in the web UI.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub clean: bool,
+    /// The first-run explanation of the network defaults was shown (D-227).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub network_explained: bool,
 }
 
 impl Default for UiSettings {
@@ -31,6 +34,7 @@ impl Default for UiSettings {
             views: Vec::new(),
             scanlines: false,
             clean: false,
+            network_explained: false,
         }
     }
 }

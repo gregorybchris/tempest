@@ -8,8 +8,10 @@ mod request;
 mod rows;
 mod share;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+
+use serde_json::json;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tempest_engine::api::QueueStep;
@@ -34,6 +36,7 @@ use crate::input::Input;
 use crate::model::Model;
 use crate::prefs;
 use crate::theme::Theme;
+use tempest_api::notices::{self, Seen};
 
 /// The app's areas (D-136), in navigation order. Transfers is home.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +163,15 @@ pub enum Origin {
     Embedded,
 }
 
+/// What the engine should do once the TUI has quit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exit {
+    /// Stop with the TUI.
+    Stop,
+    /// Carry on its active transfers in a daemon.
+    HandOff,
+}
+
 /// A key and what it does, as the hint bar shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Hint {
@@ -249,8 +261,12 @@ pub struct App {
     settings_row: usize,
     /// A message about something that just happened.
     pub notice: Option<Notice>,
+    /// What each transfer showed when last looked at, to notice when one completes or fails.
+    seen: HashMap<BundleId, Seen>,
     /// Whether the user asked to quit.
     pub quit: bool,
+    /// Whether quitting hands the active transfers to a daemon rather than stopping them.
+    pub hand_off: bool,
 }
 
 impl App {
@@ -284,7 +300,9 @@ impl App {
             catalog_row: 0,
             settings_row: 0,
             notice: None,
+            seen: HashMap::new(),
             quit: false,
+            hand_off: false,
         }
     }
 
@@ -416,11 +434,43 @@ impl App {
     /// Takes in an event from the engine, keeping the cursor on a transfer that is shown.
     pub fn apply(&mut self, event: ApiEvent) {
         let cursor = self.cursor();
+        let touched = match &event {
+            ApiEvent::Transfer(transfer) => Some(transfer.id),
+            ApiEvent::Removed(removed) => {
+                self.seen.remove(&removed.id);
+                None
+            }
+            _ => None,
+        };
+        let whole = matches!(event, ApiEvent::Snapshot(_) | ApiEvent::Reset(_));
         self.model.apply(event);
+        self.notice_changes(touched, whole);
         self.keep_cursor(cursor);
         // With nothing selected, there is nothing to look inside.
         if self.selected.is_none() {
             self.view = View::List;
+        }
+    }
+
+    /// Tells the user of a transfer that completed or failed (D-226). `touched` is the one an
+    /// event changed; `whole` means the event replaced every transfer, which says nothing the
+    /// first time.
+    fn notice_changes(&mut self, touched: Option<BundleId>, whole: bool) {
+        let transfers = self.model.transfers();
+        let after = match touched {
+            Some(id) => transfers.iter().filter(|t| t.id == id).cloned().collect(),
+            None if whole => transfers.to_vec(),
+            None => return,
+        };
+        let told = notices::notices(&self.seen, &after);
+        if whole {
+            self.seen.clear();
+        }
+        self.seen.extend(after.iter().map(|t| (t.id, Seen::of(t))));
+        for notice in told {
+            let (title, body) = notice.text();
+            let failed = matches!(notice, notices::Notice::Failed { .. });
+            self.notify(format!("{title}. {body}"), failed);
         }
     }
 
@@ -489,6 +539,17 @@ impl App {
         self.settings_age = 0;
     }
 
+    /// On the first run, shows what the network defaults share, and records that it did
+    /// (D-227). Returns the request that records it.
+    fn explain_network(&mut self) -> Option<Request> {
+        let explained = self.settings.as_ref()?.settings.ui.network_explained;
+        if explained || self.modal.is_some() {
+            return None;
+        }
+        self.modal = Some(Modal::Network);
+        Some(self.change_settings([(prefs::NETWORK_EXPLAINED, json!(true))], None))
+    }
+
     fn take_categories(&mut self, categories: BTreeMap<String, PathBuf>) {
         let names: Vec<String> = categories.keys().cloned().collect();
         self.offer_categories(&names);
@@ -528,6 +589,32 @@ impl App {
     /// What has been fetched from inside the selected transfer.
     pub fn inside(&self) -> Option<&Inside> {
         self.inside.of(self.selected?)
+    }
+
+    /// The number of transfers that run or wait to run.
+    pub fn active(&self) -> usize {
+        (self.model.transfers().iter())
+            .filter(|transfer| transfer.status.is_active())
+            .count()
+    }
+
+    /// Quits, or first asks what to do with the active transfers when the engine runs only
+    /// for this TUI (D-228).
+    fn ask_to_quit(&mut self) {
+        let active = self.active();
+        match self.origin {
+            Origin::Embedded if active > 0 => self.modal = Some(Modal::Quit { active }),
+            _ => self.quit = true,
+        }
+    }
+
+    /// What the engine should do now that the TUI has quit.
+    pub fn exit(&self) -> Exit {
+        if self.hand_off {
+            Exit::HandOff
+        } else {
+            Exit::Stop
+        }
     }
 
     /// Shows a message about something that just happened.
@@ -582,6 +669,7 @@ impl App {
             Ok(Reply::Loaded(view, categories)) => {
                 self.take_settings(*view);
                 self.take_categories(categories);
+                next = self.explain_network();
             }
             Ok(reply) => {
                 if let Reply::Settings(view) = &reply {
@@ -609,7 +697,14 @@ impl App {
     /// Handles a key press, returning what to ask for, if anything.
     pub fn key(&mut self, key: KeyEvent) -> Option<Request> {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            self.quit = true;
+            // A second one, with the question open, stops everything.
+            match self.modal {
+                Some(Modal::Quit { .. }) => self.quit = true,
+                _ => {
+                    self.modal = None;
+                    self.ask_to_quit();
+                }
+            }
             return None;
         }
         if let Some(modal) = self.modal.take() {
@@ -749,7 +844,7 @@ impl App {
             Command::PreviousArea => return self.go(self.area.step(-1)),
             Command::Theme => return self.next_theme(),
             Command::Help => self.modal = Some(Modal::Help { scroll: 0 }),
-            Command::Quit => self.quit = true,
+            Command::Quit => self.ask_to_quit(),
 
             transfer_command => return self.run_on_selected(transfer_command),
         }

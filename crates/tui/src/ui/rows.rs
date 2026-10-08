@@ -26,7 +26,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(u16::from(!restart.is_empty())),
         Constraint::Min(1),
         Constraint::Length(1),
-        Constraint::Length(2),
+        Constraint::Length(3),
         Constraint::Length(1),
     ])
     .areas(area);
@@ -115,7 +115,7 @@ fn draw_sections(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// `text` broken into lines of at most `width` columns, between words where it can be.
-fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut line = String::new();
     for word in text.split_whitespace() {
@@ -202,10 +202,17 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
         ""
     };
     let room = usize::from(area.width).saturating_sub(1);
-    let lines = vec![
-        Line::styled(format!(" {}", fit(&help, room)), Style::new().fg(theme.fg)),
-        Line::styled(fit(legend, room + 1), Style::new().fg(theme.dim)),
-    ];
+    // A sentence may take two lines; the legend has the last.
+    let mut lines: Vec<Line> = wrap(&help, room)
+        .into_iter()
+        .take(2)
+        .map(|line| Line::styled(format!(" {line}"), Style::new().fg(theme.fg)))
+        .collect();
+    lines.resize(2, Line::raw(""));
+    lines.push(Line::styled(
+        fit(legend, room + 1),
+        Style::new().fg(theme.dim),
+    ));
     frame.render_widget(Paragraph::new(lines), area);
 }
 

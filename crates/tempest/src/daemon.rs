@@ -7,6 +7,7 @@ use tempest_engine::{Engine, EngineConfig, EngineError};
 use tempest_protocol::RelayIdentity;
 
 use crate::engine::EngineArgs;
+use crate::handoff::{self, Choice, Daemon};
 
 #[derive(Debug, clap::Args)]
 pub struct DaemonArgs {
@@ -39,13 +40,20 @@ pub fn daemon(args: DaemonArgs) -> Result<()> {
     }
     config.relays.known.extend(args.relay);
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
-    runtime.block_on(run(config, |_| {}))
+    runtime.block_on(run(config, |_| {}, None))
 }
 
 /// Runs the engine and serves its API and the web UI until Ctrl-C, calling `ready` with the
-/// API's URL once it serves.
-pub async fn run(config: EngineConfig, ready: impl FnOnce(&str)) -> Result<()> {
+/// API's URL once it serves. With `hand_off`, Ctrl-C while transfers are active asks whether to
+/// start a daemon to carry them on once the engine has stopped (D-228).
+pub async fn run(
+    config: EngineConfig,
+    ready: impl FnOnce(&str),
+    hand_off: Option<Daemon>,
+) -> Result<()> {
     let data_dir = config.data_dir()?;
+    let handing = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let start_config = config.clone();
     {
         let engine = match Engine::open(config).await {
             Err(EngineError::Busy(dir)) => {
@@ -75,8 +83,18 @@ pub async fn run(config: EngineConfig, ready: impl FnOnce(&str)) -> Result<()> {
         ready(server.url());
         eprintln!("running; press Ctrl-C to stop");
         let stopping = engine.clone();
+        let handing_over = handing.clone();
+        let asks = hand_off.is_some();
         let shutdown = async move {
             interrupted().await;
+            if asks {
+                let active = (stopping.list().await.iter())
+                    .filter(|t| t.status.is_active())
+                    .count();
+                if active > 0 && handoff::ask(active).await == Choice::HandOff {
+                    handing_over.store(active, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             eprintln!("stopping");
             // Stops every transfer, tells trackers and peers, and saves where each got to.
             // Event streams end with it, so the API can finish.
@@ -87,8 +105,13 @@ pub async fn run(config: EngineConfig, ready: impl FnOnce(&str)) -> Result<()> {
             .serve(engine, shutdown)
             .await?;
         eprintln!("stopped");
-        Ok(())
     }
+    let handed = handing.load(std::sync::atomic::Ordering::Relaxed);
+    if let (Some(daemon), true) = (hand_off, handed > 0) {
+        let url = daemon.start(&start_config).await?;
+        handoff::report(handed, &url);
+    }
+    Ok(())
 }
 
 /// Waits for Ctrl-C, or on Unix for SIGTERM too.

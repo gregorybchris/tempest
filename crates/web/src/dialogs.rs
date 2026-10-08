@@ -7,6 +7,7 @@ use leptos::prelude::*;
 use tempest_api::TransferInfo;
 use tempest_api::columns::Column;
 use tempest_api::finding::Finding;
+use tempest_api::network;
 use tempest_api::prefs;
 use tempest_api::settings::parse_tags;
 use tempest_api::ui::SavedView;
@@ -40,6 +41,7 @@ pub fn Dialogs() -> impl IntoView {
         Dialog::Views => Some(view! { <Views /> }.into_any()),
         // The keys of where the keyboard was when it opened.
         Dialog::Help => Some(view! { <Help scope=ui.scope_now() /> }.into_any()),
+        Dialog::Network => Some(view! { <Network /> }.into_any()),
     }
 }
 
@@ -656,6 +658,28 @@ fn Help(scope: Scope) -> impl IntoView {
                     {rows}
                 </tbody>
             </table>
+        </Modal>
+    }
+}
+
+/// What the network defaults share, said once on the first run (D-227).
+#[component]
+fn Network() -> impl IntoView {
+    view! {
+        <Modal
+            open=true
+            on_close=close
+            title="Before you start"
+            actions=move || view! {
+                <Button kind=ButtonKind::Primary on_click=close>"Got it"</Button>
+            }
+        >
+            <p>{network::INTRO}</p>
+            <ul class="network">
+                {network::FEATURES.map(|feature| view! {
+                    <li><strong>{feature.label}"."</strong>" "{feature.says}</li>
+                }).collect_view()}
+            </ul>
         </Modal>
     }
 }

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use tempest_api::TransferInfo;
 use tempest_api::columns::Column;
+use tempest_api::network;
 use tempest_api::schedule::Schedule;
 use tempest_api::settings::{SettingsInfo, ValueKind, keys};
 use tempest_api::units;
@@ -403,6 +404,8 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
     }
     sections.push(tags);
 
+    sections.push(network_section(info));
+
     let ui = &settings.ui;
     let on = |on: bool| if on { "on" } else { "off" };
     let columns: Vec<&str> = extras.columns.iter().map(|c| c.title()).collect();
@@ -440,6 +443,34 @@ fn count_input(limit: Option<u32>) -> String {
     limit.map(|n| n.to_string()).unwrap_or_default()
 }
 
+/// The network defaults, each a switch with a sentence on what it shares (D-227).
+fn network_section(info: &SettingsInfo) -> Section {
+    let settings = &info.settings;
+    let rows = network::FEATURES
+        .iter()
+        .map(|feature| {
+            let on = match feature.key {
+                keys::PORT_MAPPING => settings.port_mapping.enabled,
+                keys::LAN => settings.lan.enabled,
+                _ => settings.relays.from_trackers,
+            };
+            setting(
+                info,
+                feature.key,
+                feature.label,
+                Control::Toggle {
+                    key: feature.key,
+                    on,
+                },
+            )
+            .value(if on { "on" } else { "off" })
+            .help(feature.says)
+        })
+        .collect();
+    Section::new("network", "Network", rows)
+        .note("On by default so direct sends work behind home routers.")
+}
+
 /// The Catalog area's sections. What trackers list is browsed in a later release (roadmap
 /// M9); the area says so.
 pub fn catalog_sections(info: &SettingsInfo) -> Vec<Section> {
@@ -456,23 +487,7 @@ pub fn catalog_sections(info: &SettingsInfo) -> Vec<Section> {
             .help("Every transfer announces to it.")
         })
         .collect();
-    let mut relays = vec![
-        setting(
-            info,
-            keys::RELAYS_FROM_TRACKERS,
-            "Use relays trackers suggest",
-            Control::Toggle {
-                key: keys::RELAYS_FROM_TRACKERS,
-                on: settings.relays.from_trackers,
-            },
-        )
-        .value(if settings.relays.from_trackers {
-            "on"
-        } else {
-            "off"
-        })
-        .help("Also pick a home relay from those the trackers recommend."),
-    ];
+    let mut relays: Vec<Row> = Vec::new();
     relays.extend(settings.relays.known.iter().map(|relay| {
         Row::new(
             format!("relay:{relay}"),
@@ -576,6 +591,8 @@ mod tests {
                 "sharing": { "ratio": 2.0, "time": "12h", "action": "stop" },
                 "trackers": ["https://tracker.example.org/announce"],
                 "relays": { "known": [], "from_trackers": true },
+                "port_mapping": { "enabled": true },
+                "lan": { "enabled": false },
                 "ui": { "theme": "amber", "scanlines": true }
             },
             "changed": { "limits.download": 2_500_000 },
@@ -640,7 +657,29 @@ mod tests {
             "https://tracker.example.org/announce"
         );
         assert_eq!(sections[0].adds, Some(Adds::Tracker));
-        assert_eq!(row(&sections, keys::RELAYS_FROM_TRACKERS).value, "on");
+        assert!(
+            sections
+                .iter()
+                .flat_map(|s| &s.rows)
+                .all(|r| r.id != keys::RELAYS_FROM_TRACKERS),
+            "its switch is in Settings"
+        );
+    }
+
+    #[test]
+    fn the_network_defaults_are_switches_with_a_sentence_each() {
+        let sections = settings_sections(&info(), &extras());
+        let on = |key| match &row(&sections, key).control {
+            Control::Toggle { on, .. } => *on,
+            other => panic!("{other:?}"),
+        };
+        assert!(on(keys::PORT_MAPPING));
+        assert!(on(keys::RELAYS_FROM_TRACKERS));
+        assert!(!on(keys::LAN));
+        assert_eq!(row(&sections, keys::LAN).value, "off");
+        for feature in network::FEATURES {
+            assert_eq!(row(&sections, feature.key).help, feature.says);
+        }
     }
 
     #[test]

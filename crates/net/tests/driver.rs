@@ -721,3 +721,92 @@ async fn connections_waiting_for_hello_are_bounded_per_source() {
     })
     .await;
 }
+
+/// Whether `event` is the closing of a connection as a duplicate, by this peer if `local`, or by
+/// the other.
+fn closed_as_duplicate(event: &EventKind, local: bool) -> bool {
+    match event {
+        EventKind::Closed {
+            cause: CloseCause::Local { reason, .. },
+            ..
+        } => local && *reason == GoodbyeReason::Duplicate,
+        EventKind::Closed {
+            cause: CloseCause::Remote { reason, .. },
+            ..
+        } => !local && *reason == GoodbyeReason::Duplicate,
+        _ => false,
+    }
+}
+
+/// Two downloaders dial each other at the same moment (protocol/connections.md, Duplicate
+/// connections): the one with the lower peer ID closes one connection, the other waits for its
+/// choice, and the one left carries the transfer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn peers_dialing_each_other_keep_one_connection() {
+    within(async {
+        let source = tempfile::tempdir().unwrap();
+        let manifest = sample_bundle(source.path());
+        let seeder = start_node(config());
+        let _seeding = share(&seeder, source.path(), &manifest).await;
+
+        let targets = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        // They keep sharing, so the lower peer stays to serve the higher one once complete.
+        let mut keep_sharing = config();
+        keep_sharing.session.lingering.keep_sharing = true;
+        let nodes = [start_node(keep_sharing.clone()), start_node(keep_sharing)];
+        let mut handles = Vec::new();
+        for (node, target) in nodes.iter().zip(&targets) {
+            let handle = node
+                .download(manifest.bundle_id(), target.path(), Vec::new())
+                .await
+                .unwrap();
+            handles.push(handle);
+        }
+        let ids = nodes.each_ref().map(|node| node.endpoint().peer_id());
+        let (lower, higher) = if ids[0] < ids[1] { (0, 1) } else { (1, 0) };
+
+        let mut lower_events = handles[lower].events.resubscribe();
+        let mut higher_events = handles[higher].events.resubscribe();
+        // Each learns of the other at once, so both dial.
+        tokio::join!(
+            handles[0].add_peers(vec![record(nodes[1].endpoint())]),
+            handles[1].add_peers(vec![record(nodes[0].endpoint())]),
+        );
+        wait_for_event(&mut lower_events, |e| closed_as_duplicate(e, true)).await;
+        wait_for_event(&mut higher_events, |e| closed_as_duplicate(e, false)).await;
+        for handle in &mut handles {
+            handle
+                .status
+                .wait_for(|s| s.connections == 1)
+                .await
+                .unwrap();
+        }
+
+        // Only the lower peer learns of the seeder. The higher one gets the bundle through the
+        // connection kept, or from the seeder once peer exchange names it.
+        handles[lower]
+            .add_peers(vec![record(seeder.endpoint())])
+            .await;
+        for handle in &mut handles {
+            handle.status.wait_for(|s| s.complete).await.unwrap();
+        }
+        for target in &targets {
+            assert_same_tree(source.path(), target.path());
+        }
+
+        for node in &nodes {
+            node.shutdown().await;
+        }
+        // The higher peer never closed a connection as a duplicate.
+        let events = &mut handles[higher].events;
+        loop {
+            match events.recv().await {
+                Ok(event) => assert!(!closed_as_duplicate(&event.kind, true)),
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+        seeder.shutdown().await;
+    })
+    .await;
+}

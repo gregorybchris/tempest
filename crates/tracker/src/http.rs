@@ -147,7 +147,8 @@ mod tests {
                         peer.ip().to_string()
                     }),
                 )
-                .route("/slow", get(|| tokio::time::sleep(Duration::from_secs(60))));
+                .route("/slow", get(|| tokio::time::sleep(Duration::from_secs(60))))
+                .route("/large", get(|| async { vec![7u8; 8 << 20] }));
         tokio::spawn(serve(listener, router, limits, std::future::pending()));
         addr
     }
@@ -171,6 +172,13 @@ mod tests {
         let response = read_to_close(&mut stream).await;
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         assert!(response.ends_with("127.0.0.1"), "{response}");
+
+        // A large body arrives whole before the connection closes.
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let request = b"GET /large HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n";
+        stream.write_all(request).await.unwrap();
+        let response = read_to_close(&mut stream).await;
+        assert!(response.len() > 8 << 20, "{}", response.len());
     }
 
     #[tokio::test]

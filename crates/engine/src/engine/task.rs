@@ -1263,8 +1263,9 @@ impl EngineTask {
         let (Some(manifest), Some(dir)) = (&t.manifest, &t.row.content_dir) else {
             return;
         };
-        let new_dir = moved_dir(t.row.kind, manifest, dir, &folder);
-        let items: Vec<Item> = match (t.row.kind, manifest.single_file()) {
+        let single = single_file_in_place(&t.row, manifest);
+        let new_dir = moved_dir(t.row.kind, manifest, dir, &folder, single);
+        let items: Vec<Item> = match (t.row.kind, single) {
             // A download's folder holds only its bundle.
             (Kind::Download, None) => vec![Item {
                 from: dir.clone(),
@@ -1319,7 +1320,8 @@ impl EngineTask {
             .content_dir
             .clone()
             .expect("a moved transfer has a content folder");
-        let new_dir = moved_dir(t.row.kind, &manifest, &old_dir, &folder);
+        let single = single_file_in_place(&t.row, &manifest);
+        let new_dir = moved_dir(t.row.kind, &manifest, &old_dir, &folder, single);
         match result {
             Ok(()) => {
                 t.row.save_folder = folder;
@@ -1630,10 +1632,24 @@ fn notice(before: &TransferInfo, after: &TransferInfo) -> Option<Notice> {
     }
 }
 
+/// The file of a transfer that is one file stored directly in its save folder (or shared from
+/// its folder). A download kept in a folder of its own, as earlier versions made, is not.
+fn single_file_in_place<'a>(row: &TransferRow, manifest: &'a Manifest) -> Option<&'a str> {
+    let single = manifest.single_file()?;
+    (row.kind == Kind::Share || row.content_dir.as_ref() == Some(&row.save_folder))
+        .then_some(single)
+}
+
 /// Where a transfer's content folder is once moved from `dir` into `folder`. A single file goes
 /// straight into `folder`; anything else keeps its folder's name, as shares and downloads do alike.
-fn moved_dir(kind: Kind, manifest: &Manifest, dir: &Path, folder: &Path) -> PathBuf {
-    match (manifest.single_file(), kind) {
+fn moved_dir(
+    kind: Kind,
+    manifest: &Manifest,
+    dir: &Path,
+    folder: &Path,
+    single: Option<&str>,
+) -> PathBuf {
+    match (single, kind) {
         (Some(_), _) => folder.to_owned(),
         (None, Kind::Download) => folder.join(manifest.name()),
         (None, Kind::Share) => folder.join(dir.file_name().unwrap_or_default()),

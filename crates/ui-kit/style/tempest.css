@@ -784,6 +784,12 @@ a {
   white-space: nowrap;
 }
 
+/* Room for the selected row's accent bar, so the first column never touches it. */
+.table th:first-child,
+.table td:first-child {
+  padding-left: 10px;
+}
+
 .table th.num,
 .table td.num {
   text-align: right;

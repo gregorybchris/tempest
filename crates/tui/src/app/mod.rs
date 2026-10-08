@@ -614,6 +614,10 @@ impl App {
         if let Some(modal) = self.modal.take() {
             return self.modal_key(modal, key);
         }
+        // A visible notice is the topmost thing esc can close.
+        if key.code == KeyCode::Esc && self.notice.take().is_some() {
+            return None;
+        }
         if self.screen() == Screen::Share && self.share.editing {
             return self.share_key(key);
         }

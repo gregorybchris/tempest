@@ -526,6 +526,32 @@ fn help_lists_the_areas_sections() {
 }
 
 #[test]
+fn esc_dismisses_a_notice_before_doing_anything_else() {
+    let mut app = three();
+    press(&mut app, KeyCode::Char('/'));
+    type_keys(&mut app, "#mus");
+    press(&mut app, KeyCode::Enter);
+    let request = Request::Transfer(target(&app), Action::Start);
+    app.finished(&request, Err("The engine is shutting down.".to_owned()));
+    assert!(app.notice.is_some());
+
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.notice, None, "the first esc closes the notice");
+    assert_eq!(
+        visible_names(&app),
+        ["alpha"],
+        "and leaves the filter alone"
+    );
+
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(
+        visible_names(&app),
+        ["alpha", "beta", "gamma"],
+        "the next clears it"
+    );
+}
+
+#[test]
 fn notices_report_successes_and_failures_and_fade() {
     let mut app = three();
     let request = Request::Transfer(target(&app), Action::Start);

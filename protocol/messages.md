@@ -253,7 +253,7 @@ A peer closes a connection with QUIC's application CONNECTION_CLOSE frame ([RFC 
 
 - A receiver MUST treat an unknown reason code like `done`, and not as an error.
 - A peer that sends messages just before leaving, such as the last Peers, finishes its side of the control stream after them, waits for the other peer to acknowledge it, and then sends the Goodbye. A receiver MUST NOT treat a finished control stream as a violation; it expects a Goodbye. A peer SHOULD close the connection with `protocol_violation` if none follows within a few seconds.
-- Closing a connection ends all of its streams. Requests that were open on it are abandoned, and the requester MAY re-request them elsewhere.
+- Closing a connection ends all of its streams. Requests that were open on it are abandoned, and the requester MAY re-request them elsewhere. A peer that is leaving and waiting to send its Goodbye resets the request streams it won't answer; a requester MUST NOT treat such a reset as a violation if the Goodbye follows within a few seconds.
 - "Close the connection with `protocol_violation`" anywhere in this specification means a Goodbye with that reason.
 
 **Rationale.** QUIC discards stream data that hasn't been delivered when a connection closes. A goodbye sent as a stream message right before closing would usually be lost. The CONNECTION_CLOSE frame is delivered reliably as part of closing. A message that must arrive before it is sent on the control stream, which is then finished and acknowledged before the close.

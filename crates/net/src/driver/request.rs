@@ -8,6 +8,7 @@ use tempest_protocol::message::{MessageType, Reject, RejectReason, max_data_fram
 use tokio::sync::{mpsc, oneshot};
 
 use super::bundle::Report;
+use super::conn::LEAVE_GRACE;
 use crate::endpoint::Connection;
 use crate::limit::Throttle;
 use crate::storage::{Storage, StorageError};
@@ -72,28 +73,43 @@ impl Outgoing {
         };
 
         let report = match result {
-            Ok(Some(message)) => match self.response(message).await {
+            Ok(Some(message)) => Some(match self.response(message).await {
                 Ok(response) => Report::Response {
                     conn: self.conn,
                     request: self.request,
                     response,
                 },
                 Err(error) => Report::StorageFailed(error),
-            },
-            Ok(None) => self.violation("a request stream ended without a response"),
+            }),
+            Ok(None) => {
+                self.unanswered("a request stream ended without a response")
+                    .await
+            }
             Err(Failed::Write(WriteError::Stopped(_))) => {
-                self.violation("a request stream was stopped before it was answered")
+                self.unanswered("a request stream was stopped before it was answered")
+                    .await
             }
             Err(Failed::Read(ReadMessageError::Read(ReadError::Reset(_)))) => {
-                self.violation("a request stream was reset before it was answered")
+                self.unanswered("a request stream was reset before it was answered")
+                    .await
             }
             Err(Failed::Read(
                 error @ ReadMessageError::Decode(_) | error @ ReadMessageError::Truncated,
-            )) => self.violation(format!("on a request stream: {error}")),
+            )) => Some(self.violation(format!("on a request stream: {error}"))),
             // The connection is gone; its task reports that.
             Err(_) => return,
         };
-        let _ = self.inbox.send(report).await;
+        if let Some(report) = report {
+            let _ = self.inbox.send(report).await;
+        }
+    }
+
+    /// A request left unanswered is a violation, unless the other peer is closing the
+    /// connection: it gives up its open requests before its Goodbye, which can follow some
+    /// time later, once its last control messages are acknowledged (D-224).
+    async fn unanswered(&self, message: &str) -> Option<Report> {
+        let closing = tokio::time::timeout(2 * LEAVE_GRACE, self.connection.closed()).await;
+        closing.is_err().then(|| self.violation(message))
     }
 
     /// What the session hears for `message`. Data waits for the speed limits, then is
@@ -185,7 +201,10 @@ impl Incoming {
             message,
             answer,
         };
+        // A request given up on is reset, never finished: a finished stream with no response
+        // would read as a malformed answer.
         if self.inbox.send(request).await.is_err() {
+            let _ = send.reset(CANCELLED);
             return;
         }
         // Resolves when the requester stops the stream, or the connection ends.
@@ -197,7 +216,10 @@ impl Incoming {
             // A dropped sender means the session closed the connection.
             answer = answered => match answer {
                 Ok(answer) => answer,
-                Err(_) => return,
+                Err(_) => {
+                    let _ = send.reset(CANCELLED);
+                    return;
+                }
             },
         };
 

@@ -15,7 +15,7 @@ Tempest supports two kinds of use from the start: direct sends (sharing with a s
 
 Non-goals: anonymity. Public sharing exposes your IP address, and Tempest says so plainly. Connections between peers are always encrypted.
 
-See [decisions.md](decisions.md) for the log of design decisions and their rationale, [glossary.md](glossary.md) for terminology, [strategies.md](strategies.md) for the client's configurable download and upload strategies, [architecture.md](architecture.md) for how the code is organized, [api.md](api.md) for the engine's API, [tracker.md](tracker.md) for running a tracker and its catalog, [interfaces.md](interfaces.md) for the user interfaces and their quality bar, and [roadmap.md](roadmap.md) for the implementation milestones.
+See [decisions.md](decisions.md) for the log of design decisions and their rationale, [glossary.md](glossary.md) for terminology, [strategies.md](strategies.md) for the client's configurable download and upload strategies, [architecture.md](architecture.md) for how the code is organized, [api.md](api.md) for the engine's API, [tracker.md](tracker.md) for running a tracker and its catalog, [interfaces.md](interfaces.md) for the user interfaces and their quality bar, [roadmap.md](roadmap.md) for the implementation milestones, and [development.md](development.md) for how to build and test efficiently.
 
 ## Protocol
 

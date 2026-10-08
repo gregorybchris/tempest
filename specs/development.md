@@ -1,0 +1,30 @@
+# Development
+
+How to work on Tempest efficiently, for people and coding agents. These guidelines come from measuring where the M1–M9 implementation runs spent their time and disk.
+
+## Iterating
+
+- **Test the crate you're changing.** Use `cargo nextest run -p <crate>` while iterating. Run the whole workspace once, before committing.
+- **Don't wait on CI.** Commit, push and keep working. Check the result once at the end of a task, rather than polling a run until it finishes.
+- **Keep local fuzzing short.** 10–20 seconds per target is enough to catch regressions while iterating. CI and occasional dedicated runs go longer.
+- **Iterate on small simulations.** Use few seeds and small scenarios while developing. Run the golden baselines once per milestone, or when a change could affect speed.
+- **Re-run flaky tests a few times, not dozens.** If a test fails intermittently, reproduce it a handful of times, then fix the cause or record it as a known issue.
+- **Build the web UIs in development mode while iterating.** Save release builds (`--cargo-profile web`, which runs wasm-opt) for checking size and before committing.
+- **Avoid release builds** unless a test needs one or you're measuring performance.
+- **Don't run `cargo clean` mid-task.** It forces a full rebuild, which takes minutes. Prune stale artifacts instead (see below).
+
+## Disk
+
+The `target/` directory is a build cache, and cargo never deletes stale artifacts from it. A full build of the workspace is about 4 GB, but during a day of agent work it grew past 30 GB, from:
+- old compiled copies of crates and test binaries left behind by every change;
+- incremental caches;
+- separate builds for tests, release, WebAssembly and fuzzing.
+
+- **Prune regularly.** Delete artifacts that haven't been used for a few hours, either with `cargo sweep --time <hours>` or by removing old files from `target/debug/deps`. Do this when no build is running.
+- **Keep the compiler output for DuckDB's C++ library** (`target/debug/build`). It's the slowest part of a rebuild.
+- **Prefer one integration-test binary per crate.** Each file in `tests/` links into its own large executable. Grouping a crate's integration tests into a single `tests/main.rs` with modules saves disk and link time.
+
+## Parallel work
+
+- Independent tasks (for example, two separate web UIs) can run in parallel, each in its own git worktree. That cuts wall-clock time considerably compared with running them one after another.
+- Parallel builds in one working tree contend for the same `target/` lock and the same disk. Separate worktrees each need their own `target/`, so check free disk space before starting several.

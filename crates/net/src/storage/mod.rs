@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use tempest_core::ChunkSet;
@@ -343,16 +344,28 @@ pub fn save_manifest(path: &Path, bytes: &[u8]) -> Result<(), StorageError> {
         path: path.to_owned(),
         source,
     };
+    // A name of its own, so saves of the same manifest at once don't write into one file.
+    static SAVES: AtomicU64 = AtomicU64::new(0);
     let mut temporary = path.as_os_str().to_owned();
-    temporary.push(".partial");
+    let save = SAVES.fetch_add(1, Ordering::Relaxed);
+    temporary.push(format!(".{}-{save}.partial", std::process::id()));
     let temporary = PathBuf::from(temporary);
     let write = || -> io::Result<()> {
-        let mut file = std::fs::File::create(&temporary)?;
+        let mut file = std::fs::File::create_new(&temporary)?;
         io::Write::write_all(&mut file, bytes)?;
         file.sync_all()?;
-        std::fs::rename(&temporary, path)
+        std::fs::rename(&temporary, path)?;
+        // The rename itself lasts only once its directory is synced.
+        #[cfg(unix)]
+        if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+            std::fs::File::open(dir)?.sync_all()?;
+        }
+        Ok(())
     };
-    write().map_err(io_error)
+    write().map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        io_error(error)
+    })
 }
 
 /// Loads the manifest saved at `path`, checking that it is the manifest of `bundle_id`. This

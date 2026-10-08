@@ -10,8 +10,10 @@ use tempest_catalog_api::Category;
 use tempest_net::FetchLimits;
 use tempest_protocol::{BundleId, RelayIdentity};
 use tempest_relay::RelayConfig;
+use tempest_tracker::limits::Action;
 use tempest_tracker::{
-    Catalog, CatalogConfig, DEFAULT_PORT, FetcherConfig, Tracker, TrackerConfig,
+    Catalog, CatalogConfig, CatalogLimits, DEFAULT_PORT, FetcherConfig, Rate, Tracker,
+    TrackerConfig,
 };
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -111,6 +113,15 @@ struct CatalogArgs {
     #[arg(long, default_value_t = FetcherConfig::default().give_up.as_secs() / 3600,
         value_name = "HOURS", requires = "catalog")]
     fetch_give_up: u64,
+    /// Change a per-IP rate limit, as `action=BURST/SECONDS` (BURST at once, then one per
+    /// SECONDS) or `action=off`. Actions: challenge, sign-in, browse, publish, edit, vote,
+    /// comment, download. Repeat for more. See specs/tracker.md for the defaults.
+    #[arg(long, value_name = "ACTION=RATE", value_parser = parse_limit, requires = "catalog")]
+    catalog_limit: Vec<(Action, Option<Rate>)>,
+    /// The most sign-in codes outstanding for one IP address.
+    #[arg(long, default_value_t = CatalogConfig::default().max_challenges_per_ip,
+        value_name = "N", requires = "catalog")]
+    challenges_per_ip: usize,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -142,6 +153,25 @@ fn parse_category(text: &str) -> Result<Category, String> {
     Ok(Category::new(slug, name.trim()))
 }
 
+fn parse_limit(text: &str) -> Result<(Action, Option<Rate>), String> {
+    let (action, rate) = text
+        .split_once('=')
+        .ok_or("a limit is `action=BURST/SECONDS` or `action=off`, such as `comment=10/30`")?;
+    let action = action.parse()?;
+    if rate == "off" {
+        return Ok((action, None));
+    }
+    let numbers = rate
+        .split_once('/')
+        .and_then(|(burst, every)| Some((burst.parse().ok()?, every.parse().ok()?)));
+    let Some((burst, every)) = numbers else {
+        return Err(format!(
+            "the rate {rate:?} must be BURST/SECONDS, such as 10/30, or off"
+        ));
+    };
+    Ok((action, Some(Rate::new(burst, every))))
+}
+
 impl CatalogArgs {
     fn open(&self) -> Result<Option<Catalog>> {
         let Some(path) = &self.catalog else {
@@ -153,11 +183,23 @@ impl CatalogArgs {
                 true => CatalogConfig::default().categories,
                 false => self.category.clone(),
             },
+            max_challenges_per_ip: self.challenges_per_ip,
             ..CatalogConfig::default()
         };
         let catalog = Catalog::open(path, config)
             .with_context(|| format!("cannot open the catalog at {}", path.display()))?;
         Ok(Some(catalog))
+    }
+
+    fn limits(&self) -> CatalogLimits {
+        let mut limits = CatalogLimits::default();
+        for &(action, rate) in &self.catalog_limit {
+            match rate {
+                Some(rate) => limits.rates.insert(action, rate),
+                None => limits.rates.remove(&action),
+            };
+        }
+        limits
     }
 
     fn fetcher(&self) -> FetcherConfig {
@@ -224,6 +266,7 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
             }
             tracker = tracker
                 .with_catalog(catalog)
+                .catalog_limits(args.catalog.limits())
                 .fetcher(args.catalog.fetcher())
                 .with_pages(assets::router(CATALOG_UI, CATALOG_UI_NOT_BUILT));
         }
@@ -277,4 +320,21 @@ async fn bind(ip: Option<IpAddr>, port: u16) -> Result<TcpListener> {
     }
     let error = last.expect("at least one candidate");
     Err(error).with_context(|| format!("cannot bind TCP port {port}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limits_parse() {
+        assert_eq!(
+            parse_limit("comment=5/60"),
+            Ok((Action::Comment, Some(Rate::new(5, 60))))
+        );
+        assert_eq!(parse_limit("sign-in=off"), Ok((Action::SignIn, None)));
+        for bad in ["comment", "comment=5", "comment=a/b", "talk=1/1"] {
+            assert!(parse_limit(bad).is_err(), "{bad}");
+        }
+    }
 }

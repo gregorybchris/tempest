@@ -27,6 +27,7 @@ The catalog's default categories follow this list; `--category` replaces them.
 - **Listing is opt-in (D-129).** A bundle appears only when its sharer publishes it, with `tempest share --publish` or `tempest catalog publish`, and only once the tracker has fetched its manifest from a peer sharing it (D-207). Publishers can edit and withdraw their listings.
 - **Accounts are keys (D-128).** People sign in by signing a code with their Tempest key; there are no passwords to store or leak. Sessions are kept as hashes (D-206).
 - **HTTPS** comes from a reverse proxy in front of the tracker; pass `--behind-proxy` so it reads clients' addresses and the host they reached from the proxy's headers.
+- **Rate limits:** the catalog limits each client IP (an IPv6 /64) per action: asking for sign-in codes, signing in and polling, browsing and searching, publishing new bundles, editing, voting, commenting, and counted downloads. Each allows a burst, then one request per interval; requests over it get `rate_limited` with `retry_after_secs`, except that an announce over the publish or download limit still succeeds but lists or counts nothing. One IP also holds only a few sign-in codes at once. The defaults are in [`limits.rs`](../crates/tracker/src/limits.rs); `--catalog-limit` and `--challenges-per-ip` change them.
 - **Backups:** the catalog file holds accounts, listings, votes, comments and download counts. The search index is rebuilt from it at startup (D-209).
 
 The catalog's UI is described in [interfaces.md](interfaces.md).

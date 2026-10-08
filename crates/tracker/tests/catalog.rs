@@ -12,7 +12,8 @@ use tempest_catalog_api::account::sign_in_message;
 use tempest_catalog_api::listing::Content;
 use tempest_protocol::tracker::{Signature, listing_message};
 use tempest_protocol::{BundleId, PeerId};
-use tempest_tracker::{Catalog, CatalogConfig, Tracker, TrackerConfig};
+use tempest_tracker::limits::Action;
+use tempest_tracker::{Catalog, CatalogConfig, CatalogLimits, Rate, Tracker, TrackerConfig};
 use tower::ServiceExt;
 
 const HOST: &str = "tracker.example.org";
@@ -722,4 +723,69 @@ async fn sorts_rank_by_swarm_votes_and_downloads() {
     let (paged, page) = search(&router, "sort=seeders&offset=1&limit=1").await;
     assert_eq!(paged, [2]);
     assert_eq!(page["total"], 3);
+}
+
+#[tokio::test]
+async fn requests_over_a_clients_limit_are_refused() {
+    let mut limits = CatalogLimits::none();
+    limits.rates.insert(Action::Challenge, Rate::new(2, 30));
+    limits.rates.insert(Action::Browse, Rate::new(1, 60));
+    let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
+    let router = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .behind_proxy(true)
+        .catalog_limits(limits)
+        .with_catalog(catalog)
+        .router();
+    let challenge = async |client: &str| {
+        let from = [("x-forwarded-for", client)];
+        call(
+            &router,
+            Method::POST,
+            "/catalog/v1/challenges",
+            &from,
+            Value::Null,
+        )
+        .await
+    };
+    // Behind a proxy, clients are told apart by the forwarded address.
+    for _ in 0..2 {
+        assert_eq!(challenge("203.0.113.5").await.status, StatusCode::OK);
+    }
+    let refused = challenge("203.0.113.5").await;
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(refused.body["error"], "rate_limited");
+    assert_eq!(refused.body["retry_after_secs"], 30);
+    assert_eq!(refused.headers[header::RETRY_AFTER], "30");
+    assert_eq!(challenge("203.0.113.6").await.status, StatusCode::OK);
+
+    // Each action has its own bucket.
+    let info = async || call(&router, Method::GET, "/catalog/v1/info", &[], Value::Null).await;
+    assert_eq!(info().await.status, StatusCode::OK);
+    assert_eq!(info().await.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn announces_over_the_limits_succeed_but_list_less() {
+    let mut limits = CatalogLimits::none();
+    limits.rates.insert(Action::Publish, Rate::new(1, 60));
+    let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
+    let tracker = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .catalog_limits(limits)
+        .with_catalog(catalog);
+    let router = tracker.router();
+    let alice = Key::new(1);
+    for n in 1..=2 {
+        let answer = announce_listed(&router, &alice, &bundle(n)).await;
+        assert_eq!(answer.status, StatusCode::OK);
+    }
+    // Only the first new bundle was listed. Asking again for a known one costs nothing.
+    let pending = || {
+        let catalog = tracker.catalog_handle().unwrap();
+        catalog.lock().unwrap().pending().unwrap()
+    };
+    assert_eq!(pending(), [(bundle(1), alice.id())]);
+    let answer = announce_listed(&router, &alice, &bundle(1)).await;
+    assert_eq!(answer.status, StatusCode::OK);
 }

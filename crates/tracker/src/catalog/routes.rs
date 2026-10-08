@@ -4,12 +4,19 @@
 //! [`SESSION_COOKIE`] a browser gets when it collects a session. Every body must be JSON with a
 //! JSON `Content-Type`, which a cross-site form can't send, and the cookie is `SameSite=Strict`;
 //! together they keep other sites from acting with a browser's session.
+//!
+//! Every route is rate limited per client IP ([`crate::limits`]), before its handler runs.
+
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::{BytesRejection, QueryRejection};
-use axum::extract::{DefaultBodyLimit, Path, Query, RawQuery, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::extract::{
+    ConnectInfo, DefaultBodyLimit, Extension, MatchedPath, Path, Query, RawQuery, Request, State,
+};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{delete, get, post, put};
 use serde::Deserialize;
@@ -22,6 +29,7 @@ use tempest_protocol::tracker::ErrorCode;
 use tempest_protocol::{BundleId, PeerId};
 
 use super::unix_now as now;
+use crate::limits::Action;
 use crate::server::{Tracker, json, refuse};
 use crate::swarms::Refusal;
 
@@ -31,7 +39,7 @@ const MAX_BODY: usize = 64 * 1024;
 type Answer = Result<Response, Refusal>;
 
 /// The catalog's routes, for a tracker that has a catalog.
-pub(crate) fn router() -> Router<Tracker> {
+pub(crate) fn router(tracker: &Tracker) -> Router<Tracker> {
     let route = |path: &str| format!("{PREFIX}{path}");
     Router::new()
         .route(&route("info"), get(info))
@@ -52,7 +60,45 @@ pub(crate) fn router() -> Router<Tracker> {
             get(comments).post(comment),
         )
         .route(&route("comments/{id}"), delete(delete_comment))
+        .route_layer(middleware::from_fn_with_state(tracker.clone(), limit))
         .layer(DefaultBodyLimit::max(MAX_BODY))
+}
+
+/// The client's IP address, which [`limit`] adds to every catalog request.
+#[derive(Debug, Clone, Copy)]
+struct ClientIp(IpAddr);
+
+/// The action a request to the route `path` with `method` counts as, if any.
+fn action(method: &Method, path: &str) -> Option<Action> {
+    let path = path.strip_prefix(PREFIX)?;
+    Some(match (method, path) {
+        (&Method::DELETE, "session") => return None,
+        (&Method::POST, "challenges") => Action::Challenge,
+        (&Method::POST, "challenges/poll" | "sessions") => Action::SignIn,
+        (&Method::PUT, "listings/{bundle}/vote") => Action::Vote,
+        (&Method::POST, "listings/{bundle}/comments") => Action::Comment,
+        (&Method::GET | &Method::HEAD, _) => Action::Browse,
+        _ => Action::Edit,
+    })
+}
+
+/// Refuses requests over the client's rate limit, and passes on the client's IP.
+async fn limit(State(tracker): State<Tracker>, mut request: Request, next: Next) -> Response {
+    // Without connect info, as when the router is called directly, every client is one.
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map_or(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)), |info| info.0);
+    let ip = tracker.observed_ip(peer, request.headers());
+    let matched = request.extensions().get::<MatchedPath>();
+    let action = matched.and_then(|path| action(request.method(), path.as_str()));
+    if let Some(action) = action
+        && let Err(refusal) = tracker.limit(action, ip)
+    {
+        return refuse(refusal);
+    }
+    request.extensions_mut().insert(ClientIp(ip));
+    next.run(request).await
 }
 
 fn answer(result: Answer) -> Response {
@@ -151,8 +197,11 @@ async fn info(State(tracker): State<Tracker>) -> Response {
     json(StatusCode::OK, &tracker.catalog().info())
 }
 
-async fn challenge(State(tracker): State<Tracker>) -> Response {
-    answer(tracker.catalog().challenge(now()).and_then(|c| ok(&c)))
+async fn challenge(
+    State(tracker): State<Tracker>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
+) -> Response {
+    answer(tracker.catalog().challenge(now(), ip).and_then(|c| ok(&c)))
 }
 
 async fn sign_in(

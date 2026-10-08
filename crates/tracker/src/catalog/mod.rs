@@ -15,6 +15,7 @@ pub mod search;
 pub mod store;
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -35,6 +36,7 @@ use tempest_protocol::{BundleId, Hash, PeerId};
 pub use search::SearchIndex;
 pub use store::{Store, StoreError};
 
+use crate::limits::client_key;
 use crate::swarms::Refusal;
 
 /// The length of a day, in seconds: downloads are counted by day.
@@ -56,6 +58,9 @@ pub struct CatalogConfig {
     pub invites_required: bool,
     /// How long a session lasts.
     pub session_lifetime: Duration,
+    /// The most sign-in challenges outstanding for one client IP (an IPv6 /64), so no one
+    /// client can fill the table.
+    pub max_challenges_per_ip: usize,
 }
 
 impl Default for CatalogConfig {
@@ -64,6 +69,7 @@ impl Default for CatalogConfig {
             categories: default_categories(),
             invites_required: false,
             session_lifetime: Duration::from_secs(30 * 24 * 60 * 60),
+            max_challenges_per_ip: 16,
         }
     }
 }
@@ -74,6 +80,8 @@ struct Pending {
     /// The SHA-256 of its poll secret.
     poll_hash: Vec<u8>,
     expires: u64,
+    /// The client that asked for it, as [`client_key`] groups them.
+    client: IpAddr,
     /// The session, once the code is signed, until it is collected.
     session: Option<Session>,
 }
@@ -211,9 +219,15 @@ impl Catalog {
 
     // Signing in.
 
-    /// A new sign-in challenge.
-    pub fn challenge(&mut self, now: u64) -> Result<Challenge, Refusal> {
+    /// A new sign-in challenge, for a client at `ip`.
+    pub fn challenge(&mut self, now: u64, ip: IpAddr) -> Result<Challenge, Refusal> {
         self.challenges.retain(|_, pending| pending.expires > now);
+        let client = client_key(ip);
+        let mine = self.challenges.values().filter(|p| p.client == client);
+        if mine.count() >= self.config.max_challenges_per_ip {
+            let refusal = Refusal::new(ErrorCode::RateLimited, "too many sign-in codes at once");
+            return Err(refusal.retry_after(Duration::from_secs(60)));
+        }
         if self.challenges.len() >= MAX_CHALLENGES {
             let refusal = Refusal::new(ErrorCode::Unavailable, "too many sign-ins at once");
             return Err(refusal.retry_after(Duration::from_secs(60)));
@@ -223,6 +237,7 @@ impl Catalog {
         let pending = Pending {
             poll_hash: sha256(&poll),
             expires: now + CHALLENGE_LIFETIME,
+            client,
             session: None,
         };
         // A repeated code, about one in 2^50, replaces an old challenge, which then fails.
@@ -379,6 +394,11 @@ impl Catalog {
             self.store.create_listing(bundle, key, now)?;
         }
         Ok(())
+    }
+
+    /// Whether `bundle` has a listing in any state.
+    pub fn knows_listing(&self, bundle: &BundleId) -> Result<bool, StoreError> {
+        Ok(self.store.listing_owner(bundle)?.is_some())
     }
 
     /// Lists `bundle` for `key`, or changes `key`'s listing of it. A withdrawn listing is listed

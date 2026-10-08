@@ -3362,7 +3362,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Views: browsing (`#/?q=…&category=…&tag=…&sort=…&offset=…`), a listing, its edit form, sign-in and the account with its listings. The search runs as it is typed, a moment after the last key, replacing the history entry; an answer that arrives after a newer request was sent is dropped. Facets and the old results stay while a new answer loads, dimmed.
 - The sign-in view asks for a challenge, shows the code and the command that signs it with the tracker's origin (and an invite when the catalog requires one), and polls every two seconds until the session's cookie is set or the code expires; then it returns to where the user was.
 - Keys come from one table, scoped by view: `/` search, `j`/`k`/`enter` move and open, `[`/`]` pages, `s` sort, `+`/`-` vote, `c` comment, `e` edit, `a` account, `T` theme, `esc` back. The theme defaults to green (D-135) until one is chosen.
-- `crates/tempest/tests/catalog_web.rs` drives headless Chrome through ChromeDriver: search with a typo, category and tag facets, the keyboard, and sign-in with `tempest catalog sign-in`. It passes with a note when the UI isn't built or `CHROMEDRIVER` isn't set; CI's web job sets both.
+- `crates/tempest/tests/catalog_web.rs` drives headless Chrome through ChromeDriver: search with a typo, category and tag facets, the keyboard, and sign-in with `tempest catalog sign-in`. It is ignored unless run explicitly (D-216).
 
 **Rationale:** Embedding keeps the one-binary promise, and hash routes need nothing from the tracker but `/`. Numbered pages give every result a link and work with `[`/`]`. Showing the command, with the origin the signer must use, turns a code into one paste. WebDriver needs no new dependencies or toolchains, and CI's runners already have ChromeDriver.
 
@@ -3460,3 +3460,37 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Attempts beyond a limit are refused without a handshake (QUIC `CONNECTION_REFUSED`), not closed with Goodbye.
 
 **Rationale:** Refusing costs no TLS work, which is the point of the limit. Before the handshake there is no authenticated channel to carry a Goodbye reason. A /64 is what one host commonly holds. The per-source default leaves room for one peer to open a connection per bundle for many bundles at once.
+
+---
+
+## D-217: Catalog rate limits
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The catalog had no rate limits. Anyone could request sign-in codes until the challenge table was full, which blocked sign-ins for everyone, and post comments, votes and edits, or inflate download counts with fresh peer IDs, as fast as the tracker answered. D-176 limits only announces, per peer.
+
+**Options:** **Key:** per account, which signing in with a fresh key evades; per client IP (chosen). **Algorithm:** fixed windows; a token bucket per action and client, kept as one time each, as in GCRA (chosen). **Over the limit on an announce:** refuse the announce; answer it but skip the catalog's part (chosen).
+
+**Decision:**
+
+- Every catalog route is limited per client IP, with a bucket per action: challenge, sign-in (signing and polling), browse (every GET), edit (other writes), vote and comment. Requests over a limit get 429 `rate_limited` with `retry_after_secs` and `Retry-After`, in the usual error body. Signing out isn't limited.
+- Announces count against two more: publish, only when they ask to list a bundle the catalog doesn't know yet, and download, for each counted `completed`. Over either, the announce succeeds but lists or counts nothing; a later announce asks again.
+- The client IP is the one announces observe, so `--behind-proxy` applies. IPv6 clients are grouped by /64.
+- Each IP holds at most 16 outstanding sign-in codes by default (`--challenges-per-ip`), under the global cap; codes still expire after ten minutes.
+- The limiter forgets idle clients when it reaches 100,000, and refuses new ones with `unavailable` while it can't. Limits are set with `--catalog-limit action=BURST/SECONDS` or `action=off`; the defaults live in `crates/tracker/src/limits.rs`.
+
+**Rationale:** Per-IP limits need no account and catch key churn. Defaults are generous enough for a browser polling every two seconds and a sharer publishing a hundred bundles at once. Refusing an announce over catalog work would cost the peer its swarm.
+
+---
+
+## D-218: The catalog browser test is ignored unless run explicitly
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** The browser test (D-210) passed with a note when `CHROMEDRIVER` was unset or the binary lacked the catalog UI, so a broken CI setup stayed green.
+
+**Options:** fail when an environment variable such as `TEMPEST_REQUIRE_BROWSER_TESTS` is set; mark the test `#[ignore]` and run it with `--ignored` where the environment exists (chosen).
+
+**Decision:** The test is `#[ignore]` with a reason. Run explicitly, it fails without ChromeDriver or the built-in UI. CI's web job runs it with `--ignored`.
+
+**Rationale:** An ignored test shows as ignored in every run, rather than as a pass, and needs no extra variable to remember. Plain `cargo test` still works anywhere.

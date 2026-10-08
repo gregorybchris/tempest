@@ -84,7 +84,7 @@ jobs:
       - name: Catalog browser test
         env:
           CHROMEDRIVER: ${{ env.CHROMEWEBDRIVER }}/chromedriver
-        run: cargo test -p tempest --test catalog_web --features tempest-sim/bundled-duckdb -- --nocapture
+        run: cargo test -p tempest --test catalog_web --features tempest-sim/bundled-duckdb -- --ignored --nocapture
       # The 1,536-cell live view benchmark (specs/interfaces.md), in headless Chrome.
       - name: Live view benchmark
         env:

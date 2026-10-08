@@ -3,8 +3,9 @@
 //! tag, and signing in by signing the page's code with `tempest catalog sign-in`.
 //!
 //! It needs the UI built into the binary (`trunk build` in `crates/catalog-web`) and
-//! ChromeDriver, named by `CHROMEDRIVER`; without either it says so and passes, so a plain
-//! `cargo test` works anywhere. CI's web job provides both.
+//! ChromeDriver, named by `CHROMEDRIVER`, so it is ignored by default. Run it with
+//! `cargo test -p tempest --test catalog_web -- --ignored`; it fails without either. CI's web
+//! job runs it so.
 
 #![cfg(unix)]
 
@@ -335,18 +336,17 @@ impl Drop for Browser {
 }
 
 #[test]
+#[ignore = "needs ChromeDriver in CHROMEDRIVER and the catalog UI built in; run with --ignored"]
 fn search_filter_and_sign_in_in_a_browser() {
-    let Ok(chromedriver) = std::env::var("CHROMEDRIVER") else {
-        eprintln!("skipped: set CHROMEDRIVER to ChromeDriver's path to run the browser test");
-        return;
-    };
+    let chromedriver = std::env::var("CHROMEDRIVER")
+        .expect("set CHROMEDRIVER to ChromeDriver's path to run the browser test");
     let dir = tempfile::tempdir().unwrap();
     let (_tracker, tracker) = start_tracker(dir.path());
     let (_, page) = http(&tracker, "GET", "/", None);
-    if !page.contains("tempest-catalog-web") {
-        eprintln!("skipped: this binary was built without the catalog UI");
-        return;
-    }
+    assert!(
+        page.contains("tempest-catalog-web"),
+        "this binary was built without the catalog UI: run trunk build in crates/catalog-web"
+    );
 
     // One publisher lists two bundles, another a third. The first share creates the shared
     // key file, so the second waits for it.

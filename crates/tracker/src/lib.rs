@@ -4,6 +4,7 @@
 //! - [`server`]: the HTTP endpoints over those swarms.
 //! - [`catalog`]: the optional catalog of bundles their sharers chose to list, with accounts,
 //!   votes and comments, served beside the peer-list routes.
+//! - [`limits`]: the catalog's rate limits per client IP.
 //! - [`fetcher`]: fetches pending listings' manifests from their swarms, which lists them.
 //!
 //! The tracker serves plain HTTP. HTTPS comes from a reverse proxy in front of it (see
@@ -11,11 +12,13 @@
 
 pub mod catalog;
 pub mod fetcher;
+pub mod limits;
 pub mod server;
 pub mod swarms;
 
 pub use catalog::{Catalog, CatalogConfig};
 pub use fetcher::FetcherConfig;
+pub use limits::{CatalogLimits, Rate};
 pub use server::Tracker;
 pub use swarms::{Refusal, Swarms, TrackerConfig};
 

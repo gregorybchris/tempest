@@ -22,6 +22,7 @@ use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
 use crate::fetcher::{self, FetcherConfig};
+use crate::limits::{Action, CatalogLimits, Limiter};
 use crate::swarms::{Refusal, Swarms, TrackerConfig};
 
 /// The largest request body accepted. An announce with every field at its limit is far smaller.
@@ -38,6 +39,7 @@ pub struct Tracker {
     catalog: Option<Arc<Mutex<Catalog>>>,
     fetcher: FetcherConfig,
     behind_proxy: bool,
+    limiter: Arc<Mutex<Limiter>>,
     pages: Option<Router>,
 }
 
@@ -50,6 +52,7 @@ impl Tracker {
             catalog: None,
             fetcher: FetcherConfig::default(),
             behind_proxy: false,
+            limiter: Arc::new(Mutex::new(Limiter::new(CatalogLimits::default()))),
             pages: None,
         })
     }
@@ -65,6 +68,12 @@ impl Tracker {
     /// How a tracker with a catalog fetches pending listings' manifests.
     pub fn fetcher(mut self, config: FetcherConfig) -> Self {
         self.fetcher = config;
+        self
+    }
+
+    /// The catalog's rate limits per client IP. Clones made before this keep the old ones.
+    pub fn catalog_limits(mut self, limits: CatalogLimits) -> Self {
+        self.limiter = Arc::new(Mutex::new(Limiter::new(limits)));
         self
     }
 
@@ -90,7 +99,7 @@ impl Tracker {
             .route(&format!("{API_PREFIX}bundles/{{bundle}}"), get(stats))
             .layer(DefaultBodyLimit::max(MAX_BODY));
         if self.catalog.is_some() {
-            router = router.merge(catalog::routes::router());
+            router = router.merge(catalog::routes::router(self));
         }
         let router = router
             .fallback(not_found)
@@ -189,6 +198,15 @@ impl Tracker {
         }
     }
 
+    /// Takes one request of `action` from `ip` under the catalog's rate limits.
+    pub(crate) fn limit(&self, action: Action, ip: IpAddr) -> Result<(), Refusal> {
+        // The limiter is plain data that each check leaves consistent.
+        self.limiter
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .check(Instant::now(), action, ip)
+    }
+
     pub(crate) fn is_behind_proxy(&self) -> bool {
         self.behind_proxy
     }
@@ -208,7 +226,7 @@ impl Tracker {
     }
 
     /// The IP address the request came from.
-    fn observed_ip(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
+    pub(crate) fn observed_ip(&self, peer: SocketAddr, headers: &HeaderMap) -> IpAddr {
         let forwarded = || {
             let value = headers.get_all("x-forwarded-for").iter().next_back()?;
             let last = value.to_str().ok()?.rsplit(',').next()?;
@@ -272,11 +290,22 @@ async fn announce(
         let mut catalog = tracker.catalog();
         // The announce itself succeeded; the catalog's work is retried by later announces or
         // lost, as a download count is, and neither is worth refusing it for.
-        if listing.is_some()
-            && let Err(error) = catalog.request_listing(now, &request.bundle, &request.peer)
+        // Asking again for a bundle the catalog knows costs nothing, so only new ones count
+        // against the client's limit. Over it, a later announce asks again.
+        let publish = listing.is_some()
+            && match catalog.knows_listing(&request.bundle) {
+                Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
+                Err(error) => {
+                    eprintln!("cannot list {}: {error}", request.bundle);
+                    false
+                }
+            };
+        if publish && let Err(error) = catalog.request_listing(now, &request.bundle, &request.peer)
         {
             eprintln!("cannot list {}: {error}", request.bundle);
         }
+        // Fresh peer IDs could otherwise inflate the counts.
+        let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
         if downloaded && let Err(error) = catalog.record_download(now, &request.bundle) {
             eprintln!("cannot count a download of {}: {error}", request.bundle);
         }

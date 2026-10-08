@@ -1,5 +1,7 @@
 //! The catalog's rules, without HTTP.
 
+use std::net::{IpAddr, Ipv4Addr};
+
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use tempest_catalog_api::account::{AccountEdit, Poll, SignIn, sign_in_message};
 use tempest_catalog_api::codes;
@@ -13,6 +15,9 @@ use tempest_protocol::{BundleId, PeerId};
 use super::{Catalog, CatalogConfig, verify};
 
 const AUTHORITY: &str = "tracker.example.org";
+
+/// The client every test signs in from.
+const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9));
 
 /// A key made from a seed of `n`s.
 struct Key(Ed25519KeyPair);
@@ -53,7 +58,7 @@ fn catalog(invites_required: bool) -> Catalog {
 
 /// Signs in `key` at time `now` and returns the session token.
 fn sign_in(catalog: &mut Catalog, key: &Key, now: u64) -> String {
-    let challenge = catalog.challenge(now).unwrap();
+    let challenge = catalog.challenge(now, CLIENT).unwrap();
     let request = SignIn {
         code: challenge.code.clone(),
         key: key.id(),
@@ -109,7 +114,7 @@ fn hex32(text: &str) -> [u8; 32] {
 fn signing_in_proves_the_key_and_the_tracker() {
     let mut catalog = catalog(false);
     let key = Key::new(1);
-    let challenge = catalog.challenge(100).unwrap();
+    let challenge = catalog.challenge(100, CLIENT).unwrap();
     let request = |authority: &str, signer: &Key| SignIn {
         code: challenge.code.to_lowercase(),
         key: key.id(),
@@ -149,7 +154,7 @@ fn signing_in_proves_the_key_and_the_tracker() {
 fn codes_expire() {
     let mut catalog = catalog(false);
     let key = Key::new(1);
-    let challenge = catalog.challenge(0).unwrap();
+    let challenge = catalog.challenge(0, CLIENT).unwrap();
     let request = SignIn {
         code: challenge.code.clone(),
         key: key.id(),
@@ -167,7 +172,7 @@ fn codes_expire() {
 fn whoever_asked_collects_the_session_once() {
     let mut catalog = catalog(false);
     let key = Key::new(1);
-    let challenge = catalog.challenge(0).unwrap();
+    let challenge = catalog.challenge(0, CLIENT).unwrap();
     let poll = Poll {
         code: challenge.code.clone(),
         poll: challenge.poll.clone(),
@@ -196,7 +201,7 @@ fn invites_admit_new_keys_once() {
     let (alice, bob) = (Key::new(1), Key::new(2));
     let invite = catalog.create_invite(0).unwrap();
     let attempt = |catalog: &mut Catalog, key: &Key, invite: Option<String>| {
-        let challenge = catalog.challenge(0).unwrap();
+        let challenge = catalog.challenge(0, CLIENT).unwrap();
         let request = SignIn {
             code: challenge.code.clone(),
             key: key.id(),
@@ -557,4 +562,22 @@ fn seeders_sort_uses_the_live_swarms() {
     let order: Vec<_> = page.listings.iter().map(|l| l.bundle).collect();
     assert_eq!(order, [bundle(1), bundle(3), bundle(2)]);
     assert_eq!(page.listings[1].swarm.incomplete, 3);
+}
+
+#[test]
+fn one_client_cannot_hold_every_challenge() {
+    let config = CatalogConfig {
+        max_challenges_per_ip: 2,
+        ..CatalogConfig::default()
+    };
+    let mut catalog = Catalog::in_memory(config).unwrap();
+    catalog.challenge(0, CLIENT).unwrap();
+    catalog.challenge(0, CLIENT).unwrap();
+    let refused = catalog.challenge(0, CLIENT).unwrap_err();
+    assert_eq!(refused.status, 429);
+    assert_eq!(refused.body.retry_after_secs, Some(60));
+    // Others still get codes, and the client gets more once its codes expire.
+    let other = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10));
+    catalog.challenge(0, other).unwrap();
+    catalog.challenge(10 * 60, CLIENT).unwrap();
 }

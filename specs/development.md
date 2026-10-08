@@ -33,3 +33,16 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 
 - Independent tasks (for example, two separate web UIs) can run in parallel, each in its own git worktree. That cuts wall-clock time considerably compared with running them one after another.
 - Parallel builds in one working tree contend for the same `target/` lock and the same disk. Separate worktrees each need their own `target/`, so check free disk space before starting several.
+
+## Releasing locally
+
+CI builds releases when a version tag is pushed (D-211). While it is unavailable, the same archives can be built on one Mac with dist (D-232):
+
+- **Tools:** trunk and the `wasm32-unknown-unknown` target for the web UIs; rustup targets for each platform; `zig` and `cargo-zigbuild` for Linux; `llvm` and `cargo-xwin` for Windows. Dist picks the cross compiler itself.
+- **Web UIs first.** Build the three UIs with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
+- **Per target:** `dist build --artifacts=local --target <triple>` writes archives and checksums to `target/distrib`. `--artifacts=all` on one target also writes the installers, the Homebrew formulas and `sha256.sum`.
+- **Smoke test** each binary that can run here: `--version`, `--help` and `tempest web` on a spare port. The Intel macOS binaries run under Rosetta.
+- **Publishing** is separate: a GitHub release with these files, and the formulas pushed to the tap.
+- **Disk:** each target's `dist` profile build takes several GB. Delete a target's `target/<triple>/dist` once it is packaged.
+
+What a Mac can't build: the Windows `tempest-sim` (DuckDB's C++ doesn't compile with clang-cl) and the `.msi` installers (WiX runs only on Windows). Builds there come from CI, or from a Windows machine.

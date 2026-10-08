@@ -9,7 +9,7 @@ use clap::Parser;
 
 /// Tempest's simulator: runs scenarios and browses their results.
 #[derive(Debug, Parser)]
-#[command(version)]
+#[command(name = "tempest-sim", version)]
 struct Cli {
     #[command(subcommand)]
     command: sim::SimCommand,

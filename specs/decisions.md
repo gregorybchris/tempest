@@ -3735,3 +3735,20 @@ This revises D-175, D-182 and D-189.
 **Decision:** Keep it. At start, the daemon logs each config-file key that a stored setting overrides, and how to reset it.
 
 **Rationale:** The least machinery, and the log turns a silent surprise into a visible fact.
+
+---
+
+## D-232: Release artifacts can be built locally
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** GitHub Actions was unavailable (billing), and releases (D-211) were built only there. Dist can drive cross compilers itself.
+
+**Decision:**
+
+- A release can be built on one Mac with `dist build`, using the system linker for both macOS targets, `cargo-zigbuild` for the Linux targets and `cargo-xwin` for Windows. Steps and tools are in `specs/development.md`.
+- Windows `tempest` builds this way; Windows `tempest-sim` does not, because clang-cl rejects DuckDB's C++ (`dllexport` on a deleted function). Nor can the `.msi` installers be built, which need WiX on Windows. Those come from CI.
+- Linux binaries are cross-built and not run locally.
+- A local build publishes nothing; tagging, the GitHub release and the Homebrew tap stay separate steps.
+
+**Rationale:** The workflow file and the dist configuration stay the single source of what a release contains; the local build only supplies the machine.

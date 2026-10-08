@@ -61,22 +61,44 @@ pub fn TextField(
     #[prop(optional)]
     secret: bool,
 ) -> impl IntoView {
+    // The help and the error describe the input rather than name it, so they sit outside
+    // its label.
+    let id = unique_id("text");
+    let (help_id, error_id) = (format!("{id}-help"), format!("{id}-error"));
+    let described = {
+        let (help_id, error_id) = (help_id.clone(), error_id.clone());
+        move || {
+            let ids: Vec<&str> = [
+                help.is_some().then_some(help_id.as_str()),
+                error.with(Option::is_some).then_some(error_id.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            (!ids.is_empty()).then(|| ids.join(" "))
+        }
+    };
     view! {
-        <label class="field">
-            <span class="field__label">{label}</span>
+        <div class="field">
+            <label class="field__label" for=id.clone()>{label}</label>
             <input
+                id=id
                 class="input"
                 type=if secret { "password" } else { "text" }
                 autocomplete=secret.then_some("current-password")
                 placeholder=placeholder
                 spellcheck="false"
                 aria-invalid=move || bool_attr(error.with(Option::is_some))
+                aria-describedby=described
                 prop:value=move || value.get()
                 on:input=move |e| value.set(event_target_value(&e))
             />
-            {help.map(|help| view! { <span class="field__help">{help}</span> })}
-            {move || error.get().map(|error| view! { <span class="field__error">{error}</span> })}
-        </label>
+            {help.map(|help| view! { <span class="field__help" id=help_id>{help}</span> })}
+            {move || {
+                let error_id = error_id.clone();
+                error.get().map(|error| view! { <span class="field__error" id=error_id>{error}</span> })
+            }}
+        </div>
     }
 }
 
@@ -142,9 +164,26 @@ pub fn NumberField(
                     max=max
                     step=step
                     prop:value=move || value.get().to_string()
+                    // While typing, a number in range is taken as it is, and anything else, such
+                    // as "1." or a first digit of "12" under a minimum of 5, waits; leaving the
+                    // field brings it into range.
                     on:input=move |e| {
-                        if let Ok(v) = event_target_value(&e).parse::<f64>() {
-                            value.set(v.clamp(min, max));
+                        if let Ok(v) = event_target_value(&e).parse::<f64>()
+                            && (min..=max).contains(&v)
+                            && v != value.get_untracked()
+                        {
+                            value.set(v);
+                        }
+                    }
+                    on:change=move |e| {
+                        let typed = event_target_value(&e).parse::<f64>();
+                        let v = typed.map_or(value.get_untracked(), |v| v.clamp(min, max));
+                        value.set(v);
+                        if let Some(input) = e
+                            .target()
+                            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        {
+                            input.set_value(&v.to_string());
                         }
                     }
                 />

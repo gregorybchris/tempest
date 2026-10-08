@@ -18,13 +18,31 @@ The full protocol is in [`protocol/`](protocol/README.md).
 
 In development. See the [roadmap](specs/roadmap.md).
 
+## Install
+
+Releases are on [GitHub](https://github.com/gregorybchris/tempest/releases/latest) for macOS, Linux and Windows.
+
+```sh
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/releases/latest/download/tempest-installer.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/gregorybchris/tempest/releases/latest/download/tempest-installer.ps1 | iex"
+
+# Homebrew
+brew install gregorybchris/tap/tempest
+```
+
+Windows users can instead download the `.msi` from the release page.
+
+To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`.
+
 ## Usage
 
 ```sh
 (cd crates/web && trunk build --release --cargo-profile web)         # the web UI, to embed (optional)
 (cd crates/sim-web && trunk build --release --cargo-profile web)     # the results UI, likewise
 (cd crates/catalog-web && trunk build --release --cargo-profile web) # the catalog UI, likewise
-cargo install --path crates/tempest
 
 tempest share ./photos   # prints a tempest: link, then shares until Ctrl-C
 tempest get '<link>'     # downloads the bundle into ./<its name>

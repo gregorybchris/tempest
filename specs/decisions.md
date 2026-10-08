@@ -1996,7 +1996,7 @@ UI screenshot tests are not required.
 **Decision:**
 
 - `cargo-dist` builds GitHub releases for macOS, Linux and Windows: shell and PowerShell installers, a Homebrew tap, and MSI. No code signing yet.
-- The README gains real installation instructions once a release exists.
+- The README documents installing from a release. Configuration details are in D-211.
 
 ---
 

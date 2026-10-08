@@ -60,7 +60,7 @@ pub fn Wordmark() -> impl IntoView {
     view! {
         <svg class="wordmark" viewBox="-1 -1 96 16" role="img" aria-label="Tempest">
             // Numeric attributes keep this subtree off Leptos's static-template path, which
-            // wraps static SVG in a stray <g> (prototypes/ui/leptos-app/NOTES.md).
+            // wraps static SVG in a stray <g> and breaks the gradient and path layout.
             <defs>
                 <linearGradient id="wordmark-gradient" x1=0 x2=1 y1=0 y2=0>
                     <stop offset=0 stop-color="#3ef3ff"></stop>

@@ -20,6 +20,7 @@ use tempest_protocol::message::GoodbyeReason;
 use tempest_protocol::relay::{RELAY_ALPN, Registered, RelayReject, RelayRejectReason};
 use tempest_protocol::{Address, PeerId, RelayDatagram, RelayMessage};
 use tokio::net::UdpSocket;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, timeout};
 
 use crate::permissions::Permissions;
@@ -27,6 +28,10 @@ use crate::registry::{Limits, Registry};
 
 /// How long a peer has to finish the handshake and send Register.
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
+/// The most connections that may be opening at once: handshaking, or yet to send Register.
+/// Beyond it new connections are refused, and beyond half of it they must first prove their
+/// address with a QUIC Retry, so forged sources can't hold handshakes open.
+const MAX_OPENING: usize = 512;
 /// How often kept sockets that have expired are given up.
 const SWEEP_EVERY: Duration = Duration::from_secs(30);
 /// How long a RelayReject, or the Goodbyes at shutdown, may take to arrive.
@@ -161,12 +166,16 @@ impl Relay {
     pub async fn serve(&self, shutdown: impl Future<Output = ()>) {
         let mut shutdown = std::pin::pin!(shutdown);
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
+        let opening = Arc::new(Semaphore::new(MAX_OPENING));
         loop {
             tokio::select! {
                 incoming = self.endpoint.accept() => {
                     let Some(incoming) = incoming else { break };
+                    let Some(opening) = admit_opening(&opening, incoming) else {
+                        continue;
+                    };
                     let shared = self.shared.clone();
-                    tokio::spawn(async move { shared.serve_peer(incoming).await });
+                    tokio::spawn(async move { shared.serve_peer(opening).await });
                 }
                 _ = sweep.tick() => self.shared.registry().expire(Instant::now()),
                 () = &mut shutdown => break,
@@ -186,9 +195,10 @@ impl Shared {
     }
 
     /// Registers one peer and forwards its traffic until its relay connection ends.
-    async fn serve_peer(&self, incoming: quinn::Incoming) {
-        let Ok(Some((conn, peer, send, recv))) = timeout(REGISTER_TIMEOUT, open(incoming)).await
-        else {
+    async fn serve_peer(&self, (incoming, permit): (quinn::Incoming, OwnedSemaphorePermit)) {
+        let opened = timeout(REGISTER_TIMEOUT, open(incoming)).await;
+        drop(permit);
+        let Ok(Some((conn, peer, send, recv))) = opened else {
             return;
         };
         let Some(relay_ip) = self.config.public_ip.or_else(|| conn.local_ip()) else {
@@ -239,6 +249,25 @@ impl Shared {
         socket.set_nonblocking(true)?;
         Ok(Arc::new(UdpSocket::from_std(socket)?))
     }
+}
+
+/// Takes a slot for a new connection to open in, or refuses it: outright when every slot is
+/// taken, and with a Retry, which costs the relay no state, when over half are and the
+/// client's address is unproven.
+fn admit_opening(
+    slots: &Arc<Semaphore>,
+    incoming: quinn::Incoming,
+) -> Option<(quinn::Incoming, OwnedSemaphorePermit)> {
+    let Ok(permit) = slots.clone().try_acquire_owned() else {
+        incoming.refuse();
+        return None;
+    };
+    if slots.available_permits() < MAX_OPENING / 2 && !incoming.remote_address_validated() {
+        // Fails only if the address is validated, which was just checked.
+        let _ = incoming.retry();
+        return None;
+    }
+    Some((incoming, permit))
 }
 
 /// Completes the handshake and reads Register from the control stream. Closes the connection

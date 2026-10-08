@@ -679,6 +679,15 @@ a.tag:hover {
   font-size: var(--text-sm);
 }
 
+.listing__report .linkish {
+  color: var(--dim);
+}
+
+.listing__report .linkish:hover,
+.listing__report .linkish:focus-visible {
+  color: var(--fg);
+}
+
 .prose {
   max-width: 78ch;
 }

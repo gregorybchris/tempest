@@ -10,6 +10,7 @@ use tempest_api::PREFIX;
 use tempest_api::requests::{SessionInfo, SignInRequest};
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::form::TextField;
+use tempest_ui_kit::theme::{Look, Theme};
 
 use crate::request::{self, RequestError, method};
 
@@ -83,6 +84,33 @@ pub fn check(auth: RwSignal<Auth>) {
             Err(_) => {}
         }
     });
+}
+
+const LOOK_KEY: &str = "tempest.look";
+
+/// Remembers the look in this browser, so the sign-in page, which can't ask the engine for
+/// it, can wear it.
+pub fn remember_look(look: &Look) {
+    if let Some(storage) = window().local_storage().ok().flatten() {
+        let value = format!("{},{},{}", look.theme.name(), look.scanlines, look.clean);
+        let _ = storage.set_item(LOOK_KEY, &value);
+    }
+}
+
+/// The look this browser last showed, or the default.
+pub fn remembered_look() -> Look {
+    let stored = window()
+        .local_storage()
+        .ok()
+        .flatten()
+        .and_then(|s| s.get_item(LOOK_KEY).ok().flatten())
+        .unwrap_or_default();
+    let mut parts = stored.split(',');
+    Look {
+        theme: parts.next().and_then(Theme::named).unwrap_or_default(),
+        scanlines: parts.next() == Some("true"),
+        clean: parts.next() == Some("true"),
+    }
 }
 
 /// The sign-in page.

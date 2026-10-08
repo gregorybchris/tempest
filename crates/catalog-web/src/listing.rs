@@ -205,7 +205,6 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                             <Stat label="downloads" value=Signal::derive(move || format::count(listing.with(|l| l.downloads))) />
                         </Stats>
                     </Panel>
-                    <ReportLink bundle />
                     <Panel title="Votes">
                         <div class="votes">
                             <button
@@ -229,6 +228,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                             </button>
                         </div>
                     </Panel>
+                    <ReportLink bundle />
                 </aside>
             </div>
         </article>
@@ -244,6 +244,11 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
     let reason = RwSignal::new(String::new());
     let problem = RwSignal::new(None::<String>);
     let sending = RwSignal::new(false);
+    // An error is about what was typed, so typing again clears it.
+    Effect::new(move |_| {
+        reason.track();
+        problem.set(None);
+    });
     let start = move || {
         if ctx.me.with_untracked(|m| m.account().is_none()) {
             toasts.push(Tone::Warn, "Sign in to report a listing.");
@@ -254,7 +259,7 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
         open.set(true);
     };
     let send = move || {
-        let reason = match text::clean_report(&reason.get_untracked()) {
+        let cleaned = match text::clean_report(&reason.get_untracked()) {
             Ok(reason) => reason,
             Err(error) => {
                 problem.set(Some(request::sentence(&error.0)));
@@ -265,12 +270,13 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
         sending.set(true);
         spawn_local(async move {
             let path = format!("listings/{bundle}/reports");
-            let body = NewReport { reason };
+            let body = NewReport { reason: cleaned };
             let answer = request::send::<serde_json::Value>(method::POST, &path, Some(&body)).await;
             let _ = sending.try_set(false);
             match answer {
                 Ok(_) => {
                     let _ = open.try_set(false);
+                    let _ = reason.try_set(String::new());
                     let _ = problem.try_set(None);
                     toasts.push(Tone::Neutral, "Reported. The operator will see it.");
                 }
@@ -291,7 +297,7 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
             actions=ViewFn::from(move || view! {
                 <Button kind=ButtonKind::Ghost on_click=move || open.set(false)>"Cancel"</Button>
                 <Button
-                    kind=ButtonKind::Danger
+                    kind=ButtonKind::Primary
                     disabled=sending
                     on_click=move || send()
                 >"Report"</Button>

@@ -51,6 +51,8 @@ pub fn App() -> impl IntoView {
     let auth = RwSignal::new(Auth::Checking);
     provide_context(auth);
     signin::watch(auth);
+    // The sign-in page can't ask the engine for the look, so it wears the last one shown here.
+    apply_look(Signal::derive(signin::remembered_look));
     // A memo, so the page is rebuilt only when the answer changes.
     let state = Memo::new(move |_| auth.get());
     view! {
@@ -190,11 +192,13 @@ fn retry_now() {
 /// look when the user changes it. Like the TUI, the page takes the look once, when the
 /// settings first arrive, and the columns and views whenever they change.
 fn look(config: Config, ui: Ui) {
-    apply_look(Signal::derive(move || Look {
+    let look = Signal::derive(move || Look {
         theme: ui.theme.get(),
         scanlines: ui.scanlines.get(),
         clean: ui.clean.get(),
-    }));
+    });
+    apply_look(look);
+    Effect::new(move |_| signin::remember_look(&look.get()));
     ui.notify.set(notify::enabled());
     // The look the engine has, once known.
     let saved = StoredValue::new(None::<(Theme, bool, bool)>);

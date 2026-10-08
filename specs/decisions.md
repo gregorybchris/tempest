@@ -1183,7 +1183,7 @@ Which one should be the default is one of the first questions for the simulator.
 
 ## D-079: Process model
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-236)
 
 **Decision:**
 
@@ -2889,7 +2889,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-185: The relay server
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-236)
 
 **Context:** M6 builds the relay of `protocol/relays.md`. The architecture table had the relay crate depend on `protocol` only, but a relay needs the same raw-public-key TLS, identities and framed streams as peers, which live in `net`. Several details the protocol leaves open had to be settled: how a relay closes connections, a peer registering again while still connected, how kept addresses count against capacity, which IP a lent address carries, and how the tracker takes on the relay role (D-028).
 
@@ -2897,11 +2897,11 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 **Decision:**
 
-- `tempest-relay` depends on `protocol` and `net`. The binary is `tempest relay`, not a separate executable.
+- `tempest-relay` depends on `protocol` and `net`. The binary is `tempest-relay` (D-236).
 - A relay connection closes with Goodbye's reason codes: `protocol_violation`, `duplicate` for a registration replaced by a newer one from the same peer, and `shutting_down`. A newer registration takes over the older one's lent address. Both are now in `protocol/relays.md`.
 - A peer that leaves has its lent socket kept bound for 5 minutes, so the same address is certain to be free when it returns. Kept sockets count toward the relay's capacity, and the one closest to expiring is given up to admit a newcomer.
 - Limits: an allowlist, a cap on registrations and on registrations per source IP, and an optional per-peer byte rate in each direction, over which datagrams are dropped. Forwarding permissions per peer are capped in number, so forged sources can't exhaust memory.
-- `tempest tracker --run-relay` runs a relay beside the tracker. Given the relay's public IP, the tracker recommends its own relay.
+- A tracker recommends a relay that runs separately, named with `--relay` (D-236).
 
 **Rationale:** Depending on `net` keeps one implementation of the handshake rules. Replacing an old registration lets a peer whose network changed get its address back at once instead of waiting for a timeout. Keeping the socket bound makes stable addresses a guarantee rather than a hope that the port stays free.
 
@@ -3813,3 +3813,34 @@ This revises D-175, D-182 and D-189.
 - CI selects browser and web tests with a module filter on `--test integration`.
 
 **Rationale:** Linking once per crate saves link time and disk. Test names stay readable and filterable by module, and nextest still isolates each test in its own process.
+
+---
+
+## D-236: The tracker and the relay are their own binaries
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** D-079 put everything but the simulator (D-214) in one `tempest` binary. That binary carried the tracker with its Tantivy index, SQLite catalog and website, and the relay server, which almost nobody who downloads the client runs. The owner decided the tracker and the relay should be their own programs, and that nothing else is split: the client keeps the engine inside, so one command opens the TUI or the web UI.
+
+**Options:** keep everything in `tempest`; split the tracker and relay out (chosen); also split the engine and the UIs from the CLI.
+
+**Decision:** Four binaries, each with a package of its own:
+
+| Binary | Package | For | Contains |
+| --- | --- | --- | --- |
+| `tempest` | `tempest` | everyone | CLI, engine and daemon, TUI, client web UI |
+| `tempest-tracker` | `tempest-tracker-cli` (`crates/tracker-cli`) | tracker operators | peer lists, the catalog and search, the tracker website, operator commands |
+| `tempest-relay` | `tempest-relay-cli` (`crates/relay-cli`) | relay operators | the relay server |
+| `tempest-sim` | `tempest-sim-cli` | researchers | the simulator (D-214) |
+
+- `tempest-tracker [OPTIONS]` serves; `tempest-tracker invite|hide|unhide|ban|unban|reports --catalog FILE` are the operator commands (D-225, D-234). The options and the help text are those of the former `tempest tracker`, except `--run-relay`. `tempest-relay [OPTIONS]` is the former `tempest relay`.
+- A tracker no longer runs a relay (D-185). `--run-relay`, `--relay-port`, `--relay-public-ip` and `--relay-identity` are gone. The tracker's existing `--relay '<key>@host[:port]'` names a relay run separately, which it recommends to clients as before (D-186); `tempest-relay` prints that identity on startup.
+- The `tempest` binary depends on neither `tempest-tracker` nor `tempest-relay`, so Tantivy, the catalog's SQLite use and the tracker website are no longer in it. It keeps the clients of both in `tempest-net`, and the shared types in `tracker-api`. `tempest tracker` and `tempest relay` are hidden commands that fail with a message naming the new program, as `tempest sim` does.
+- The tracker website is embedded into `tempest-tracker` by its build script, through `tempest-assets`, and the client web UI into `tempest` only.
+- The per-user data folder lookup moved from `tempest-engine` to `tempest-net`, so the relay finds its default key file without the engine.
+- Tests that start a tracker or relay as a process (publishing, the daemon, transfers, the tracker website in a browser) stay in `crates/tempest`: they drive the client. Cargo builds only a package's own binaries, so a test helper builds `tempest-tracker` or `tempest-relay` on first use with `cargo build -p` and runs it from the same target folder. The operator commands, the website being served and each program's command line are tested in its own crate.
+- `ListingStatus::Withdrawn` is now `Unpublished` in the API (D-234's term); the catalog still stores the value as `withdrawn`.
+
+**Releases:** both new packages set `dist = false`, so releases stay `tempest` only, as in D-233. **Open question for the owner:** whether releases should ship `tempest-tracker` and `tempest-relay`, for example for Linux and macOS. Shipping the tracker means building its website and compiling SQLite for each target.
+
+**Rationale:** Operators get a program that matches their job, and everyone else gets a smaller client that builds faster. Keeping the engine in `tempest` means the common case stays one command.

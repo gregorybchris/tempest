@@ -9,7 +9,7 @@ Tempest's user-facing interfaces and the quality bar they share. Decisions refer
 | Client web UI | Leptos (D-117) | Engine API (HTTP + JSON, event stream) |
 | Terminal UI | ratatui (D-090) | Engine API, or an engine of its own that it can hand to a daemon on quitting (D-228) |
 | CLI | The `tempest` binary's subcommands (D-079) | Engine API, or an embedded engine |
-| Tracker website | Same framework as the client web UI | Tracker server |
+| Tracker website | Same framework as the client web UI | Tracker server, served by the `tempest-tracker` binary (D-236) |
 | Simulation results UI | Same framework as the client web UI | The results API over the DuckDB results database (D-204), served by the `tempest-sim` binary (D-214) |
 
 The three web UIs share a design-system crate, `ui-kit`, with colors, typography, components and chart styles (D-076, D-198). `ui-gallery` shows all of it.
@@ -160,7 +160,7 @@ The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web
 
 ## Tracker website
 
-A tracker that takes listings (`tempest tracker --catalog`) serves it, with a header that names the tracker and its host, embedded in the binary like the other web UIs (D-201). It searches as you type, narrows by category and tag facets, sorts by relevance, newest, seeders, votes or trending (D-209), and shows each listing's content, swarm health, votes and comments. Signing in shows a code for the user's client to sign (D-128); signed in, people vote, comment, report a listing to the operator (D-225), name their account and edit their own listings. Its views, keys and browser test are in D-210; running a public one is covered in [tracker.md](tracker.md).
+A tracker that takes listings (`tempest-tracker --catalog`) serves it, with a header that names the tracker and its host, embedded in the `tempest-tracker` binary like the other web UIs (D-201, D-236). It searches as you type, narrows by category and tag facets, sorts by relevance, newest, seeders, votes or trending (D-209), and shows each listing's content, swarm health, votes and comments. Signing in shows a code for the user's client to sign (D-128); signed in, people vote, comment, report a listing to the operator (D-225), name their account and edit their own listings. Its views, keys and browser test are in D-210; running a public one is covered in [tracker.md](tracker.md).
 
 ## Visualization ideas
 

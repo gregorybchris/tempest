@@ -28,6 +28,7 @@ Each crate's integration tests are one test binary, `tests/integration/main.rs`,
 - **Names.** Tests read as `module::test` under the target `integration`. Select a topic with `cargo nextest run -p <crate> -E 'test(/^topic::/)'` or `cargo test -p <crate> --test integration topic::`.
 - **Snapshots.** insta names a snapshot after the module path, so the terminal UI's are `integration__screens__<name>.snap`.
 - **One process.** Plain `cargo test` runs a binary's tests on threads of one process, while nextest runs each test in its own. Tests must not change the process's environment or working directory, or share a fixed port or file; use temporary directories and port 0.
+- **Other programs.** Cargo builds only a package's own binaries for its tests. Tests of `tempest` that need a tracker or a relay (`crates/tempest/tests/integration/common.rs`) build `tempest-tracker` or `tempest-relay` on first use with `cargo build -p` and run it from the same target folder; tests of what a server binary does alone live in its own crate (D-236).
 - **Browser tests** (`#[ignore]`, D-218) run with `--ignored` and a module filter, as CI's web job does. The gallery's wasm-bindgen tests are one binary too, configured once in its `main.rs`.
 
 ## Web UIs
@@ -37,7 +38,7 @@ Build a UI with `trunk build` in its crate (`crates/web`, `crates/tracker-web`, 
 To iterate on a UI, run `trunk serve` in its crate. It rebuilds on every change and serves the page on a port of its own (`Trunk.toml`), forwarding API requests to a running backend:
 
 - **Client web UI** (`crates/web`): `tempest daemon` is the backend, on its default port 4776. `trunk serve` forwards `/v1/`, including the event stream, to it, and the page works as the engine's own would.
-- **Tracker website** (`crates/tracker-web`): `tempest tracker --catalog catalog.db` is the backend, on its default port 4777.
+- **Tracker website** (`crates/tracker-web`): `tempest-tracker --catalog catalog.db` is the backend, on its default port 4777.
 - **Results UI** (`crates/sim-web`): `tempest-sim web` is the backend.
 
 To point a UI at a backend on another port, change the `[[proxy]]` backend in its `Trunk.toml` or pass `--proxy-backend`. Pass `--port` to serve on a different port than the one in `Trunk.toml`.

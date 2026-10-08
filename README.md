@@ -35,7 +35,15 @@ brew install gregorybchris/tap/tempest
 
 Windows users can instead download the `.msi` from the release page.
 
-To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`. The simulator, `tempest-sim`, is a development tool and is only built from source: `cargo install --path crates/sim-cli --features bundled-duckdb`, or without the feature to link an installed DuckDB ([development](specs/development.md)).
+To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`. Releases contain only `tempest`. The servers and the simulator are separate programs built from source:
+
+```sh
+cargo install --path crates/tracker-cli   # tempest-tracker, for tracker operators (build crates/tracker-web first)
+cargo install --path crates/relay-cli     # tempest-relay, for relay operators
+cargo install --path crates/sim-cli --features bundled-duckdb   # tempest-sim, a development tool
+```
+
+The simulator can link an installed DuckDB instead of the feature ([development](specs/development.md)).
 
 ## Usage
 
@@ -47,12 +55,13 @@ To build from source, build the web UIs below (optional), then `cargo install --
 tempest share ./photos   # prints a tempest: link, then shares until Ctrl-C
 tempest get '<link>'     # downloads the bundle into ./<its name>
 
-tempest tracker                                   # runs a tracker
+tempest-tracker                                   # runs a tracker
 tempest share --tracker http://host:4777 ./photos # announces the bundle to it
-tempest tracker --catalog catalog.db              # with listings and a website at its address
+tempest-tracker --catalog catalog.db              # with listings and a website at its address
 tempest share --publish http://host:4777 ./data   # lists the bundle on that tracker
-tempest relay                                     # runs a relay for peers behind routers
+tempest-relay                                     # runs a relay for peers behind routers, and prints its <key>@host:port
 tempest share --relay '<key>@host:4775' ./photos  # reachable through that relay too
+tempest-tracker --relay '<key>@host:4775'         # a tracker recommends a relay to its peers
 
 tempest daemon           # runs the engine, which keeps transfers going and serves its API
 tempest list             # shows its transfers; start, stop and remove control them
@@ -65,7 +74,7 @@ tempest-sim web                                         # browses and compares t
 
 Building the web UIs needs [trunk](https://trunkrs.dev); a binary built without them serves a page that says so. In the TUI and the web UI, `1`-`3` switch between Transfers, Share and Settings, `:` finds any command (TUI), and `?` lists the keys of the screen you are on.
 
-While a daemon runs, `share` and `get` hand their transfers to it. Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. Each peer asks its router to forward its port with PCP, NAT-PMP or UPnP-IGD; `--no-port-mapping` turns that off. `tempest <command> --help` lists each command's options. The engine's API is described in [`specs/api.md`](specs/api.md). Running a public tracker: see [`specs/tracker.md`](specs/tracker.md).
+While a daemon runs, `share` and `get` hand their transfers to it. Peers on the same local network also find each other without a tracker; `--no-lan` turns that off. Each peer asks its router to forward its port with PCP, NAT-PMP or UPnP-IGD; `--no-port-mapping` turns that off. `tempest <command> --help`, `tempest-tracker --help` and `tempest-relay --help` list each command's options. The engine's API is described in [`specs/api.md`](specs/api.md). Running a public tracker: see [`specs/tracker.md`](specs/tracker.md).
 
 ## Repository
 

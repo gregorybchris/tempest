@@ -79,6 +79,7 @@ jobs:
       - name: Build the tracker website
         working-directory: crates/tracker-web
         run: trunk build --release --cargo-profile web
+      # Tests that run the tracker build `tempest-tracker` with the website embedded (D-236).
       - run: cargo test -p tempest --test integration -- web::
       - run: cargo test -p tempest-sim-cli --test integration --features bundled-duckdb -- sim_web::
       # The tracker website in headless Chrome: search, filters and sign-in.

@@ -7,7 +7,7 @@ Tempest's terms, as decided. Terms not yet named are listed at the bottom with t
 | **announce** | A peer's request to a tracker, saying it takes part in a bundle's swarm; the tracker replies with other peers | announce |
 | **bundle** | One or more files (plus optional symlinks and empty directories) offered together | torrent |
 | **bundle ID** | The identifier of a bundle, computed from its manifest | info hash |
-| **catalog** | A tracker's own store of its listings, accounts, votes, comments, reports and search index. It is internal to a tracker: it appears only in the tracker's code, `tempest tracker --catalog`, the operator commands and the operator docs, never in what a client or visitor sees | (none) |
+| **catalog** | A tracker's own store of its listings, accounts, votes, comments, reports and search index. It is internal to a tracker: it appears only in the tracker's code, `tempest-tracker --catalog`, the operator commands and the operator docs, never in what a client or visitor sees | (none) |
 | **chunk** | A 16 KiB unit of a file; the unit that is requested, sent and verified | block (inside a piece) |
 | **chunk tree** | The Merkle tree built from a file's chunks | piece / merkle tree |
 | **complete / incomplete** | State of a peer that has / doesn't have the whole bundle | seeder / leecher |

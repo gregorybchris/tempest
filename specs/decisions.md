@@ -981,7 +981,7 @@ Which one should be the default is one of the first questions for the simulator.
 
 ## D-063: Complete peers and superseeding
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-223)
 
 **Decision:**
 
@@ -1003,7 +1003,7 @@ Which one should be the default is one of the first questions for the simulator.
 
 ## D-065: Lingering
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-224)
 
 **Decision:**
 
@@ -1761,7 +1761,7 @@ The full field list is in `protocol/trackers.md`.
 
 ## D-118: Client feature set (v1)
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-226)
 
 **Context:** The owner reviewed qBittorrent-style features after trying the dummy TUI (`prototypes/tui/`). The same features apply to the TUI and the web UI.
 
@@ -2094,7 +2094,7 @@ UI screenshot tests are not required.
 
 ## D-143: Bundles made from a single file
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-221)
 
 **Context:** A manifest's entries are relative to the bundle's top level, and its `name` is typically the top-level folder. Nothing said what sharing a single file produces.
 
@@ -2284,7 +2284,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-154: Upload strategy details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-051, D-062 and D-063 name the upload strategies; their behavior between reviews, how PropShare divides upload, and what "round-robin" means for a complete peer were open.
 
@@ -2302,7 +2302,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-155: How superseeding works
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-223)
 
 **Context:** D-063 has a brand-new bundle's only complete copy offer each chunk to only one peer until every chunk has been sent once. How to "offer" was open.
 
@@ -2321,7 +2321,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-156: Connection, peer exchange and lingering details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-224)
 
 **Context:** D-064 to D-066 set the connection limit, lingering and direct-send rules; the protocol limits Peers to 50 records at most once a minute. The details were open.
 
@@ -2339,7 +2339,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-157: Scenario file fields
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-230)
 
 **Context:** D-072 puts a scenario and its experiment in one YAML file; `specs/simulation.md` left the field names open.
 
@@ -2508,7 +2508,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-166: Simulated strategic clients
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-070 asks the simulator to model strategic clients (BitTyrant-style), so that upload strategies can be tested against peers that game them.
 
@@ -2578,7 +2578,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-170: Choking that withholds from peers it doesn't serve
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** Validation against Legout et al. (D-078) found free riders downloading as fast as contributors under the BitTorrent strategy (D-154). Two leaks caused it: requests accepted while a peer was served were still answered after it stopped being served, and slots freed between reviews went to waiting peers at random, free riders included, which happened far more often than reviews.
 
@@ -2681,7 +2681,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-175: `tempest share` and `tempest get` before the engine
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-224, D-228)
 
 **Context:** M4 runs `share` and `get` (D-124) as standalone processes, before the engine (D-079) exists. They need an identity file location, the addresses a link advertises, where `get` writes, and when it gives up or exits.
 
@@ -2746,7 +2746,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-178: LAN discovery details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-227)
 
 **Context:** `protocol/discovery.md` fixes LAN discovery's messages, groups and reply rate, but leaves open which interfaces to use, which socket to send from, what a query reveals, and how heard-of peers reach downloads.
 
@@ -2785,7 +2785,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-180: Engine structure
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-220)
 
 **Context:** D-079 to D-082 and D-118 fix what the engine does. M5 needs how: who owns what, what the queue counts, how statuses are decided, and what the event stream carries.
 
@@ -2808,7 +2808,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-181: Engine API details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-222, D-231)
 
 **Context:** D-080, D-125 and D-126 fix an HTTP + JSON API with resumable server-sent events, on loopback TCP 4776 by default, with remote access behind a token and HTTPS. M5 needs the routes, the error shape, how resuming works, how access is checked, how local clients find the API, and where settings changed through it live.
 
@@ -2831,7 +2831,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-182: The CLI and the daemon
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-228)
 
 **Context:** D-079 says the CLI talks to the engine's API and can start an embedded engine when none is running. D-175 made `share` and `get` standalone processes before the engine existed. A one-shot command can't run transfers for long, and `share` can't bind the peer port the daemon holds.
 
@@ -2868,7 +2868,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-184: Sharing limits, recheck, move storage and notifications
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-221, D-224, D-226)
 
 **Context:** D-118 asks for sharing limits (stop or remove at a ratio or after a sharing time), recheck, move storage and notifications on completion and on error, at the engine level for M5. Their details are open.
 
@@ -2907,7 +2907,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-186: Client relay support
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-227)
 
 **Context:** M6 lets a peer register with a home relay and be reached through it (`protocol/relays.md`). The protocol leaves the client's side open: how relayed packets reach QUIC, how the home relay is picked, where tracker-recommended relays fit, and when the relay address is published.
 
@@ -2950,7 +2950,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-188: Port mapping
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-227)
 
 **Context:** `protocol/connections.md` says clients SHOULD ask their router to forward a port (UPnP-IGD, NAT-PMP or PCP), and `protocol/relays.md` lists a port mapping's external address among the Candidates. M6 leaves open the libraries, the order of protocols, which sockets to map, lease times, what to do with a useless mapping, and where the external address goes.
 
@@ -2972,7 +2972,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-189: The TUI's engine
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-228)
 
 **Context:** D-079 and `specs/interfaces.md` let the TUI talk to the engine's API or run an embedded engine. M7 needs to choose how the embedded case works and how the TUI follows changes.
 
@@ -3078,7 +3078,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-195: Clients keep their look and views in the engine's settings
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-231)
 
 **Context:** The TUI's theme should survive a restart, and D-118's custom columns and saved views need a home. The TUI and the web UI share these choices by design (D-119).
 
@@ -3175,7 +3175,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-201: Building the web UI and embedding it in the binary
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-222)
 
 **Context:** D-079 ships one `tempest` binary, and the engine serves the client web UI. The UI is WebAssembly built by trunk, a separate tool, and a plain `cargo build` must keep working without it.
 
@@ -3239,7 +3239,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-204: The simulation results UI and its API
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-222)
 
 **Context:** D-074 and D-075 put simulation results in DuckDB, read by a Rust web UI. The UI is WebAssembly and can't open the database, so something must serve it; the comparisons it shows must agree with what `tempest sim run` and `tempest sim baseline` print.
 
@@ -3274,7 +3274,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-206: Catalog accounts, sessions and storage
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-225)
 
 **Context:** D-128 signs catalog users in with their Tempest key, but a browser doesn't hold the key. M9 also leaves the catalog's storage and API open.
 
@@ -3514,3 +3514,186 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `leptos-use` 0.19 supplies click-outside and event listeners, with only those features enabled.
 
 **Rationale:** No stylesheet reaches a native select's popup, so a themed one must be drawn. One select written against the ARIA pattern is little code next to a library whose look would still need overriding. Native elements already handle the other controls' accessibility, and restyling them needs no script.
+
+---
+
+## D-220: No limit on active uploads by default
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** Under D-180, a complete transfer takes one of five upload slots. A share never stops on its own (D-156), so once five run, each new share waits in the queue and its link doesn't work.
+
+**Options:** keep the limit; exempt shares from it; no upload limit by default (chosen).
+
+**Decision:** `queue.max_active_uploads` defaults to no limit. The download limit stays. This revises D-180.
+
+**Rationale:** A link you created should always work. An idle share costs almost nothing, and the speed limits (D-183) already bound bandwidth.
+
+---
+
+## D-221: Where downloads land
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** Every download was written to a folder named after its bundle, so a shared `report.pdf` arrived as `~/Downloads/report.pdf/report.pdf`. Moving a share's storage put its entries straight into the target, while moving a download kept its folder. D-143 left the single-file layout open.
+
+**Decision:**
+
+- A bundle with one file entry is written straight into the save folder. Bundles with several entries get a folder named after the bundle.
+- If the destination name exists, the download fails with an error that names it, as now. Nothing is renamed or overwritten.
+- Moving a share's storage keeps its folder name, as moving a download does. This revises D-184.
+
+**Rationale:** A single file in its own folder surprises everyone. Failing on a collision keeps names predictable. Shares and downloads should move the same way, and moved shares should never mix their files.
+
+---
+
+## D-222: Signing in to the web UI from another machine
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** With remote access on (D-125), every request needs the token in a header. The web UI's event stream (`EventSource`) can't send one, and the UI can't ask for the token, so it works only locally. The token amounts to running commands on the machine, since the API can set `notifications.command`. `tempest sim web --listen` serves without authentication on any address.
+
+**Options:** local only, reached by SSH port forwarding; a login that exchanges the token for a session cookie (chosen); the token in browser storage with a `fetch`-based stream.
+
+**Decision:**
+
+- In remote mode, the web UI shows a sign-in page. The engine exchanges the token for an `HttpOnly`, `Secure`, `SameSite=Strict` session cookie, which every request and the event stream then carry. The CLI and TUI keep using the header.
+- `tempest sim web` warns when it listens on an address other than loopback.
+
+**Rationale:** Remote control of a headless daemon is the reason D-125 exists. The catalog already signs in with a cookie (D-206), and a cookie scripts can't read is safer than a stored token.
+
+---
+
+## D-223: A new share superseeds by default, offering a window of ranges
+
+**Date:** 2026-10-07 · **Status:** Decided (confirm with simulation)
+
+**Context:** D-063 made superseeding opt-in. In simulation, a crowd arriving at once was done once the origin had uploaded 2.7 copies under round-robin, against 1.2 with superseeding. As built (D-155), a superseeding origin offers each peer one range and waits for it to announce the whole range before offering the next, which caps a 1:1 send at about one range per round trip.
+
+**Decision:**
+
+- `strategies.superseed` defaults to on for a transfer that starts as its bundle's only copy.
+- A superseeding origin keeps a window of several ranges offered to each peer, so a single downloader is never throttled to one range per round trip.
+- Before the default changes, a simulation compares round-robin and superseeding with the window on a flash crowd and on a 1:1 direct send. If the window still slows direct sends, revisit.
+
+This revises D-063 and D-155.
+
+**Rationale:** Sending each chunk out of the origin about once is the classic result this tool should demonstrate, and the window removes its cost for direct sends.
+
+---
+
+## D-224: One set of sharing settings, and a farewell peer list
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** Two mechanisms decided when a finished download stops sharing: the core's lingering (`settings.lingering`, ratio 1.0 or ten idle minutes, D-065) and the engine's sharing limits (`sharing.*`, D-184). A downloader that knew the swarm only through peer exchange could be stranded when its sources left.
+
+**Decision:**
+
+- The engine's `sharing.*` settings are the only user-facing ones: ratio, time, idle timeout, and the action at the limit. They drive the core's lingering, whose own settings stop being user-facing.
+- A peer leaving a swarm sends its known peers in a final Peers message before Goodbye.
+- Standalone `tempest get` still exits when its download completes (D-175).
+
+This revises D-065, D-156 and D-184.
+
+**Rationale:** Two ratio settings with different defaults contradict conceptual clarity. The farewell list fixes stranding with one message.
+
+---
+
+## D-225: Catalog operator tools
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** A bundle ID doesn't identify an author, so the first key to list a bundle keeps its listing (D-206). Operators are responsible for what their catalog lists (`specs/tracker.md`) but had no tool to remove a listing short of editing the database. D-031 deferred moderation until the catalog existed.
+
+**Options:** keep first come with no tools; operator tools (chosen); one listing per publisher, side by side; author keys in manifests.
+
+**Decision:**
+
+- `tempest tracker` gains commands to hide a listing and to ban a key, which also hides its listings, and to undo either.
+- Each listing page has a Report link. Reports are recorded for the operator; nothing happens automatically.
+- First come still owns a listing. Revisit if squatting appears.
+
+**Rationale:** Operators carry the risk and need the minimum tools to act. Side-by-side listings and author keys are larger changes to make only if squatting turns out to be a problem.
+
+---
+
+## D-226: Notifications are the command plus a notice in each UI
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** D-118 put notifications in scope and "run a command on completion" out. D-184 implemented notifications as exactly that command. The web UI shows notices; the TUI showed none on completion.
+
+**Decision:** The engine's only notification mechanism stays `notifications.command`. The TUI shows a notice when a transfer completes or errors, as the web UI does. This deliberately brings the command into scope, revising D-118.
+
+**Rationale:** One hook covers desktop notifications, chat and scripts without platform code. Both UIs should tell you the same things.
+
+---
+
+## D-227: Network defaults stay on and are explained
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** Port mapping (D-188), relays chosen by trackers (D-186) and LAN discovery (D-178) are on by default. Each reaches beyond the machine: the router opens a port, a tracker's relay sees who talks to whom, and LAN peers see which bundles you ask about.
+
+**Decision:** All three stay on by default. Settings shows each as a switch with a plain sentence on what it does and what it reveals, and the first run says the same once.
+
+**Rationale:** These make direct sends work behind home routers, which D-029's "no default relays" depends on. Saying plainly what they share is the honest cost (D-002).
+
+---
+
+## D-228: When commands use the daemon
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** `share` and `get` hand their transfer to a running daemon, but options it couldn't take, such as `--tracker` or `--created`, silently ran them standalone instead (D-175, D-182). A TUI or web UI that started its own engine stopped every share on quitting.
+
+**Decision:**
+
+- The daemon's API accepts the per-transfer options `share` and `get` can give, such as trackers and the creation time. Only `--standalone` and options that belong to a separate process (its port, identity, binding, relay and LAN settings) run standalone.
+- Quitting a TUI or web UI that runs its own engine while shares are running asks first: hand them to a daemon, or stop them.
+
+This revises D-175, D-182 and D-189.
+
+**Rationale:** Which process runs a transfer should follow from what you asked for, not from unrelated flags. Closing a window shouldn't silently break links you've sent.
+
+---
+
+## D-229: Incentives under the default upload strategy are accepted as they are
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** After D-170, free riders finish about 15% later than contributors under the default BitTorrent strategy, and strategic clients about 13% sooner than honest ones.
+
+**Decision:** Keep the default strategy and these results. D-154, D-166 and D-170 stand, including the protocol's allowance to drop pending requests from a peer it stops serving.
+
+**Rationale:** Weak incentives are a known property of BitTorrent, and the simulator can show them. Other strategies remain available to compare.
+
+---
+
+## D-230: Experiments can vary peer-class fields
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** `experiment.vary` takes only session settings, which apply to every peer (D-157). Comparing one class's behavior, such as the origin superseeding (D-223) or the share of strategic peers, needed separate scenario files, losing the pairing of runs on the same seeds.
+
+**Decision:**
+
+- `vary` can address a peer class's fields, such as `peers.origin.settings.strategies.superseed` or a class's `count`.
+- Simulator-only protocol variants (D-004) wait until an experiment needs one.
+
+**Rationale:** Paired comparisons of one class are what D-223's check and incentive studies need.
+
+---
+
+## D-231: Settings changed through the API win, and the daemon says so
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** Settings changed through the API are stored apart from the config file and apply over it (D-181, D-195), so a later edit to the same key in the file is ignored. The UIs mark overridden keys.
+
+**Options:** keep it, with a log; rewrite the file on API changes; let a newer file edit win.
+
+**Decision:** Keep it. At start, the daemon logs each config-file key that a stored setting overrides, and how to reset it.
+
+**Rationale:** The least machinery, and the log turns a silent surprise into a visible fact.

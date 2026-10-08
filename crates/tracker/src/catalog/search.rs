@@ -28,8 +28,8 @@ use tantivy::{
     DocId, Index, IndexReader, IndexWriter, ReloadPolicy, Score, SegmentReader, TantivyDocument,
     Term,
 };
-use tempest_catalog_api::listing::{FacetCount, Facets, MAX_TAG_FACETS};
 use tempest_protocol::{BundleId, Hash};
+use tempest_tracker_api::listing::{FacetCount, Facets, MAX_TAG_FACETS};
 
 use super::store::Indexed;
 

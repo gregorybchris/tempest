@@ -2541,17 +2541,9 @@ dependencies = [
  "axum",
  "serde",
  "serde_json",
- "tempest-catalog-api",
  "tempest-protocol",
+ "tempest-tracker-api",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "tempest-catalog-api"
-version = "0.1.0"
-dependencies = [
- "serde",
- "tempest-protocol",
 ]
 
 [[package]]
@@ -2584,10 +2576,10 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempest-api",
- "tempest-catalog-api",
  "tempest-core",
  "tempest-net",
  "tempest-protocol",
+ "tempest-tracker-api",
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
@@ -2602,7 +2594,6 @@ dependencies = [
  "libfuzzer-sys",
  "serde",
  "serde_json",
- "tempest-catalog-api",
  "tempest-core",
  "tempest-engine",
  "tempest-net",
@@ -2610,6 +2601,7 @@ dependencies = [
  "tempest-sim",
  "tempest-sim-api",
  "tempest-tracker",
+ "tempest-tracker-api",
 ]
 
 [[package]]
@@ -2629,9 +2621,9 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2",
- "tempest-catalog-api",
  "tempest-core",
  "tempest-protocol",
+ "tempest-tracker-api",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -2682,11 +2674,19 @@ dependencies = [
  "serde",
  "serde_json",
  "tantivy",
- "tempest-catalog-api",
  "tempest-net",
  "tempest-protocol",
+ "tempest-tracker-api",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "tempest-tracker-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempest-protocol",
 ]
 
 [[package]]

@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tempest_assets as assets;
-use tempest_catalog_api::Category;
 use tempest_net::FetchLimits;
 use tempest_protocol::{BundleId, PeerId, RelayIdentity};
 use tempest_relay::RelayConfig;
@@ -16,30 +15,31 @@ use tempest_tracker::{
     Catalog, CatalogConfig, CatalogLimits, DEFAULT_PORT, FetcherConfig, Rate, Tracker,
     TrackerConfig,
 };
+use tempest_tracker_api::Category;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 use crate::relay;
 
-/// The catalog UI's files, by their path in the page, as `crates/catalog-web/dist` held them at
+/// The tracker website's files, by their path in the page, as `crates/tracker-web/dist` held them at
 /// build time (D-201).
-static CATALOG_UI: assets::Assets = include!(concat!(env!("OUT_DIR"), "/catalog_web_assets.rs"));
+static TRACKER_WEB: assets::Assets = include!(concat!(env!("OUT_DIR"), "/tracker_web_assets.rs"));
 
-/// What `/` shows when the binary was built without the catalog UI.
-const CATALOG_UI_NOT_BUILT: &str = r#"<!DOCTYPE html>
+/// What `/` shows when the binary was built without the tracker website.
+const TRACKER_WEB_NOT_BUILT: &str = r#"<!DOCTYPE html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tempest catalog</title>
+<title>Tempest tracker</title>
 <style>
   body { background: #020b05; color: #8af2a4; font: 15px/1.6 ui-monospace, monospace; padding: 8vh 6vw; }
   code { color: #d2ffe0; }
 </style>
-<h1>Tempest catalog</h1>
-<p>The catalog's API is running, but this <code>tempest</code> binary was built without its web UI.</p>
-<p>Build the UI with <code>trunk build --release --cargo-profile web</code> in <code>crates/catalog-web</code>,
-then build <code>tempest</code> again. Meanwhile, the API answers under <code>/catalog/v1</code>, as in
-<code>/catalog/v1/listings</code>.</p>
+<h1>Tempest tracker</h1>
+<p>The tracker is running, but this <code>tempest</code> binary was built without its website.</p>
+<p>Build the website with <code>trunk build --release --cargo-profile web</code> in <code>crates/tracker-web</code>,
+then build <code>tempest</code> again. Meanwhile, its API answers under <code>/tempest/v1</code>, as in
+<code>/tempest/v1/listings</code>.</p>
 </html>
 "#;
 
@@ -91,8 +91,9 @@ pub struct TrackerArgs {
 
 #[derive(Debug, clap::Args)]
 struct CatalogArgs {
-    /// Run a catalog, a website of the bundles their sharers chose to list, saved in this
-    /// SQLite file. Created if missing. You are responsible for what it lists.
+    /// Take listings, and serve a website of them. The catalog that stores the listings,
+    /// accounts, votes and comments is this SQLite file. Created if missing. You are
+    /// responsible for what it lists.
     #[arg(long, value_name = "FILE")]
     catalog: Option<PathBuf>,
     /// Let a key join the catalog only with an invite (see `tempest tracker invite`).
@@ -308,15 +309,15 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
         let mut tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
         if let Some(catalog) = catalog {
-            eprintln!("catalog at http://{address}/");
-            if CATALOG_UI.is_empty() {
-                eprintln!("note: this binary was built without the catalog UI; the page says how to add it");
+            eprintln!("website at http://{address}/");
+            if TRACKER_WEB.is_empty() {
+                eprintln!("note: this binary was built without the tracker website; the page says how to add it");
             }
             tracker = tracker
                 .with_catalog(catalog)
                 .catalog_limits(args.catalog.limits())
                 .fetcher(args.catalog.fetcher())
-                .with_pages(assets::router(CATALOG_UI, CATALOG_UI_NOT_BUILT));
+                .with_pages(assets::router(TRACKER_WEB, TRACKER_WEB_NOT_BUILT));
         }
         let (stop, stopped) = watch::channel(false);
         tokio::spawn(async move {

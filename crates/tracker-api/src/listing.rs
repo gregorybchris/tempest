@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tempest_protocol::tracker::BundleStats;
 use tempest_protocol::{BundleId, PeerId};
 
-/// Someone, as the catalog shows them: a publisher or a comment's author.
+/// Someone, as a tracker shows them: a publisher or a comment's author.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Person {
     /// Their key.
@@ -42,7 +42,7 @@ pub struct Content {
     pub files: u64,
 }
 
-/// A listing: the answer to `GET /catalog/v1/listings/{bundle}`.
+/// A listing: the answer to `GET /tempest/v1/listings/{bundle}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Listing {
     /// The listed bundle.
@@ -100,14 +100,14 @@ pub enum Vote {
     None,
 }
 
-/// The body of `PUT /catalog/v1/listings/{bundle}/vote`.
+/// The body of `PUT /tempest/v1/listings/{bundle}/vote`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoteRequest {
     /// The vote, replacing any earlier one.
     pub vote: Vote,
 }
 
-/// The body of `PUT /catalog/v1/listings/{bundle}`: asks for the bundle to be listed under the
+/// The body of `PUT /tempest/v1/listings/{bundle}`: asks for the bundle to be listed under the
 /// session's key, or changes the session's listing. Fields left out stay as they are.
 ///
 /// The rules in [`crate::text`] say what each field accepts.
@@ -141,8 +141,8 @@ where
     T::deserialize(d).map(Some)
 }
 
-/// A page of listings: the answer to `GET /catalog/v1/listings`, whose query string is a
-/// [`ListingQuery`](crate::query::ListingQuery), and `GET /catalog/v1/me/listings`.
+/// A page of listings: the answer to `GET /tempest/v1/listings`, whose query string is a
+/// [`ListingQuery`](crate::query::ListingQuery), and `GET /tempest/v1/account/listings`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListingPage {
     /// The listings on this page.
@@ -184,7 +184,7 @@ pub const MAX_PAGE: u32 = 100;
 /// A comment on a listing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Comment {
-    /// Its identifier, for `DELETE /catalog/v1/comments/{id}`.
+    /// Its identifier, for `DELETE /tempest/v1/comments/{id}`.
     pub id: u64,
     /// Who wrote it.
     pub author: Person,
@@ -194,14 +194,14 @@ pub struct Comment {
     pub created: u64,
 }
 
-/// The body of `POST /catalog/v1/listings/{bundle}/comments`.
+/// The body of `POST /tempest/v1/listings/{bundle}/comments`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewComment {
     /// What to say. See [`crate::text::clean_comment`].
     pub body: String,
 }
 
-/// The body of `POST /catalog/v1/listings/{bundle}/reports`.
+/// The body of `POST /tempest/v1/listings/{bundle}/reports`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewReport {
     /// Why the listing needs the operator's attention. See [`crate::text::clean_report`].

@@ -1,12 +1,12 @@
-//! Requests to the catalog's API, from the page the tracker served, with the browser's `fetch`.
+//! Requests to the tracker's API, from the page the tracker served, with the browser's `fetch`.
 //! The session travels in the tracker's `HttpOnly` cookie, which `fetch` sends on its own.
 
 use std::fmt;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tempest_catalog_api::{PREFIX, codes};
-use tempest_protocol::tracker::ErrorResponse;
+use tempest_protocol::tracker::{API_PREFIX, ErrorResponse};
+use tempest_tracker_api::codes;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -79,7 +79,7 @@ pub mod method {
     pub const DELETE: &str = "DELETE";
 }
 
-/// Sends `method` to the catalog endpoint at `path` (relative to [`PREFIX`]), with `body` as
+/// Sends `method` to the tracker endpoint at `path` (relative to [`API_PREFIX`]), with `body` as
 /// JSON, and reads the answer.
 pub async fn send<T: DeserializeOwned>(
     method: &str,
@@ -90,14 +90,14 @@ pub async fn send<T: DeserializeOwned>(
         .map(serde_json::to_string)
         .transpose()
         .map_err(|e| RequestError::Unexpected(e.to_string()))?;
-    let url = format!("{PREFIX}{path}");
+    let url = format!("{API_PREFIX}{path}");
     let (status, text) = fetch(method, &url, body)
         .await
         .map_err(|_| RequestError::Unreachable)?;
     decode(status, &text)
 }
 
-/// `GET` of the catalog endpoint at `path`.
+/// `GET` of the tracker endpoint at `path`.
 pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, RequestError> {
     send(method::GET, path, None::<&()>).await
 }
@@ -105,7 +105,7 @@ pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, RequestError> {
 async fn fetch(method: &str, url: &str, body: Option<String>) -> Result<(u16, String), JsValue> {
     let init = web_sys::RequestInit::new();
     init.set_method(method);
-    // The catalog refuses bodies that don't say JSON, so other sites' forms can't post here;
+    // The tracker refuses bodies that don't say JSON, so other sites' forms can't post here;
     // every write sends one, even an empty object.
     if method != method::GET {
         let headers = web_sys::Headers::new()?;

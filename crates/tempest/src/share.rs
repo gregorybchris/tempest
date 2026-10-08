@@ -1,6 +1,5 @@
 //! `tempest share`: build a bundle's manifest, print its link, and serve it: through the
-//! daemon if one is running, otherwise from here. With `--publish`, list it on a tracker's
-//! catalog too.
+//! daemon if one is running, otherwise from here. With `--publish`, list it on a tracker too.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,10 +12,10 @@ use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis
 use tempest_net::{DEFAULT_PORT, Storage, StorageConfig, TrackerClient};
 use tempest_protocol::{BundleId, Link, Manifest};
 
-use crate::catalog::{ListingArgs, print_listing};
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
 use crate::progress::{StatusLine, bytes, peers};
+use crate::publish::{ListingArgs, print_listing};
 
 #[derive(Debug, clap::Args)]
 pub struct ShareArgs {
@@ -43,7 +42,7 @@ pub struct ShareArgs {
     /// trackers.
     #[arg(long, value_name = "URL")]
     tracker: Vec<String>,
-    /// List the bundle on the catalog of the tracker at this URL, signing in with this
+    /// List the bundle on the tracker at this URL, signing in with this
     /// installation's key. The tracker lists it once it has fetched the manifest from the
     /// swarm.
     #[arg(long, value_name = "URL", conflicts_with = "dry_run")]
@@ -130,8 +129,7 @@ async fn through_daemon(client: &ApiClient, args: &ShareArgs) -> Result<()> {
     if let Some(tracker) = &args.publish {
         let listing = client
             .publish(added.id, &args.listing.request(tracker))
-            .await
-            .with_context(|| format!("cannot publish on {tracker}"))?;
+            .await?;
         print_listing(tracker, &listing);
     }
     eprintln!(
@@ -141,7 +139,7 @@ async fn through_daemon(client: &ApiClient, args: &ShareArgs) -> Result<()> {
     Ok(())
 }
 
-/// Signs `peer`'s key in to `tracker`'s catalog and sets `bundle`'s listing there.
+/// Signs `peer`'s key in to `tracker` and sets `bundle`'s listing there.
 async fn publish(
     peer: &Peer,
     tracker: &str,
@@ -150,14 +148,12 @@ async fn publish(
 ) -> Result<()> {
     let client = TrackerClient::new(TRACKER_TIMEOUT).context("cannot set up HTTPS")?;
     let invite = listing.invite.as_deref();
-    let session = client
-        .catalog_sign_in(tracker, &peer.identity, invite)
-        .await?;
+    let session = client.sign_in(tracker, &peer.identity, invite).await?;
     let edited = client
         .edit_listing(tracker, &session.token, &bundle, &listing.edit())
         .await;
     // The session was only for this; it would expire on its own.
-    let _ = client.catalog_sign_out(tracker, &session.token).await;
+    let _ = client.sign_out(tracker, &session.token).await;
     print_listing(tracker, &edited?);
     Ok(())
 }
@@ -189,7 +185,7 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
         let published = publish(&peer, tracker, &args.listing, link.bundle).await;
         if let Err(error) = published {
             peer.stop().await;
-            return Err(error.context(format!("cannot publish on {tracker}")));
+            return Err(error.context(format!("cannot publish to {tracker}")));
         }
     }
     let mut handle = peer.node.share(storage).await?;

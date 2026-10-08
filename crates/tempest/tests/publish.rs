@@ -1,5 +1,5 @@
 //! `tempest share --publish` against `tempest tracker --catalog`, as separate processes on
-//! localhost: the bundle shows in the catalog with its content and the metadata given.
+//! localhost: the bundle shows on the tracker with its content and the metadata given.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -47,7 +47,7 @@ impl Drop for Running {
     }
 }
 
-/// Starts `tempest tracker` with a catalog in `dir` and returns it with its URL.
+/// Starts `tempest tracker` with listings (a catalog file) in `dir` and returns it with its URL.
 fn start_tracker(dir: &Path) -> (Running, String) {
     let mut child = tempest()
         .args(["tracker", "--bind", "127.0.0.1", "--port", "0", "--catalog"])
@@ -92,7 +92,7 @@ fn request(url: &str, method: &str, path: &str, body: &str) -> (u16, Value) {
 }
 
 #[test]
-fn a_published_share_appears_in_the_catalog() {
+fn a_published_share_appears_on_the_tracker() {
     let dir = tempfile::tempdir().unwrap();
     let (_tracker, url) = start_tracker(dir.path());
     let folder = dir.path().join("Rainfall 2025");
@@ -125,9 +125,9 @@ fn a_published_share_appears_in_the_catalog() {
         }
         printed.push(line);
     };
-    let catalog_line = printed.iter().find(|line| line.starts_with("catalog"));
+    let tracker_line = printed.iter().find(|line| line.starts_with("tracker"));
     assert!(
-        catalog_line.is_some_and(|line| line.contains("pending")),
+        tracker_line.is_some_and(|line| line.contains("pending")),
         "{printed:#?}"
     );
     let bundle = link
@@ -143,7 +143,7 @@ fn a_published_share_appears_in_the_catalog() {
     // Nobody signed in, as anyone browsing: shown once the tracker has fetched the manifest.
     let deadline = Instant::now() + LIMIT;
     let listing = loop {
-        let (status, body) = get(&url, &format!("/catalog/v1/listings/{bundle}"));
+        let (status, body) = get(&url, &format!("/tempest/v1/listings/{bundle}"));
         if status == 200 {
             break body;
         }
@@ -161,13 +161,13 @@ fn a_published_share_appears_in_the_catalog() {
     assert_eq!(listing["content"]["size"], 32);
     assert_eq!(listing["swarm"]["complete"], 1);
 
-    let (status, page) = get(&url, "/catalog/v1/listings?category=datasets");
+    let (status, page) = get(&url, "/tempest/v1/listings?category=datasets");
     assert_eq!(status, 200);
     assert_eq!(page["total"], 1);
     assert_eq!(page["listings"][0]["bundle"], bundle.as_str());
 
     // Searching finds it despite a typo, and counts its category and tags.
-    let (status, page) = get(&url, "/catalog/v1/listings?q=rainfal+csv&tag=weather");
+    let (status, page) = get(&url, "/tempest/v1/listings?q=rainfal+csv&tag=weather");
     assert_eq!(status, 200, "{page}");
     assert_eq!(page["total"], 1);
     assert_eq!(page["listings"][0]["bundle"], bundle.as_str());
@@ -175,7 +175,7 @@ fn a_published_share_appears_in_the_catalog() {
         page["facets"]["categories"],
         serde_json::json!([{ "value": "datasets", "count": 1 }])
     );
-    let (_, page) = get(&url, "/catalog/v1/listings?q=snowfall");
+    let (_, page) = get(&url, "/tempest/v1/listings?q=snowfall");
     assert_eq!(page["total"], 0);
 }
 
@@ -192,18 +192,50 @@ fn listing_fields_need_publish() {
     assert!(stderr.contains("--publish"), "{stderr}");
 }
 
-/// A browser's sign-in code, signed by `tempest catalog sign-in` with the engine's key while no
+/// A tracker that only announces has no sign-in, and publishing to it says so.
+#[test]
+fn publishing_to_a_tracker_without_listings_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = tempest()
+        .args(["tracker", "--bind", "127.0.0.1", "--port", "0"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let received = lines(child.stderr.take().unwrap());
+    let _tracker = Running(child);
+    let line = received.recv_timeout(LIMIT).unwrap();
+    let url = line
+        .strip_prefix("tracker listening on ")
+        .and_then(|rest| rest.split(';').next())
+        .unwrap_or_else(|| panic!("unexpected line: {line}"))
+        .to_owned();
+
+    let output = tempest()
+        .args(["sign-in", &url, "--code", "AAAAA-AAAAA", "--data-dir"])
+        .arg(dir.path().join("data"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!("tracker {url}: the tracker doesn't take listings")),
+        "{stderr}"
+    );
+}
+
+/// A browser's sign-in code, signed by `tempest sign-in` with the engine's key while no
 /// daemon runs; the browser then collects the session.
 #[test]
-fn catalog_sign_in_signs_a_browsers_code() {
+fn sign_in_signs_a_browsers_code() {
     let dir = tempfile::tempdir().unwrap();
     let (_tracker, url) = start_tracker(dir.path());
-    let (status, challenge) = request(&url, "POST", "/catalog/v1/challenges", "");
+    let (status, challenge) = request(&url, "POST", "/tempest/v1/session/challenges", "");
     assert_eq!(status, 200, "{challenge}");
     let code = challenge["code"].as_str().unwrap();
 
     let output = tempest()
-        .args(["catalog", "sign-in", &url, "--code", code, "--data-dir"])
+        .args(["sign-in", &url, "--code", code, "--data-dir"])
         .arg(dir.path().join("data"))
         .output()
         .unwrap();
@@ -215,15 +247,15 @@ fn catalog_sign_in_signs_a_browsers_code() {
         .unwrap_or_else(|| panic!("{stderr}"));
 
     let poll = serde_json::json!({ "code": code, "poll": challenge["poll"] }).to_string();
-    let (status, collected) = request(&url, "POST", "/catalog/v1/challenges/poll", &poll);
+    let (status, collected) = request(&url, "POST", "/tempest/v1/session/challenges/poll", &poll);
     assert_eq!(status, 200, "{collected}");
     assert_eq!(collected["session"]["account"]["key"], key);
 }
 
-/// The catalog's page is at `/`, whether its UI was built into the binary or not, and every
+/// The tracker's website is at `/`, whether it was built into the binary or not, and every
 /// file it names is served.
 #[test]
-fn the_tracker_serves_the_catalog_page() {
+fn the_tracker_serves_its_website() {
     let dir = tempfile::tempdir().unwrap();
     let (_tracker, url) = start_tracker(dir.path());
     let address = url.strip_prefix("http://").unwrap();
@@ -242,7 +274,7 @@ fn the_tracker_serves_the_catalog_page() {
     };
     let (status, html) = page("/");
     assert_eq!(status, "200");
-    assert!(html.contains("<title>Tempest catalog</title>"), "{html}");
+    assert!(html.contains("<title>Tempest tracker</title>"), "{html}");
     for name in html
         .split('"')
         .filter(|part| part.ends_with(".js") || part.ends_with(".css") || part.ends_with(".wasm"))
@@ -251,7 +283,7 @@ fn the_tracker_serves_the_catalog_page() {
         assert_eq!(page(&path).0, "200", "{path}");
     }
     // The API's paths stay the API's.
-    let (status, body) = page("/catalog/v1/nowhere");
+    let (status, body) = page("/tempest/v1/nowhere");
     assert_eq!(status, "404");
     assert!(body.contains("not_found"), "{body}");
 }
@@ -259,9 +291,9 @@ fn the_tracker_serves_the_catalog_page() {
 /// The operator's commands act on the catalog file, with the tracker stopped or running.
 #[test]
 fn operator_commands_hide_ban_and_list_reports() {
-    use tempest_catalog_api::listing::{Content, NewReport};
     use tempest_protocol::Hash;
     use tempest_tracker::{Catalog, CatalogConfig};
+    use tempest_tracker_api::listing::{Content, NewReport};
 
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("catalog.db");
@@ -331,10 +363,10 @@ fn operator_commands_hide_ban_and_list_reports() {
             .to_owned();
         (Running(child), url)
     };
-    let status = |bundle: &Hash| get(&url, &format!("/catalog/v1/listings/{bundle}")).0;
+    let status = |bundle: &Hash| get(&url, &format!("/tempest/v1/listings/{bundle}")).0;
     assert_eq!(status(&first), 200);
     let found = || {
-        get(&url, "/catalog/v1/listings").1["total"]
+        get(&url, "/tempest/v1/listings").1["total"]
             .as_u64()
             .unwrap()
     };

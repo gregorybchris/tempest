@@ -14,7 +14,7 @@ axum = ["dep:axum"]
 testing = []
 
 [dependencies]
-tempest-catalog-api.workspace = true
+tempest-tracker-api.workspace = true
 tempest-protocol.workspace = true
 
 axum = { workspace = true, optional = true }

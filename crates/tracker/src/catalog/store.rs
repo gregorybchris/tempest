@@ -9,11 +9,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
-use tempest_catalog_api::listing::{
-    Comment, Content, Listing, ListingStatus, Person, Vote, VoteCounts,
-};
 use tempest_protocol::tracker::BundleStats;
 use tempest_protocol::{BundleId, Hash, PeerId};
+use tempest_tracker_api::listing::{
+    Comment, Content, Listing, ListingStatus, Person, Vote, VoteCounts,
+};
 
 /// The migrations, in order. Migration `i` takes the schema from version `i` to `i + 1`.
 const MIGRATIONS: &[&str] = &[

@@ -13,11 +13,11 @@ use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use tempest_catalog_api::listing::Listing;
 use tempest_protocol::BundleId;
 use tempest_protocol::tracker::{
     API_PREFIX, AnnounceEvent, AnnounceRequest, BundleStats, ErrorCode, listing_message,
 };
+use tempest_tracker_api::listing::Listing;
 use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
@@ -57,7 +57,7 @@ impl Tracker {
         })
     }
 
-    /// The tracker with a catalog, served under `/catalog/v1/` beside the peer-list service.
+    /// The tracker with a catalog, served under `/tempest/v1/` beside the peer-list service.
     /// While it serves, it fetches pending listings' manifests from their swarms (see
     /// [`fetcher`]).
     pub fn with_catalog(mut self, catalog: Catalog) -> Self {

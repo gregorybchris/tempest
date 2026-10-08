@@ -4,10 +4,10 @@
 //! Everything here is a pure function of a listing's [`Signals`], so the orders can be tested
 //! with made-up numbers.
 
-use tempest_catalog_api::listing::VoteCounts;
-use tempest_catalog_api::query::Sort;
 use tempest_protocol::BundleId;
 use tempest_protocol::tracker::BundleStats;
+use tempest_tracker_api::listing::VoteCounts;
+use tempest_tracker_api::query::Sort;
 
 /// How many days of downloads count towards trending.
 pub const TRENDING_DAYS: u64 = 30;

@@ -11,8 +11,8 @@
 //! - deleting a removed transfer's files;
 //! - moving a transfer's files to another folder ("moving").
 //!
-//! Requests to trackers' catalogs, signing in with this peer's key and listing bundles, run on
-//! the handle; only the trackers a transfer is listed on pass through the task.
+//! Requests to trackers, signing in with this peer's key and listing bundles, run on the
+//! handle; only the trackers a transfer is listed on pass through the task.
 //!
 //! Every half second the task reads each running bundle's status, records what changed (the
 //! manifest's arrival, completion, progress, rates, time spent sharing), emits snapshots of
@@ -30,8 +30,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use tempest_catalog_api::account::Account;
-use tempest_catalog_api::listing::{Listing, ListingEdit};
 use tempest_core::Event;
 use tempest_net::{
     AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, HomeRelay, Identity,
@@ -40,6 +38,8 @@ use tempest_net::{
 };
 use tempest_protocol::link::ParseLinkError;
 use tempest_protocol::{Address, BundleId, ChunkLayout, Link, Manifest, PeerId, RangeList};
+use tempest_tracker_api::account::Account;
+use tempest_tracker_api::listing::{Listing, ListingEdit};
 use tokio::sync::{mpsc, oneshot};
 
 use self::task::EngineTask;
@@ -134,13 +134,13 @@ pub enum EngineError {
     /// A tracker URL is not an `http://` or `https://` URL.
     #[error("{0:?} is not an http:// or https:// URL")]
     InvalidTracker(String),
-    /// A request to a tracker failed, such as signing in to its catalog.
-    #[error("tracker {tracker}: {source}")]
+    /// A request to a tracker failed, such as signing in to it.
+    #[error("tracker {tracker}: {error}")]
     Tracker {
         /// The tracker's URL.
         tracker: String,
         /// What went wrong.
-        source: TrackerError,
+        error: TrackerError,
     },
     /// The engine has shut down.
     #[error("the engine has shut down")]
@@ -413,8 +413,8 @@ impl Engine {
         self.ask(command).await.unwrap_or(Err(EngineError::Stopped))
     }
 
-    /// Lists a transfer on the catalog of the tracker at `tracker` (D-129): signs in with this
-    /// peer's key, using `invite` for a first sign-in to a catalog that needs one, sets the
+    /// Lists a transfer on the tracker at `tracker` (D-129): signs in with this
+    /// peer's key, using `invite` for a first sign-in to a tracker that needs one, sets the
     /// listing's fields from `edit`, and from then on announces the transfer there with
     /// `listing`. The tracker lists it once it has fetched the manifest from the swarm.
     pub async fn publish(
@@ -428,20 +428,20 @@ impl Engine {
             return Err(EngineError::InvalidTracker(tracker.to_owned()));
         }
         self.get(id).await.ok_or(EngineError::NotFound(id))?;
-        let failed = |source| EngineError::Tracker {
+        let failed = |error| EngineError::Tracker {
             tracker: tracker.to_owned(),
-            source,
+            error,
         };
         let client = &self.tracker;
         let session = client
-            .catalog_sign_in(tracker, &self.identity, invite)
+            .sign_in(tracker, &self.identity, invite)
             .await
             .map_err(failed)?;
         let listing = client
             .edit_listing(tracker, &session.token, &id, edit)
             .await;
         // The session was only for this; it would expire on its own.
-        let _ = client.catalog_sign_out(tracker, &session.token).await;
+        let _ = client.sign_out(tracker, &session.token).await;
         let listing = listing.map_err(failed)?;
         let tracker = tracker.to_owned();
         self.call(|reply| Command::Publish(id, tracker, reply))
@@ -449,10 +449,10 @@ impl Engine {
         Ok(listing)
     }
 
-    /// Withdraws a transfer's listing from the catalog of the tracker at `tracker`: signs in
-    /// with this peer's key, withdraws the listing, signs out, and from then on announces the
+    /// Unpublishes a transfer from the tracker at `tracker`: signs in with this peer's key,
+    /// removes the listing, signs out, and from then on announces the
     /// transfer there without `listing`, or not at all if only publishing put it there. A
-    /// listing the catalog doesn't have counts as withdrawn.
+    /// listing the tracker doesn't have counts as removed.
     pub async fn unpublish(
         &self,
         id: BundleId,
@@ -462,17 +462,17 @@ impl Engine {
             return Err(EngineError::InvalidTracker(tracker.to_owned()));
         }
         self.get(id).await.ok_or(EngineError::NotFound(id))?;
-        let failed = |source| EngineError::Tracker {
+        let failed = |error| EngineError::Tracker {
             tracker: tracker.to_owned(),
-            source,
+            error,
         };
         let client = &self.tracker;
         let session = client
-            .catalog_sign_in(tracker, &self.identity, None)
+            .sign_in(tracker, &self.identity, None)
             .await
             .map_err(failed)?;
-        let withdrawn = client.withdraw_listing(tracker, &session.token, &id).await;
-        let _ = client.catalog_sign_out(tracker, &session.token).await;
+        let withdrawn = client.unpublish_listing(tracker, &session.token, &id).await;
+        let _ = client.sign_out(tracker, &session.token).await;
         match withdrawn {
             Ok(()) | Err(TrackerError::Refused { status: 404, .. }) => {}
             Err(error) => return Err(failed(error)),
@@ -482,10 +482,10 @@ impl Engine {
             .await
     }
 
-    /// Signs this peer's key in to the catalog of the tracker at `tracker` for whoever asked
-    /// for the sign-in `code`, such as a browser showing the catalog, using `invite` for a first
-    /// sign-in to a catalog that needs one.
-    pub async fn catalog_sign_in(
+    /// Signs this peer's key in to the tracker at `tracker` for whoever asked for the
+    /// sign-in `code`, such as a browser showing its website, using `invite` for a first sign-in
+    /// to a tracker that needs one.
+    pub async fn sign_in(
         &self,
         tracker: &str,
         code: &str,
@@ -496,11 +496,11 @@ impl Engine {
         }
         let session = self
             .tracker
-            .catalog_sign_code(tracker, &self.identity, code, invite)
+            .sign_code(tracker, &self.identity, code, invite)
             .await
-            .map_err(|source| EngineError::Tracker {
+            .map_err(|error| EngineError::Tracker {
                 tracker: tracker.to_owned(),
-                source,
+                error,
             })?;
         Ok(session.account)
     }

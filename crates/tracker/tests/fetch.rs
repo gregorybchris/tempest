@@ -8,7 +8,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tempest_catalog_api::listing::{Content, ListingEdit, ListingStatus};
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, FetchLimits, Identity, Node,
     NodeConfig, Storage, StorageConfig, TrackerClient, TrackerError,
@@ -16,6 +15,7 @@ use tempest_net::{
 use tempest_protocol::tree;
 use tempest_protocol::{Address, Entry, FileInfo, Manifest};
 use tempest_tracker::{Catalog, CatalogConfig, FetcherConfig, Tracker, TrackerConfig};
+use tempest_tracker_api::listing::{Content, ListingEdit, ListingStatus};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
@@ -114,10 +114,7 @@ async fn a_published_bundle_is_listed_once_its_manifest_is_fetched() {
         let bundle = manifest.bundle_id();
 
         let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
-        let session = client
-            .catalog_sign_in(&tracker, &identity, None)
-            .await
-            .unwrap();
+        let session = client.sign_in(&tracker, &identity, None).await.unwrap();
         assert_eq!(session.account.key, identity.peer_id());
         let edit = ListingEdit {
             title: Some("Field notes, 2026".into()),
@@ -155,10 +152,7 @@ async fn a_published_bundle_is_listed_once_its_manifest_is_fetched() {
         assert_eq!(listing.content, Some(content));
         assert_eq!(listing.swarm.complete, 1);
 
-        client
-            .catalog_sign_out(&tracker, &session.token)
-            .await
-            .unwrap();
+        client.sign_out(&tracker, &session.token).await.unwrap();
         let signed_out = client.edit_listing(&tracker, &session.token, &bundle, &edit);
         assert!(matches!(
             signed_out.await,
@@ -187,10 +181,7 @@ async fn a_manifest_over_the_limit_leaves_the_listing_pending() {
         let announcer = announce(&node, &tracker, &handle, &identity);
 
         let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
-        let session = client
-            .catalog_sign_in(&tracker, &identity, None)
-            .await
-            .unwrap();
+        let session = client.sign_in(&tracker, &identity, None).await.unwrap();
         // Long enough for several attempts.
         tokio::time::sleep(Duration::from_secs(2)).await;
         let listing = client

@@ -8,12 +8,12 @@ use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{Value, json};
-use tempest_catalog_api::account::sign_in_message;
-use tempest_catalog_api::listing::Content;
 use tempest_protocol::tracker::{Signature, listing_message};
 use tempest_protocol::{BundleId, PeerId};
 use tempest_tracker::limits::Action;
 use tempest_tracker::{Catalog, CatalogConfig, CatalogLimits, Rate, Tracker, TrackerConfig};
+use tempest_tracker_api::account::sign_in_message;
+use tempest_tracker_api::listing::Content;
 use tower::ServiceExt;
 
 const HOST: &str = "tracker.example.org";
@@ -93,7 +93,7 @@ async fn sign_in(router: &Router, key: &Key) -> String {
     let challenge = call(
         router,
         Method::POST,
-        "/catalog/v1/challenges",
+        "/tempest/v1/session/challenges",
         &[],
         Value::Null,
     )
@@ -105,7 +105,7 @@ async fn sign_in(router: &Router, key: &Key) -> String {
         "key": key.id(),
         "sig": key.sign(&sign_in_message(HOST, code)),
     });
-    let session = call(router, Method::POST, "/catalog/v1/sessions", &[], request).await;
+    let session = call(router, Method::POST, "/tempest/v1/session", &[], request).await;
     assert_eq!(session.status, StatusCode::OK, "{}", session.body);
     format!("Bearer {}", session.body["token"].as_str().unwrap())
 }
@@ -135,7 +135,7 @@ async fn announce_listed(router: &Router, key: &Key, bundle: &BundleId) -> Answe
 #[tokio::test]
 async fn a_tracker_without_a_catalog_ignores_listings() {
     let router = Tracker::new(TrackerConfig::default()).unwrap().router();
-    let info = call(&router, Method::GET, "/catalog/v1/info", &[], Value::Null).await;
+    let info = call(&router, Method::GET, "/tempest/v1/info", &[], Value::Null).await;
     assert_eq!(info.status, StatusCode::NOT_FOUND);
     // Even a bad signature: the field means nothing here.
     let key = Key::new(1);
@@ -147,7 +147,7 @@ async fn a_tracker_without_a_catalog_ignores_listings() {
 #[tokio::test]
 async fn info_lists_the_categories() {
     let router = tracker().router();
-    let info = call(&router, Method::GET, "/catalog/v1/info", &[], Value::Null).await;
+    let info = call(&router, Method::GET, "/tempest/v1/info", &[], Value::Null).await;
     assert_eq!(info.status, StatusCode::OK);
     assert_eq!(info.body["invites_required"], false);
     assert_eq!(info.body["categories"][0]["slug"], "datasets");
@@ -161,7 +161,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let challenge = call(
         &router,
         Method::POST,
-        "/catalog/v1/challenges",
+        "/tempest/v1/session/challenges",
         &[],
         Value::Null,
     )
@@ -171,7 +171,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let waiting = call(
         &router,
         Method::POST,
-        "/catalog/v1/challenges/poll",
+        "/tempest/v1/session/challenges/poll",
         &[],
         poll.clone(),
     )
@@ -183,7 +183,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let wrong = call(
         &router,
         Method::POST,
-        "/catalog/v1/sessions",
+        "/tempest/v1/session",
         &[],
         signed("evil.example"),
     )
@@ -193,7 +193,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let right = call(
         &router,
         Method::POST,
-        "/catalog/v1/sessions",
+        "/tempest/v1/session",
         &[],
         signed(HOST),
     )
@@ -204,7 +204,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let collected = call(
         &router,
         Method::POST,
-        "/catalog/v1/challenges/poll",
+        "/tempest/v1/session/challenges/poll",
         &[],
         poll,
     )
@@ -216,7 +216,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let me = call(
         &router,
         Method::GET,
-        "/catalog/v1/me",
+        "/tempest/v1/account",
         &[("cookie", &cookie)],
         Value::Null,
     )
@@ -227,7 +227,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     // Bodies must say they are JSON, which cross-site forms can't.
     let form = Request::builder()
         .method(Method::PUT)
-        .uri("/catalog/v1/me")
+        .uri("/tempest/v1/account")
         .header(header::HOST, HOST)
         .header(header::COOKIE, &cookie)
         .header(header::CONTENT_TYPE, "text/plain")
@@ -240,7 +240,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let out = call(
         &router,
         Method::DELETE,
-        "/catalog/v1/session",
+        "/tempest/v1/session",
         &[("cookie", &cookie)],
         Value::Null,
     )
@@ -254,7 +254,7 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     let me = call(
         &router,
         Method::GET,
-        "/catalog/v1/me",
+        "/tempest/v1/account",
         &[("cookie", &cookie)],
         Value::Null,
     )
@@ -274,7 +274,7 @@ async fn behind_a_proxy_the_forwarded_host_is_signed() {
     let challenge = call(
         &router,
         Method::POST,
-        "/catalog/v1/challenges",
+        "/tempest/v1/session/challenges",
         &[],
         Value::Null,
     )
@@ -289,7 +289,7 @@ async fn behind_a_proxy_the_forwarded_host_is_signed() {
     let session = call(
         &router,
         Method::POST,
-        "/catalog/v1/sessions",
+        "/tempest/v1/session",
         &forwarded,
         request,
     )
@@ -319,14 +319,14 @@ async fn announces_ask_for_listings_with_a_valid_signature() {
     );
 
     // Pending: hidden from others, shown to its publisher.
-    let path = format!("/catalog/v1/listings/{id}");
+    let path = format!("/tempest/v1/listings/{id}");
     let hidden = call(&router, Method::GET, &path, &[], Value::Null).await;
     assert_eq!(hidden.status, StatusCode::NOT_FOUND);
     let auth = sign_in(&router, &alice).await;
     let mine = call(
         &router,
         Method::GET,
-        "/catalog/v1/me/listings",
+        "/tempest/v1/account/listings",
         &[("authorization", &auth)],
         Value::Null,
     )
@@ -352,7 +352,7 @@ async fn announces_ask_for_listings_with_a_valid_signature() {
     let page = call(
         &router,
         Method::GET,
-        "/catalog/v1/listings",
+        "/tempest/v1/listings",
         &[],
         Value::Null,
     )
@@ -366,7 +366,7 @@ async fn publishers_describe_listings_and_others_vote_and_comment() {
     let router = tracker.router();
     let (alice, bob) = (Key::new(1), Key::new(2));
     let id = bundle(1);
-    let path = format!("/catalog/v1/listings/{id}");
+    let path = format!("/tempest/v1/listings/{id}");
 
     // Signed out, nothing can change.
     let edit = json!({
@@ -436,7 +436,7 @@ async fn publishers_describe_listings_and_others_vote_and_comment() {
     let comment_id = said.body["id"].as_u64().unwrap();
     let all = call(&router, Method::GET, &comments_path, &[], Value::Null).await;
     assert_eq!(all.body[0]["body"], "Thanks!");
-    let delete_path = format!("/catalog/v1/comments/{comment_id}");
+    let delete_path = format!("/tempest/v1/comments/{comment_id}");
     let not_hers = call(&router, Method::DELETE, &delete_path, &alice_h, Value::Null).await;
     assert_eq!(not_hers.status, StatusCode::FORBIDDEN);
     let deleted = call(&router, Method::DELETE, &delete_path, &bob_h, Value::Null).await;
@@ -446,7 +446,7 @@ async fn publishers_describe_listings_and_others_vote_and_comment() {
     let named = call(
         &router,
         Method::PUT,
-        "/catalog/v1/me",
+        "/tempest/v1/account",
         &alice_h,
         json!({ "name": "Alice" }),
     )
@@ -482,7 +482,7 @@ async fn browsing_filters_and_pages() {
     let page = call(
         &router,
         Method::GET,
-        "/catalog/v1/listings?limit=2",
+        "/tempest/v1/listings?limit=2",
         &[],
         Value::Null,
     )
@@ -492,7 +492,7 @@ async fn browsing_filters_and_pages() {
     let none = call(
         &router,
         Method::GET,
-        "/catalog/v1/listings?category=models",
+        "/tempest/v1/listings?category=models",
         &[],
         Value::Null,
     )
@@ -501,7 +501,7 @@ async fn browsing_filters_and_pages() {
     let bad = call(
         &router,
         Method::GET,
-        "/catalog/v1/listings?limit=-1",
+        "/tempest/v1/listings?limit=-1",
         &[],
         Value::Null,
     )
@@ -521,7 +521,7 @@ async fn list(tracker: &Tracker, key: &Key, auth: &str, n: u8, edit: Value) {
     };
     let catalog = tracker.catalog_handle().unwrap();
     catalog.lock().unwrap().set_content(&id, &content).unwrap();
-    let path = format!("/catalog/v1/listings/{id}");
+    let path = format!("/tempest/v1/listings/{id}");
     let edited = call(
         &router,
         Method::PUT,
@@ -535,7 +535,7 @@ async fn list(tracker: &Tracker, key: &Key, auth: &str, n: u8, edit: Value) {
 
 /// The bundles of a search's listings, by their first byte, and the whole page.
 async fn search(router: &Router, query: &str) -> (Vec<u8>, Value) {
-    let path = format!("/catalog/v1/listings?{query}");
+    let path = format!("/tempest/v1/listings?{query}");
     let page = call(router, Method::GET, &path, &[], Value::Null).await;
     assert_eq!(page.status, StatusCode::OK, "{}", page.body);
     let found = page.body["listings"]
@@ -626,7 +626,7 @@ async fn searching_counts_facets_and_filters_by_tag() {
     let bad = call(
         &router,
         Method::GET,
-        "/catalog/v1/listings?tag=c%2B%2B",
+        "/tempest/v1/listings?tag=c%2B%2B",
         &[],
         Value::Null,
     )
@@ -651,7 +651,7 @@ async fn search_follows_edits_and_withdrawals() {
     .await;
     assert_eq!(search(&router, "q=tide").await.0, [1]);
 
-    let path = format!("/catalog/v1/listings/{}", bundle(1));
+    let path = format!("/tempest/v1/listings/{}", bundle(1));
     let headers = [("authorization", auth.as_str())];
     let edit = json!({ "title": "Sea levels" });
     call(&router, Method::PUT, &path, &headers, edit).await;
@@ -695,7 +695,7 @@ async fn sorts_rank_by_swarm_votes_and_downloads() {
         (&carol_auth, &b1, "up"),
         (&bob_auth, &b3, "down"),
     ] {
-        let path = format!("/catalog/v1/listings/{id}/vote");
+        let path = format!("/tempest/v1/listings/{id}/vote");
         let headers = [("authorization", auth.as_str())];
         let voted = call(
             &router,
@@ -742,7 +742,7 @@ async fn requests_over_a_clients_limit_are_refused() {
         call(
             &router,
             Method::POST,
-            "/catalog/v1/challenges",
+            "/tempest/v1/session/challenges",
             &from,
             Value::Null,
         )
@@ -760,7 +760,7 @@ async fn requests_over_a_clients_limit_are_refused() {
     assert_eq!(challenge("203.0.113.6").await.status, StatusCode::OK);
 
     // Each action has its own bucket.
-    let info = async || call(&router, Method::GET, "/catalog/v1/info", &[], Value::Null).await;
+    let info = async || call(&router, Method::GET, "/tempest/v1/info", &[], Value::Null).await;
     assert_eq!(info().await.status, StatusCode::OK);
     assert_eq!(info().await.status, StatusCode::TOO_MANY_REQUESTS);
 }
@@ -804,7 +804,7 @@ async fn reports_reach_the_operator_one_per_key_and_listing() {
         json!({ "title": "Weather" }),
     )
     .await;
-    let path = format!("/catalog/v1/listings/{}/reports", bundle(1));
+    let path = format!("/tempest/v1/listings/{}/reports", bundle(1));
     let bob_h = [("authorization", bob_auth.as_str())];
     let report = async |reason: &str| {
         let body = json!({ "reason": reason });
@@ -817,7 +817,7 @@ async fn reports_reach_the_operator_one_per_key_and_listing() {
     let anonymous = call(&router, Method::POST, &path, &[], body.clone()).await;
     assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
     assert_eq!(report("  ").await, StatusCode::BAD_REQUEST);
-    let missing = format!("/catalog/v1/listings/{}/reports", bundle(9));
+    let missing = format!("/tempest/v1/listings/{}/reports", bundle(9));
     let none = call(&router, Method::POST, &missing, &bob_h, body).await;
     assert_eq!(none.status, StatusCode::NOT_FOUND);
 
@@ -852,7 +852,7 @@ async fn reports_are_rate_limited() {
     let (alice, bob) = (Key::new(1), Key::new(2));
     let (alice_auth, bob_auth) = (sign_in(&router, &alice).await, sign_in(&router, &bob).await);
     list(&tracker, &alice, &alice_auth, 1, json!({})).await;
-    let path = format!("/catalog/v1/listings/{}/reports", bundle(1));
+    let path = format!("/tempest/v1/listings/{}/reports", bundle(1));
     let headers = [("authorization", bob_auth.as_str())];
     let body = json!({ "reason": "spam" });
     let first = call(&router, Method::POST, &path, &headers, body.clone()).await;
@@ -882,7 +882,7 @@ async fn hiding_and_banning_take_effect_in_a_running_tracker() {
     list(&tracker, &alice, &alice_auth, 1, titled("Weather")).await;
     list(&tracker, &alice, &alice_auth, 2, titled("Weather models")).await;
     list(&tracker, &bob, &bob_auth, 3, titled("Weather bob")).await;
-    let page = |id: u8| format!("/catalog/v1/listings/{}", bundle(id));
+    let page = |id: u8| format!("/tempest/v1/listings/{}", bundle(id));
     let status = async |auth: &[(&str, &str)], id: u8| {
         let answer = call(&router, Method::GET, &page(id), auth, Value::Null).await;
         answer.status

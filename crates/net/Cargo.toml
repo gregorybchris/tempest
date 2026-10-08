@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-tempest-catalog-api.workspace = true
+tempest-tracker-api.workspace = true
 tempest-core.workspace = true
 tempest-protocol.workspace = true
 

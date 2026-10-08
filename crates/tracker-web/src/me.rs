@@ -3,9 +3,9 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use tempest_catalog_api::account::{Account, AccountEdit};
-use tempest_catalog_api::listing::{Listing, ListingPage, ListingStatus};
-use tempest_catalog_api::text;
+use tempest_tracker_api::account::{Account, AccountEdit};
+use tempest_tracker_api::listing::{Listing, ListingPage, ListingStatus};
+use tempest_tracker_api::text;
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
 
@@ -16,7 +16,7 @@ use crate::route::Route;
 use crate::views::{Copyable, HealthBars, fetch, shown};
 
 /// The most of the account's listings shown, which the API allows in one page.
-const MAX_SHOWN: u32 = tempest_catalog_api::listing::MAX_PAGE;
+const MAX_SHOWN: u32 = tempest_tracker_api::listing::MAX_PAGE;
 
 /// The account page.
 #[component]
@@ -60,7 +60,7 @@ fn AccountView(account: Account) -> impl IntoView {
         problem.set(None);
         saving.set(true);
         spawn_local(async move {
-            let answer = request::send::<Account>(method::PUT, "me", Some(&edit)).await;
+            let answer = request::send::<Account>(method::PUT, "account", Some(&edit)).await;
             let _ = saving.try_set(false);
             match answer {
                 Ok(account) => {
@@ -124,7 +124,7 @@ fn AccountView(account: Account) -> impl IntoView {
 /// The listings the account published.
 #[component]
 fn MyListings() -> impl IntoView {
-    let (fetched, _) = fetch::<ListingPage>(move || format!("me/listings?limit={MAX_SHOWN}"));
+    let (fetched, _) = fetch::<ListingPage>(move || format!("account/listings?limit={MAX_SHOWN}"));
     let list = shown(fetched, move |page: ListingPage| {
         if page.listings.is_empty() {
             return view! {
@@ -177,7 +177,7 @@ fn MyRow(listing: Listing) -> impl IntoView {
     let (label, tone) = match listing.status {
         ListingStatus::Listed => ("listed", Tone::Up),
         ListingStatus::Pending => ("pending", Tone::Warn),
-        ListingStatus::Withdrawn => ("withdrawn", Tone::Dim),
+        ListingStatus::Withdrawn => ("unpublished", Tone::Dim),
     };
     let why = match listing.status {
         ListingStatus::Listed => "Shown to everyone",

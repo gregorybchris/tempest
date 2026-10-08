@@ -1,10 +1,10 @@
-//! The catalog's web UI in headless Chrome, against `tempest tracker --catalog` with bundles
+//! The tracker's website in headless Chrome, against `tempest tracker --catalog` with bundles
 //! published by `tempest share --publish`: searching with a typo, narrowing by category and
-//! tag, and signing in by signing the page's code with `tempest catalog sign-in`.
+//! tag, and signing in by signing the page's code with `tempest sign-in`.
 //!
-//! It needs the UI built into the binary (`trunk build` in `crates/catalog-web`) and
+//! It needs the UI built into the binary (`trunk build` in `crates/tracker-web`) and
 //! ChromeDriver, named by `CHROMEDRIVER`, so it is ignored by default. Run it with
-//! `cargo test -p tempest --test catalog_web -- --ignored`; it fails without either. CI's web
+//! `cargo test -p tempest --test tracker_web -- --ignored`; it fails without either. CI's web
 //! job runs it so.
 
 #![cfg(unix)]
@@ -110,7 +110,7 @@ fn http(address: &str, method: &str, path: &str, body: Option<&Value>) -> (u16, 
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
-/// Starts `tempest tracker` with a catalog in `dir`, and returns it with its address.
+/// Starts `tempest tracker` with listings in `dir`, and returns it with its address.
 fn start_tracker(dir: &Path) -> (Running, String) {
     let mut child = tempest()
         .args(["tracker", "--bind", "127.0.0.1", "--port", "0", "--catalog"])
@@ -336,7 +336,7 @@ impl Drop for Browser {
 }
 
 #[test]
-#[ignore = "needs ChromeDriver in CHROMEDRIVER and the catalog UI built in; run with --ignored"]
+#[ignore = "needs ChromeDriver in CHROMEDRIVER and the tracker website built in; run with --ignored"]
 fn search_filter_and_sign_in_in_a_browser() {
     let chromedriver = std::env::var("CHROMEDRIVER")
         .expect("set CHROMEDRIVER to ChromeDriver's path to run the browser test");
@@ -344,8 +344,8 @@ fn search_filter_and_sign_in_in_a_browser() {
     let (_tracker, tracker) = start_tracker(dir.path());
     let (_, page) = http(&tracker, "GET", "/", None);
     assert!(
-        page.contains("tempest-catalog-web"),
-        "this binary was built without the catalog UI: run trunk build in crates/catalog-web"
+        page.contains("tempest-tracker-web"),
+        "this binary was built without the tracker website: run trunk build in crates/tracker-web"
     );
 
     // One publisher lists two bundles, another a third. The first share creates the shared
@@ -356,7 +356,7 @@ fn search_filter_and_sign_in_in_a_browser() {
     let listed = |count: usize| {
         let tracker = tracker.clone();
         move || {
-            let (_, page) = http(&tracker, "GET", "/catalog/v1/listings", None);
+            let (_, page) = http(&tracker, "GET", "/tempest/v1/listings", None);
             match page.contains(&format!(r#""total":{count}"#)) {
                 true => Ok(()),
                 false => Err(page),
@@ -463,13 +463,12 @@ fn search_filter_and_sign_in_in_a_browser() {
     assert_eq!(
         command,
         format!(
-            "tempest catalog sign-in {} --code {code}",
+            "tempest sign-in {} --code {code}",
             home.trim_end_matches('/')
         )
     );
     let signed = tempest()
         .args([
-            "catalog",
             "sign-in",
             home.trim_end_matches('/'),
             "--code",

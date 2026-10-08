@@ -1,12 +1,12 @@
-//! Parses arbitrary text as the catalog's listing query string, and checks that whatever parses
+//! Parses arbitrary text as a tracker's listing query string, and checks that whatever parses
 //! writes a query string that parses back to the same query, within the query's limits.
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use tempest_catalog_api::listing::MAX_PAGE;
-use tempest_catalog_api::query::{ListingQuery, MAX_SEARCH};
-use tempest_catalog_api::text::{self, MAX_TAGS};
+use tempest_tracker_api::listing::MAX_PAGE;
+use tempest_tracker_api::query::{ListingQuery, MAX_SEARCH};
+use tempest_tracker_api::text::{self, MAX_TAGS};
 
 fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(data) else {

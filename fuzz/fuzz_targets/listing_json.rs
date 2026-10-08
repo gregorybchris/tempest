@@ -1,4 +1,4 @@
-//! Parses every catalog request type from arbitrary JSON, checks that whatever parses
+//! Parses every listing and sign-in request type from arbitrary JSON, checks that whatever parses
 //! serializes to JSON that parses back to the same value, and that the text rules hold for
 //! whatever text they accept.
 
@@ -7,9 +7,9 @@
 use libfuzzer_sys::fuzz_target;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tempest_catalog_api::account::{AccountEdit, Poll, SignIn, normalize_code};
-use tempest_catalog_api::listing::{ListingEdit, NewComment, VoteRequest};
-use tempest_catalog_api::text;
+use tempest_tracker_api::account::{AccountEdit, Poll, SignIn, normalize_code};
+use tempest_tracker_api::listing::{ListingEdit, NewComment, VoteRequest};
+use tempest_tracker_api::text;
 
 fn check<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(json: &[u8]) {
     if let Ok(value) = serde_json::from_slice::<T>(json) {

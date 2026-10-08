@@ -153,7 +153,7 @@ pub struct TransferRow {
     pub chunks: u64,
     /// How long it has shared while complete, over every run, in milliseconds.
     pub seeding_time: u64,
-    /// The trackers whose catalogs the user chose to list it on (D-129).
+    /// The trackers the user chose to publish it to (D-129).
     pub publish: BTreeSet<String>,
 }
 

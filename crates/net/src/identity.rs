@@ -114,7 +114,7 @@ impl Identity {
     }
 
     /// The key's Ed25519 signature over `message`, such as an announce's listing request or a
-    /// catalog sign-in (`protocol/trackers.md`).
+    /// sign-in (`protocol/trackers.md`).
     pub fn sign(&self, message: &[u8]) -> Signature {
         let pair = Ed25519KeyPair::from_pkcs8_maybe_unchecked(&self.pkcs8)
             .expect("checked when the key was loaded");

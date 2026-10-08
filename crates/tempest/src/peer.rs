@@ -53,7 +53,7 @@ pub struct PeerArgs {
 /// A running node and what it needs to tell others about itself.
 pub struct Peer {
     pub node: Node,
-    /// Its key, which signs catalog sign-ins and listing requests.
+    /// Its key, which signs sign-ins and listing requests.
     pub identity: Identity,
     /// The addresses it advertises.
     pub addresses: Vec<Address>,

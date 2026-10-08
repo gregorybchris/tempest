@@ -2,12 +2,12 @@
 //!
 //! There are no passwords. Signing in proves ownership of a peer key:
 //!
-//! 1. Someone asks for a [`Challenge`] (`POST /catalog/v1/challenges`). Its `code` is short
+//! 1. Someone asks for a [`Challenge`] (`POST /tempest/v1/session/challenges`). Its `code` is short
 //!    enough to type, and its `poll` secret stays with whoever asked.
 //! 2. The key's owner signs [`sign_in_message`] for the code and sends a [`SignIn`]
-//!    (`POST /catalog/v1/sessions`). The answer is a [`Session`].
+//!    (`POST /tempest/v1/session`). The answer is a [`Session`].
 //! 3. Whoever holds `poll` can also collect that session, once, with a [`Poll`]
-//!    (`POST /catalog/v1/challenges/poll`).
+//!    (`POST /tempest/v1/session/challenges/poll`).
 //!
 //! A command-line client does all three steps itself. A browser does steps 1 and 3 and shows
 //! the code, which the user's client signs in step 2, so the key never leaves the client.
@@ -20,17 +20,17 @@ use tempest_protocol::PeerId;
 use tempest_protocol::tracker::Signature;
 
 /// The prefix of [`sign_in_message`], which keeps its signatures from meaning anything else.
-pub const SIGN_IN_CONTEXT: &[u8] = b"tempest catalog sign-in v1\0";
+pub const SIGN_IN_CONTEXT: &[u8] = b"tempest sign-in v1\0";
 
 /// What a key signs to sign in with challenge `code` at the tracker whose URL has `authority`
 /// (its host, and port if the URL has one): [`SIGN_IN_CONTEXT`], `authority`, a zero byte and
 /// `code`.
 ///
 /// ```
-/// use tempest_catalog_api::account::sign_in_message;
+/// use tempest_tracker_api::account::sign_in_message;
 /// assert_eq!(
 ///     sign_in_message("tracker.example.org", "K7QM2-X4PDV"),
-///     b"tempest catalog sign-in v1\0tracker.example.org\0K7QM2-X4PDV"
+///     b"tempest sign-in v1\0tracker.example.org\0K7QM2-X4PDV"
 /// );
 /// ```
 pub fn sign_in_message(authority: &str, code: &str) -> Vec<u8> {
@@ -46,7 +46,7 @@ pub fn sign_in_message(authority: &str, code: &str) -> Vec<u8> {
 /// The authority of `url` as [`sign_in_message`] takes it: see [`normalize_authority`].
 ///
 /// ```
-/// use tempest_catalog_api::account::authority;
+/// use tempest_tracker_api::account::authority;
 /// assert_eq!(authority("https://Tracker.example.org:443/x"), Some("tracker.example.org".into()));
 /// assert_eq!(authority("http://127.0.0.1:4777"), Some("127.0.0.1:4777".into()));
 /// assert_eq!(authority("tracker.example.org"), None);
@@ -75,7 +75,7 @@ pub fn normalize_authority(authority: &str) -> String {
     }
 }
 
-/// A sign-in challenge: the answer to `POST /catalog/v1/challenges`.
+/// A sign-in challenge: the answer to `POST /tempest/v1/session/challenges`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Challenge {
     /// The code to sign, such as `K7QM2-X4PDV`.
@@ -86,7 +86,7 @@ pub struct Challenge {
     pub expires_in_secs: u64,
 }
 
-/// The body of `POST /catalog/v1/sessions`: a signed challenge.
+/// The body of `POST /tempest/v1/session`: a signed challenge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignIn {
     /// The challenge's code.
@@ -95,12 +95,12 @@ pub struct SignIn {
     pub key: PeerId,
     /// The key's signature over [`sign_in_message`].
     pub sig: Signature,
-    /// An invite, for a key's first sign-in to a catalog that requires one.
+    /// An invite, for a key's first sign-in to a tracker that requires one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invite: Option<String>,
 }
 
-/// The body of `POST /catalog/v1/challenges/poll`.
+/// The body of `POST /tempest/v1/session/challenges/poll`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Poll {
     /// The challenge's code.
@@ -127,7 +127,7 @@ pub struct Session {
     pub account: Account,
 }
 
-/// An account: a key that has signed in, or published, at least once. `GET /catalog/v1/me`
+/// An account: a key that has signed in, or published, at least once. `GET /tempest/v1/account`
 /// answers with the session's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
@@ -139,7 +139,7 @@ pub struct Account {
     pub joined: u64,
 }
 
-/// The body of `PUT /catalog/v1/me`.
+/// The body of `PUT /tempest/v1/account`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountEdit {
     /// The name to show, or `null` to show none. See [`crate::text::clean_name`].
@@ -157,7 +157,7 @@ pub const CODE_LEN: usize = 10;
 /// as `1`, and a dash after the fifth character. Spaces and dashes typed are ignored.
 ///
 /// ```
-/// use tempest_catalog_api::account::normalize_code;
+/// use tempest_tracker_api::account::normalize_code;
 /// assert_eq!(normalize_code(" k7qm2 x4pdo "), "K7QM2-X4PD0");
 /// ```
 pub fn normalize_code(code: &str) -> String {

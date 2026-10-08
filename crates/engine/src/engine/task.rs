@@ -690,7 +690,7 @@ impl EngineTask {
         Ok(self.info(&id).expect("just inserted"))
     }
 
-    /// Lists a transfer on `tracker`'s catalog from now on: saved, and told to its running
+    /// Lists a transfer on `tracker` from now on: saved, and told to its running
     /// bundle's supervisor.
     async fn publish(
         &mut self,
@@ -711,7 +711,7 @@ impl EngineTask {
         .await
     }
 
-    /// Stops listing a transfer on `tracker`'s catalog: forgotten, and told to its running
+    /// Stops listing a transfer on `tracker`: forgotten, and told to its running
     /// bundle's supervisor, which stops announcing there unless the transfer has another reason
     /// to.
     async fn unpublish(

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use tempest_catalog_api::account::{Challenge, Poll, PollResponse};
-use tempest_catalog_api::codes;
+use tempest_tracker_api::account::{Challenge, Poll, PollResponse};
+use tempest_tracker_api::codes;
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
 
@@ -64,7 +64,8 @@ fn SignIn() -> impl IntoView {
     let ask = move || {
         step.set(Step::Asking);
         spawn_local(async move {
-            let answer = request::send::<Challenge>(method::POST, "challenges", None::<&()>).await;
+            let answer =
+                request::send::<Challenge>(method::POST, "session/challenges", None::<&()>).await;
             let _ = step.try_set(match answer {
                 Ok(challenge) => {
                     let expires = unix_now() + challenge.expires_in_secs;
@@ -96,9 +97,12 @@ fn SignIn() -> impl IntoView {
                     code: challenge.code.clone(),
                     poll: challenge.poll.clone(),
                 };
-                let answer =
-                    request::send::<PollResponse>(method::POST, "challenges/poll", Some(&body))
-                        .await;
+                let answer = request::send::<PollResponse>(
+                    method::POST,
+                    "session/challenges/poll",
+                    Some(&body),
+                )
+                .await;
                 let _ = busy.try_set_value(false);
                 match answer {
                     Ok(PollResponse {

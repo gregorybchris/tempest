@@ -1,4 +1,4 @@
-/* The catalog UI's layout; components and themes come from the UI kit's stylesheet. */
+/* The tracker website's layout; components and themes come from the UI kit's stylesheet. */
 
 .app {
   min-height: 100vh;
@@ -47,14 +47,28 @@ a.btn {
   align-items: center;
 }
 
-.appbar__product {
+.appbar__tracker {
+  display: inline-flex;
+  align-items: stretch;
   margin-left: -6px;
-  padding: 1px 6px;
   border: 1px solid var(--line);
-  color: var(--dim);
   font-size: var(--text-xs);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.appbar__kind {
+  padding: 1px 7px;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
+.appbar__host {
+  padding: 1px 8px;
+  color: var(--dim);
+  letter-spacing: 0.06em;
+  text-transform: none;
 }
 
 .appbar__links {
@@ -975,10 +989,14 @@ a.tag:hover {
     padding: 8px var(--gap-3);
   }
 
-  .appbar__product,
+  .appbar__host,
   .appbar__links,
   .bigsearch__key {
     display: none;
+  }
+
+  .appbar__kind {
+    border-right: 0;
   }
 
   .wordmark {

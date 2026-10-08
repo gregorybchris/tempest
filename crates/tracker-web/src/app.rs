@@ -1,12 +1,12 @@
 //! The page: the app bar, the view the address names, the hint bar, and the keyboard, theme,
-//! catalog info and session behind them.
+//! tracker info and session behind them.
 
 use leptos::ev;
 use leptos::html::Input;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use tempest_catalog_api::CatalogInfo;
-use tempest_catalog_api::account::Account;
+use tempest_tracker_api::TrackerInfo;
+use tempest_tracker_api::account::Account;
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::theme::apply_look;
 use tempest_ui_kit::{Look, Theme};
@@ -24,7 +24,7 @@ use crate::route::Route;
 use crate::signin::SignInPage;
 
 /// Where the theme is kept in this browser.
-const THEME_KEY: &str = "tempest-catalog-theme";
+const THEME_KEY: &str = "tempest-tracker-theme";
 
 /// Who is signed in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,8 +56,8 @@ pub struct Ctx {
     replace_next: StoredValue<bool>,
     /// The theme.
     pub theme: RwSignal<Theme>,
-    /// The catalog's categories and rules, once the tracker answers.
-    pub info: RwSignal<Option<CatalogInfo>>,
+    /// The tracker's categories and rules, once it answers.
+    pub info: RwSignal<Option<TrackerInfo>>,
     /// Who is signed in.
     pub me: RwSignal<Me>,
     /// Where signing in returns to.
@@ -105,7 +105,7 @@ impl Ctx {
     pub fn refresh_me(&self) {
         let me = self.me;
         spawn_local(async move {
-            let answer = request::get::<Account>("me").await;
+            let answer = request::get::<Account>("account").await;
             let _ = me.try_set(match answer {
                 Ok(account) => Me::SignedIn(account),
                 Err(_) => Me::SignedOut,
@@ -116,6 +116,11 @@ impl Ctx {
     /// The tracker's origin, such as `https://tracker.example.org`, as the browser reached it.
     pub fn origin(&self) -> String {
         window().location().origin().unwrap_or_default()
+    }
+
+    /// The tracker's host, with its port if it has one, such as `tracker.example.org`.
+    pub fn host(&self) -> String {
+        window().location().host().unwrap_or_default()
     }
 
     /// Copies `text`, and says so.
@@ -241,13 +246,18 @@ fn Shell() -> impl IntoView {
     };
     let hints = Signal::derive(move || ctx.route.with(keys::hints));
     let browsing = move || matches!(page.get(), Page::Browse);
+    let host = ctx.host();
+    let host_title = host.clone();
     view! {
         <div class="app">
             <header class="appbar">
-                <a class="appbar__home" href="#/" aria-label="Catalog home">
+                <a class="appbar__home" href="#/" aria-label="Tracker home">
                     <Wordmark />
                 </a>
-                <span class="appbar__product">"catalog"</span>
+                <span class="appbar__tracker" title=host_title>
+                    <span class="appbar__kind">"Tracker"</span>
+                    <span class="appbar__host">{host}</span>
+                </span>
                 <nav class="appbar__links" aria-label="Areas">
                     <a href="#/" aria-current=move || browsing().then_some("page")>"Browse"</a>
                     <Show when=move || ctx.me.with(|m| m.account().is_some())>
@@ -324,7 +334,7 @@ fn page_of(route: &Route) -> Page {
 
 fn load_info(ctx: Ctx) {
     spawn_local(async move {
-        if let Ok(info) = request::get::<CatalogInfo>("info").await {
+        if let Ok(info) = request::get::<TrackerInfo>("info").await {
             let _ = ctx.info.try_set(Some(info));
         }
     });

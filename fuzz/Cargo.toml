@@ -13,7 +13,7 @@ arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
 serde = "1"
 serde_json = "1"
-tempest-catalog-api = { path = "../crates/catalog-api" }
+tempest-tracker-api = { path = "../crates/tracker-api" }
 tempest-core = { path = "../crates/core" }
 tempest-engine = { path = "../crates/engine" }
 tempest-net = { path = "../crates/net" }
@@ -153,15 +153,15 @@ doc = false
 bench = false
 
 [[bin]]
-name = "catalog_json"
-path = "fuzz_targets/catalog_json.rs"
+name = "listing_json"
+path = "fuzz_targets/listing_json.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "catalog_query"
-path = "fuzz_targets/catalog_query.rs"
+name = "listing_query"
+path = "fuzz_targets/listing_query.rs"
 test = false
 doc = false
 bench = false

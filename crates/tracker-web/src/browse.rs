@@ -2,8 +2,8 @@
 //! Everything the page shows follows the address, so every search has a link.
 
 use leptos::prelude::*;
-use tempest_catalog_api::listing::{FacetCount, Listing, ListingPage};
-use tempest_catalog_api::query::{ListingQuery, Sort};
+use tempest_tracker_api::listing::{FacetCount, Listing, ListingPage};
+use tempest_tracker_api::query::{ListingQuery, Sort};
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
 use wasm_bindgen::JsCast;
@@ -113,7 +113,7 @@ pub fn BrowsePage() -> impl IntoView {
                         class="bigsearch__input"
                         type="search"
                         placeholder="search datasets, models, software…"
-                        aria-label="Search the catalog"
+                        aria-label="Search listings"
                         spellcheck="false"
                         autocomplete="off"
                         prop:value=move || text.get()
@@ -174,7 +174,7 @@ fn Facets(query: Memo<ListingQuery>, page: crate::views::Fetched<ListingPage>) -
     let ctx = use_ctx();
     // The last facets stay while a new answer is on its way, so the column doesn't jump.
     let facets = Memo::new(
-        move |previous: Option<&tempest_catalog_api::listing::Facets>| match page.get() {
+        move |previous: Option<&tempest_tracker_api::listing::Facets>| match page.get() {
             Some(Ok(page)) => page.facets,
             _ => previous.cloned().unwrap_or_default(),
         },

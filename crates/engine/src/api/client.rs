@@ -21,13 +21,13 @@ pub use tempest_api::ApiEvent;
 
 use super::sse::{SseDecoder, SseEvent};
 use super::{
-    AddRequest, ApiError, CatalogSignInRequest, Category, CategoryRequest, EngineInfo, MoveRequest,
-    NameRequest, PREFIX, PublishRequest, QueuePlace, QueueRequest, TagsRequest,
+    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
+    PublishRequest, QueuePlace, QueueRequest, TagsRequest, TrackerSignInRequest,
 };
 use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use crate::{SettingsView, TransferInfo};
-use tempest_catalog_api::account::Account;
-use tempest_catalog_api::listing::Listing;
+use tempest_tracker_api::account::Account;
+use tempest_tracker_api::listing::Listing;
 
 /// Why a request to the API failed.
 #[derive(Debug, thiserror::Error)]
@@ -295,7 +295,7 @@ impl ApiClient {
             .await
     }
 
-    /// Lists a transfer on a tracker's catalog (see [`Engine::publish`](crate::Engine::publish)).
+    /// Lists a transfer on a tracker (see [`Engine::publish`](crate::Engine::publish)).
     pub async fn publish(
         &self,
         id: BundleId,
@@ -305,7 +305,7 @@ impl ApiClient {
         self.send(Method::POST, &path, Some(request)).await
     }
 
-    /// Withdraws a transfer's listing from a tracker's catalog (see
+    /// Unpublishes a transfer from a tracker (see
     /// [`Engine::unpublish`](crate::Engine::unpublish)).
     pub async fn unpublish(
         &self,
@@ -319,13 +319,12 @@ impl ApiClient {
         self.send(Method::DELETE, &path, None::<&()>).await
     }
 
-    /// Signs the engine's key in to a tracker's catalog for whoever asked for the request's
-    /// code.
-    pub async fn catalog_sign_in(
+    /// Signs the engine's key in to a tracker for whoever asked for the request's code.
+    pub async fn tracker_sign_in(
         &self,
-        request: &CatalogSignInRequest,
+        request: &TrackerSignInRequest,
     ) -> Result<Account, ClientError> {
-        self.send(Method::POST, "/catalog/sign-in", Some(request))
+        self.send(Method::POST, "/trackers/sign-in", Some(request))
             .await
     }
 

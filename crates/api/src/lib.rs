@@ -105,7 +105,7 @@ pub struct TransferInfo {
     pub link: String,
     /// Its own settings, by dotted key, over the engine's.
     pub settings: BTreeMap<String, serde_json::Value>,
-    /// The trackers whose catalogs it is published on (D-208).
+    /// The trackers it is published to (D-208).
     #[serde(default)]
     pub published: BTreeSet<String>,
 }

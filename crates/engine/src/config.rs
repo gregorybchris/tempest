@@ -46,7 +46,7 @@ pub struct EngineConfig {
     pub queue: QueueSettings,
     /// Trackers to announce every transfer to, besides those its link names.
     pub trackers: Vec<String>,
-    /// Trackers whose catalogs list every new share (D-129). Shares announce to them too.
+    /// Trackers that list every new share (D-129). Shares announce to them too.
     pub publish: Vec<String>,
     /// Relays to pick a home relay from (D-029: none by default).
     pub relays: RelaySettings,
@@ -873,7 +873,7 @@ data_dir: /var/lib/tempest
 save_folder: /srv/downloads
 queue: { max_active_downloads: null, max_active_uploads: 2 }
 trackers: [https://tracker.example.org]
-publish: [https://catalog.example.org]
+publish: [https://listings.example.org]
 ",
         )
         .unwrap();

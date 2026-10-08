@@ -1,7 +1,7 @@
 //! Finding peers through trackers (`protocol/trackers.md`).
 //!
-//! A [`TrackerClient`] makes single requests, including those to a tracker's catalog (see
-//! [`crate::catalog`]). An [`Announcer`] keeps one bundle announced to one tracker for as long as
+//! A [`TrackerClient`] makes single requests, including those about a tracker's listings (see
+//! [`crate::publish`]). An [`Announcer`] keeps one bundle announced to one tracker for as long as
 //! the bundle runs: `started` when it begins, `update` every interval, `completed` when the
 //! bundle completes and `stopped` when it stops, handing the peers each response lists to the
 //! bundle. Its announces carry `listing` while the user chose to list the bundle there.
@@ -54,6 +54,9 @@ pub enum TrackerError {
     /// The tracker's URL is not an HTTP or HTTPS URL with a host.
     #[error("the tracker's URL is not an HTTP or HTTPS URL with a host")]
     NotHttp,
+    /// The tracker has no sign-in or listings: it only announces.
+    #[error("the tracker doesn't take listings")]
+    NoListings,
 }
 
 fn describe(error: &Option<ErrorResponse>) -> String {

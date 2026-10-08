@@ -1,6 +1,6 @@
 [package]
-name = "tempest-catalog-api"
-description = "The tracker catalog API's types and rules, shared by the tracker, the client and the catalog's web UI"
+name = "tempest-tracker-api"
+description = "A tracker's listing API: types and rules shared by the tracker, the client and the tracker website"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

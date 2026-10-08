@@ -2,8 +2,8 @@
 //! browser's back button works: `#/?q=rain&category=datasets` (browsing, with the API's own
 //! query string), `#/listings/{bundle}`, `#/listings/{bundle}/edit`, `#/sign-in` and `#/me`.
 
-use tempest_catalog_api::query::ListingQuery;
 use tempest_protocol::BundleId;
+use tempest_tracker_api::query::ListingQuery;
 
 /// A view and what it shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +70,7 @@ impl Route {
 
 #[cfg(test)]
 mod tests {
-    use tempest_catalog_api::query::Sort;
+    use tempest_tracker_api::query::Sort;
 
     use super::*;
 

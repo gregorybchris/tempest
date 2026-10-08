@@ -65,7 +65,7 @@ pub struct AnnounceRequest {
     /// How many peers the client would like. Defaults to [`DEFAULT_NUM_WANT`].
     #[serde(default = "default_num_want")]
     pub num_want: u32,
-    /// Asks a tracker with a catalog to list the bundle. Absent unless the peer opted in.
+    /// Asks a tracker that takes listings to list the bundle. Absent unless the peer opted in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listing: Option<ListingRequest>,
 }

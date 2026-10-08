@@ -21,18 +21,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ring::digest::{SHA256, digest};
 use ring::signature::{ED25519, UnparsedPublicKey};
-use tempest_catalog_api::account::{
+use tempest_protocol::tracker::{BundleStats, ErrorCode, Signature};
+use tempest_protocol::{BundleId, Hash, PeerId};
+use tempest_tracker_api::account::{
     Account, AccountEdit, CODE_LEN, Challenge, Poll, PollResponse, Session, SignIn, code_from,
     normalize_code, sign_in_message,
 };
-use tempest_catalog_api::listing::{
+use tempest_tracker_api::listing::{
     Comment, Content, Listing, ListingEdit, ListingPage, ListingStatus, MAX_PAGE, NewComment,
     NewReport, Vote,
 };
-use tempest_catalog_api::query::ListingQuery;
-use tempest_catalog_api::{CatalogInfo, Category, codes, default_categories, text};
-use tempest_protocol::tracker::{BundleStats, ErrorCode, Signature};
-use tempest_protocol::{BundleId, Hash, PeerId};
+use tempest_tracker_api::query::ListingQuery;
+use tempest_tracker_api::{Category, TrackerInfo, codes, default_categories, text};
 
 pub use search::SearchIndex;
 pub use store::{Report, Store, StoreError};
@@ -224,8 +224,8 @@ impl Catalog {
     }
 
     /// What the catalog is like.
-    pub fn info(&self) -> CatalogInfo {
-        CatalogInfo {
+    pub fn info(&self) -> TrackerInfo {
+        TrackerInfo {
             categories: self.config.categories.clone(),
             invites_required: self.config.invites_required,
         }
@@ -306,7 +306,7 @@ impl Catalog {
     }
 
     /// Signs in with a signed challenge that reached the tracker at `authority` (see
-    /// [`tempest_catalog_api::account::normalize_authority`]).
+    /// [`tempest_tracker_api::account::normalize_authority`]).
     pub fn sign_in(
         &mut self,
         now: u64,

@@ -1,11 +1,11 @@
 //! The publisher's form for a listing: its title, description, category and tags, and
-//! withdrawing it or listing it again.
+//! unpublishing it or listing it again.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use tempest_catalog_api::listing::{Listing, ListingStatus};
-use tempest_catalog_api::text::{MAX_DESCRIPTION, MAX_TITLE};
 use tempest_protocol::BundleId;
+use tempest_tracker_api::listing::{Listing, ListingStatus};
+use tempest_tracker_api::text::{MAX_DESCRIPTION, MAX_TITLE};
 use tempest_ui_kit::components::*;
 
 use crate::app::{Me, use_ctx};
@@ -105,13 +105,13 @@ fn Form(listing: Listing) -> impl IntoView {
             }
         });
     };
-    let withdraw = move || {
+    let unpublish = move || {
         confirm.set(false);
         spawn_local(async move {
             let path = format!("listings/{bundle}");
             match request::send::<serde_json::Value>(method::DELETE, &path, None::<&()>).await {
                 Ok(_) => {
-                    toasts.push(Tone::Neutral, "Withdrawn. Edit it to list it again.");
+                    toasts.push(Tone::Neutral, "Unpublished. Edit it to list it again.");
                     ctx.go(Route::Me);
                 }
                 Err(error) => toasts.push(Tone::Bad, error.to_string()),
@@ -151,7 +151,7 @@ fn Form(listing: Listing) -> impl IntoView {
         false => listing.title.clone(),
     };
     let steps = vec![
-        ("catalog".to_owned(), "#/".to_owned()),
+        ("listings".to_owned(), "#/".to_owned()),
         (shown_title, Route::Listing(bundle).hash()),
     ];
     view! {
@@ -160,7 +160,7 @@ fn Form(listing: Listing) -> impl IntoView {
                 <Crumbs steps here="edit" />
                 <h1 class="page__title glow">"Edit the listing"</h1>
                 {withdrawn.then(|| view! {
-                    <p class="notice"><Badge tone=Tone::Warn label="withdrawn".to_owned() />" Saving lists it again."</p>
+                    <p class="notice"><Badge tone=Tone::Warn label="unpublished".to_owned() />" Saving lists it again."</p>
                 })}
             </header>
             <form class="edit__form" on:submit=move |e| {
@@ -212,20 +212,20 @@ fn Form(listing: Listing) -> impl IntoView {
                     <a class="btn btn--ghost" href=Route::Listing(bundle).hash()>"Cancel"</a>
                     <span class="appbar__spacer"></span>
                     {(!withdrawn).then(|| view! {
-                        <Button kind=ButtonKind::Danger on_click=move || confirm.set(true)>"Withdraw"</Button>
+                        <Button kind=ButtonKind::Danger on_click=move || confirm.set(true)>"Unpublish"</Button>
                     })}
                 </div>
             </form>
             <Dialog
                 open=confirm
                 on_close=move || confirm.set(false)
-                title="Withdraw this listing?"
+                title="Unpublish this listing?"
                 actions=ViewFn::from(move || view! {
                     <Button kind=ButtonKind::Ghost on_click=move || confirm.set(false)>"Keep it"</Button>
-                    <Button kind=ButtonKind::Danger on_click=move || withdraw()>"Withdraw"</Button>
+                    <Button kind=ButtonKind::Danger on_click=move || unpublish()>"Unpublish"</Button>
                 })
             >
-                <p>"It stops showing in the catalog, and announces won't list it again. You can list it again by editing it."</p>
+                <p>"It stops showing on this tracker, and announces won't list it again. You can list it again by editing it."</p>
             </Dialog>
         </section>
     }

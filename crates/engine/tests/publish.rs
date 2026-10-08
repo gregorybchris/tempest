@@ -1,4 +1,4 @@
-//! Publishing shares on a tracker's catalog (D-129): by `Engine::publish`, by the config's
+//! Publishing shares to a tracker (D-129): by `Engine::publish`, by the config's
 //! `publish` trackers, and through the API, withdrawing them too; and signing in for a browser
 //! with a code.
 
@@ -8,8 +8,6 @@ use std::fs;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tempest_catalog_api::account::{Challenge, PollResponse};
-use tempest_catalog_api::listing::{Listing, ListingEdit, ListingStatus};
 use tempest_engine::api::client::{ApiClient, ClientError};
 use tempest_engine::api::{Access, PublishRequest, router};
 use tempest_engine::{Engine, EngineError, ShareOptions};
@@ -17,6 +15,8 @@ use tempest_net::TrackerError;
 use tempest_net::{EndpointConfig, TrackerClient};
 use tempest_protocol::BundleId;
 use tempest_tracker::{Catalog, CatalogConfig, FetcherConfig, Tracker, TrackerConfig};
+use tempest_tracker_api::account::{Challenge, PollResponse};
+use tempest_tracker_api::listing::{Listing, ListingEdit, ListingStatus};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -58,7 +58,7 @@ async fn share(engine: &Engine, dir: &std::path::Path, name: &str, size: usize) 
         .id
 }
 
-/// Waits until the catalog shows `bundle` to everyone.
+/// Waits until the tracker lists `bundle` to everyone.
 async fn listed(tracker: &str, bundle: &BundleId) -> Listing {
     let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
     let wait = async {
@@ -141,13 +141,13 @@ async fn the_configs_publish_trackers_list_new_shares() {
     engine.shutdown().await;
 }
 
-/// Posts `body` to the catalog endpoint at `path`, as a browser would, and reads the answer.
+/// Posts `body` to the tracker endpoint at `path`, as a browser would, and reads the answer.
 async fn post<T: serde::de::DeserializeOwned>(tracker: &str, path: &str, body: Value) -> T {
     let address = tracker.strip_prefix("http://").unwrap();
     let mut stream = TcpStream::connect(address).await.unwrap();
     let body = body.to_string();
     let request = format!(
-        "POST /catalog/v1/{path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+        "POST /tempest/v1/{path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
@@ -159,7 +159,7 @@ async fn post<T: serde::de::DeserializeOwned>(tracker: &str, path: &str, body: V
     serde_json::from_str(body).unwrap()
 }
 
-/// A browser asks the catalog for a code; the engine signs it, and the browser collects the
+/// A browser asks the tracker for a code; the engine signs it, and the browser collects the
 /// session of the engine's key.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_engine_signs_in_a_browsers_code() {
@@ -167,19 +167,17 @@ async fn the_engine_signs_in_a_browsers_code() {
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(config(dir.path())).await.unwrap();
 
-    let challenge: Challenge = post(&tracker, "challenges", Value::Null).await;
+    let challenge: Challenge = post(&tracker, "session/challenges", Value::Null).await;
     let code = challenge.code.to_lowercase().replace('-', " ");
-    let account = engine.catalog_sign_in(&tracker, &code, None).await.unwrap();
+    let account = engine.sign_in(&tracker, &code, None).await.unwrap();
     assert_eq!(account.key, engine.peer_id());
 
     let poll = json!({ "code": challenge.code, "poll": challenge.poll });
-    let collected: PollResponse = post(&tracker, "challenges/poll", poll).await;
+    let collected: PollResponse = post(&tracker, "session/challenges/poll", poll).await;
     assert_eq!(collected.session.unwrap().account.key, engine.peer_id());
 
     // A used code signs nobody in again.
-    let again = engine
-        .catalog_sign_in(&tracker, &challenge.code, None)
-        .await;
+    let again = engine.sign_in(&tracker, &challenge.code, None).await;
     assert!(matches!(again, Err(EngineError::Tracker { .. })));
     engine.shutdown().await;
 }
@@ -210,14 +208,14 @@ async fn unpublishing_through_the_api_withdraws_the_listing() {
 
     let transfer = api.unpublish(id, &tracker).await.unwrap();
     assert!(transfer.published.is_empty());
-    let catalog = TrackerClient::new(Duration::from_secs(5)).unwrap();
+    let browse = TrackerClient::new(Duration::from_secs(5)).unwrap();
     let gone = |result: Result<Listing, TrackerError>| {
         matches!(result, Err(TrackerError::Refused { status: 404, .. }))
     };
-    assert!(gone(catalog.listing(&tracker, None, &id).await));
+    assert!(gone(browse.listing(&tracker, None, &id).await));
     // Past a few announce intervals, it stays withdrawn.
     tokio::time::sleep(Duration::from_secs(3)).await;
-    assert!(gone(catalog.listing(&tracker, None, &id).await));
+    assert!(gone(browse.listing(&tracker, None, &id).await));
 
     // Withdrawing again changes nothing; an unknown transfer is refused.
     api.unpublish(id, &tracker).await.unwrap();

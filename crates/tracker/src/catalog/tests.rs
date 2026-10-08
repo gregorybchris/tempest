@@ -3,14 +3,14 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use ring::signature::{Ed25519KeyPair, KeyPair};
-use tempest_catalog_api::account::{AccountEdit, Poll, SignIn, sign_in_message};
-use tempest_catalog_api::codes;
-use tempest_catalog_api::listing::{
-    Content, ListingEdit, ListingPage, ListingStatus, NewComment, Vote,
-};
-use tempest_catalog_api::query::{ListingQuery, Sort};
 use tempest_protocol::tracker::{BundleStats, Signature, listing_message};
 use tempest_protocol::{BundleId, PeerId};
+use tempest_tracker_api::account::{AccountEdit, Poll, SignIn, sign_in_message};
+use tempest_tracker_api::codes;
+use tempest_tracker_api::listing::{
+    Content, ListingEdit, ListingPage, ListingStatus, NewComment, Vote,
+};
+use tempest_tracker_api::query::{ListingQuery, Sort};
 
 use super::{Catalog, CatalogConfig, verify};
 

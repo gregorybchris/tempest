@@ -1,13 +1,13 @@
-//! How the catalog reads: names, swarm health, ages, votes, excerpts, search highlights, pages,
+//! How the tracker's listings read: names, swarm health, ages, votes, excerpts, search highlights, pages,
 //! and the commands and links the page hands out. Plain functions, tested natively.
 
-use tempest_catalog_api::Category;
-use tempest_catalog_api::listing::{ListingEdit, Person, VoteCounts};
-use tempest_catalog_api::query::Sort;
-use tempest_catalog_api::text::{self, TextError};
 use tempest_protocol::BundleId;
 use tempest_protocol::link::Link;
 use tempest_protocol::tracker::BundleStats;
+use tempest_tracker_api::Category;
+use tempest_tracker_api::listing::{ListingEdit, Person, VoteCounts};
+use tempest_tracker_api::query::Sort;
+use tempest_tracker_api::text::{self, TextError};
 use tempest_ui_kit::components::Tone;
 use tempest_ui_kit::format;
 
@@ -207,8 +207,8 @@ pub fn pages(offset: u64, limit: u32, total: u64) -> Vec<PageButton> {
 pub fn sign_in_command(origin: &str, code: &str, invite: &str) -> String {
     let invite = invite.trim();
     match invite.is_empty() {
-        true => format!("tempest catalog sign-in {origin} --code {code}"),
-        false => format!("tempest catalog sign-in {origin} --code {code} --invite {invite}"),
+        true => format!("tempest sign-in {origin} --code {code}"),
+        false => format!("tempest sign-in {origin} --code {code} --invite {invite}"),
     }
 }
 
@@ -363,7 +363,7 @@ mod tests {
     fn commands_and_links() {
         assert_eq!(
             sign_in_command("http://127.0.0.1:4777", "K7QM2-X4PDV", " "),
-            "tempest catalog sign-in http://127.0.0.1:4777 --code K7QM2-X4PDV"
+            "tempest sign-in http://127.0.0.1:4777 --code K7QM2-X4PDV"
         );
         assert!(sign_in_command("http://t", "C", "INV").ends_with("--invite INV"));
         let bundle: BundleId = "3f9a000000000000000000000000000000000000000000000000000000000000"
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn the_form_applies_the_catalogs_rules() {
+    fn the_form_applies_the_trackers_rules() {
         let form = EditForm {
             title: "  Rainfall ".into(),
             description: "Daily.\r\n".into(),

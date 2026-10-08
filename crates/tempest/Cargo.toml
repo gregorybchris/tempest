@@ -17,7 +17,7 @@ eula = false
 
 [dependencies]
 tempest-assets.workspace = true
-tempest-catalog-api.workspace = true
+tempest-tracker-api.workspace = true
 tempest-core.workspace = true
 tempest-engine.workspace = true
 tempest-net.workspace = true

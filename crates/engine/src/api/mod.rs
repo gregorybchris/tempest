@@ -93,7 +93,7 @@ pub fn router(engine: Engine, access: Access) -> Router {
         .route(&transfer("/settings"), put(set_transfer_settings))
         .route(&transfer("/queue"), post(move_in_queue))
         .route(&transfer("/publish"), post(publish).delete(unpublish))
-        .route(&format!("{PREFIX}/catalog/sign-in"), post(catalog_sign_in))
+        .route(&format!("{PREFIX}/trackers/sign-in"), post(tracker_sign_in))
         .route(
             &format!("{PREFIX}/settings"),
             get(settings).patch(change_settings),
@@ -407,13 +407,13 @@ async fn unpublish(
     ok(&engine.unpublish(bundle_id(&id)?, &query.tracker).await?)
 }
 
-async fn catalog_sign_in(
+async fn tracker_sign_in(
     State(engine): State<Engine>,
-    Json(request): Json<CatalogSignInRequest>,
+    Json(request): Json<TrackerSignInRequest>,
 ) -> Result {
     let invite = request.invite.as_deref();
     ok(&engine
-        .catalog_sign_in(&request.tracker, &request.code, invite)
+        .sign_in(&request.tracker, &request.code, invite)
         .await?)
 }
 

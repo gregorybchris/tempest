@@ -1,4 +1,4 @@
-//! The query string of `GET /catalog/v1/listings`: what to search for, which category and tags
+//! The query string of `GET /tempest/v1/listings`: what to search for, which category and tags
 //! to keep, how to sort and which page. The web UI writes it and the tracker reads it, so the two
 //! always agree.
 //!

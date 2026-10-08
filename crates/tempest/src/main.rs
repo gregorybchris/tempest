@@ -1,12 +1,12 @@
 //! The `tempest` binary.
 
-mod catalog;
 mod daemon;
 mod engine;
 mod get;
 mod handoff;
 mod peer;
 mod progress;
+mod publish;
 mod relay;
 mod share;
 mod tracker;
@@ -53,9 +53,13 @@ enum Command {
     /// Moved to the `tempest-sim` binary (D-214).
     #[command(hide = true)]
     Sim(SimArgs),
-    /// Sign in to trackers' catalogs and list transfers there.
-    #[command(subcommand)]
-    Catalog(catalog::CatalogCommand),
+    /// List a transfer on a tracker, or change its listing.
+    Publish(publish::PublishArgs),
+    /// Remove a transfer's listing from a tracker, and stop asking the tracker to list it.
+    Unpublish(publish::UnpublishArgs),
+    /// Sign a browser in to a tracker's website: sign the code the website shows with this
+    /// installation's key.
+    SignIn(publish::SignInArgs),
     /// Run a tracker, which helps peers in public swarms find each other.
     Tracker(tracker::TrackerArgs),
     /// Run a relay, which lends public addresses to peers behind routers.
@@ -84,7 +88,9 @@ fn main() -> ExitCode {
         Command::Sim(_) => Err(anyhow::anyhow!(
             "the simulator is now its own program: run `tempest-sim` with the same arguments"
         )),
-        Command::Catalog(command) => catalog::catalog(command),
+        Command::Publish(args) => publish::publish(args),
+        Command::Unpublish(args) => publish::unpublish(args),
+        Command::SignIn(args) => publish::sign_in(args),
         Command::Tracker(args) => tracker::tracker(args),
         Command::Relay(args) => relay::relay(args),
     };

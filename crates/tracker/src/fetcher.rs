@@ -16,11 +16,11 @@ use std::time::{Duration, Instant};
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use tempest_catalog_api::listing::Content;
 use tempest_net::{Endpoint, EndpointConfig, FetchLimits, Identity, fetch_manifest};
 use tempest_protocol::message::PeerRecord;
 use tempest_protocol::tracker::PeerEntry;
 use tempest_protocol::{BundleId, Manifest, PeerId};
+use tempest_tracker_api::listing::Content;
 use tokio::task::JoinSet;
 
 use crate::catalog::Catalog;

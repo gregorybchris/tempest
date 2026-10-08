@@ -4803,13 +4803,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempest-assets",
- "tempest-catalog-api",
  "tempest-core",
  "tempest-engine",
  "tempest-net",
  "tempest-protocol",
  "tempest-relay",
  "tempest-tracker",
+ "tempest-tracker-api",
  "tempest-tui",
  "tempfile",
  "tokio",
@@ -4824,8 +4824,8 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
- "tempest-catalog-api",
  "tempest-protocol",
+ "tempest-tracker-api",
  "thiserror 2.0.21",
 ]
 
@@ -4834,34 +4834,6 @@ name = "tempest-assets"
 version = "0.1.0"
 dependencies = [
  "axum",
-]
-
-[[package]]
-name = "tempest-catalog-api"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
- "tempest-protocol",
-]
-
-[[package]]
-name = "tempest-catalog-web"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "js-sys",
- "leptos",
- "proptest",
- "serde",
- "serde_json",
- "tempest-catalog-api",
- "tempest-protocol",
- "tempest-ui-kit",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -4896,12 +4868,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempest-api",
- "tempest-catalog-api",
  "tempest-core",
  "tempest-net",
  "tempest-protocol",
  "tempest-relay",
  "tempest-tracker",
+ "tempest-tracker-api",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -4929,10 +4901,10 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2",
- "tempest-catalog-api",
  "tempest-core",
  "tempest-protocol",
  "tempest-tracker",
+ "tempest-tracker-api",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -5042,13 +5014,41 @@ dependencies = [
  "serde",
  "serde_json",
  "tantivy",
- "tempest-catalog-api",
  "tempest-net",
  "tempest-protocol",
+ "tempest-tracker-api",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "tempest-tracker-api"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempest-protocol",
+]
+
+[[package]]
+name = "tempest-tracker-web"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "leptos",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempest-protocol",
+ "tempest-tracker-api",
+ "tempest-ui-kit",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

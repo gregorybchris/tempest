@@ -1,4 +1,5 @@
-//! The catalog's HTTP endpoints, under [`PREFIX`]. `tempest_catalog_api` defines their bodies.
+//! The catalog's HTTP endpoints, under [`API_PREFIX`] beside the peer-list service's.
+//! `tempest_tracker_api` defines their bodies.
 //!
 //! Requests authenticate with a session token: a bearer token in `Authorization`, or the
 //! [`SESSION_COOKIE`] a browser gets when it collects a session. Every body must be JSON with a
@@ -21,12 +22,12 @@ use axum::response::Response;
 use axum::routing::{delete, get, post, put};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use tempest_catalog_api::account::{AccountEdit, Poll, PollResponse, SignIn, normalize_authority};
-use tempest_catalog_api::listing::{ListingEdit, NewComment, NewReport, VoteRequest};
-use tempest_catalog_api::query::{DEFAULT_LIMIT, ListingQuery};
-use tempest_catalog_api::{PREFIX, SESSION_COOKIE};
-use tempest_protocol::tracker::ErrorCode;
+use tempest_protocol::tracker::{API_PREFIX, ErrorCode};
 use tempest_protocol::{BundleId, PeerId};
+use tempest_tracker_api::SESSION_COOKIE;
+use tempest_tracker_api::account::{AccountEdit, Poll, PollResponse, SignIn, normalize_authority};
+use tempest_tracker_api::listing::{ListingEdit, NewComment, NewReport, VoteRequest};
+use tempest_tracker_api::query::{DEFAULT_LIMIT, ListingQuery};
 
 use super::unix_now as now;
 use crate::limits::Action;
@@ -40,15 +41,14 @@ type Answer = Result<Response, Refusal>;
 
 /// The catalog's routes, for a tracker that has a catalog.
 pub(crate) fn router(tracker: &Tracker) -> Router<Tracker> {
-    let route = |path: &str| format!("{PREFIX}{path}");
+    let route = |path: &str| format!("{API_PREFIX}{path}");
     Router::new()
         .route(&route("info"), get(info))
-        .route(&route("challenges"), post(challenge))
-        .route(&route("challenges/poll"), post(poll))
-        .route(&route("sessions"), post(sign_in))
-        .route(&route("session"), delete(sign_out))
-        .route(&route("me"), get(me).put(edit_me))
-        .route(&route("me/listings"), get(my_listings))
+        .route(&route("session/challenges"), post(challenge))
+        .route(&route("session/challenges/poll"), post(poll))
+        .route(&route("session"), post(sign_in).delete(sign_out))
+        .route(&route("account"), get(me).put(edit_me))
+        .route(&route("account/listings"), get(my_listings))
         .route(&route("listings"), get(listings))
         .route(
             &route("listings/{bundle}"),
@@ -71,11 +71,11 @@ struct ClientIp(IpAddr);
 
 /// The action a request to the route `path` with `method` counts as, if any.
 fn action(method: &Method, path: &str) -> Option<Action> {
-    let path = path.strip_prefix(PREFIX)?;
+    let path = path.strip_prefix(API_PREFIX)?;
     Some(match (method, path) {
         (&Method::DELETE, "session") => return None,
-        (&Method::POST, "challenges") => Action::Challenge,
-        (&Method::POST, "challenges/poll" | "sessions") => Action::SignIn,
+        (&Method::POST, "session/challenges") => Action::Challenge,
+        (&Method::POST, "session/challenges/poll" | "session") => Action::SignIn,
         (&Method::PUT, "listings/{bundle}/vote") => Action::Vote,
         (&Method::POST, "listings/{bundle}/comments") => Action::Comment,
         (&Method::POST, "listings/{bundle}/reports") => Action::Report,
@@ -168,7 +168,7 @@ fn signed_in(tracker: &Tracker, headers: &HeaderMap) -> Result<PeerId, Refusal> 
     let token = token(headers).ok_or_else(|| Refusal {
         status: 401,
         ..Refusal::new(
-            ErrorCode::Other(tempest_catalog_api::codes::UNAUTHORIZED.into()),
+            ErrorCode::Other(tempest_tracker_api::codes::UNAUTHORIZED.into()),
             "sign in first",
         )
     })?;
@@ -269,7 +269,7 @@ async fn edit_me(
     })())
 }
 
-/// The query string of `GET /catalog/v1/me/listings`.
+/// The query string of `GET /tempest/v1/account/listings`.
 #[derive(Debug, Deserialize)]
 struct PageQuery {
     #[serde(default)]

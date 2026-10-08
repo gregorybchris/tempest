@@ -200,7 +200,7 @@ impl TrackerProcess {
         stats.complete
     }
 
-    /// The status of `bundle`'s listing in the catalog, as anyone browsing sees it: 200 or 404.
+    /// The status of `bundle`'s listing on the tracker, as anyone browsing sees it: 200 or 404.
     fn listing_status(&self, bundle: &str) -> u16 {
         let bundle: BundleId = bundle.parse().unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -350,8 +350,8 @@ fn the_cli_reaches_a_daemon_with_remote_access_through_its_data_directory() {
     daemon.interrupt();
 }
 
-/// `tempest share --publish` lists a share through the daemon, and `tempest catalog unpublish`
-/// withdraws it, through the daemon or with none running.
+/// `tempest share --publish` lists a share through the daemon, and `tempest unpublish`
+/// removes it, through the daemon or with none running.
 #[test]
 fn the_cli_publishes_and_unpublishes_through_the_daemon() {
     let root = tempfile::tempdir().unwrap();
@@ -375,9 +375,9 @@ fn the_cli_publishes_and_unpublishes_through_the_daemon() {
     }
     assert_eq!(transfers(&dir)[0]["published"][0], tracker.url.as_str());
 
-    let withdrawn = run(tempest(&dir).args(["catalog", "unpublish", "notes", &tracker.url]));
+    let withdrawn = run(tempest(&dir).args(["unpublish", "notes", &tracker.url]));
     assert!(
-        stdout(&withdrawn).contains("withdrawn"),
+        stdout(&withdrawn).contains("unpublished"),
         "{}",
         stdout(&withdrawn)
     );
@@ -386,8 +386,8 @@ fn the_cli_publishes_and_unpublishes_through_the_daemon() {
 
     // With no daemon, the command signs in with the engine's key itself.
     daemon.interrupt();
-    let again = run(tempest(&dir).args(["catalog", "unpublish", &id, &tracker.url]));
-    assert!(stdout(&again).contains("withdrawn"), "{}", stdout(&again));
+    let again = run(tempest(&dir).args(["unpublish", &id, &tracker.url]));
+    assert!(stdout(&again).contains("unpublished"), "{}", stdout(&again));
     assert_eq!(tracker.listing_status(&id), 404);
 }
 

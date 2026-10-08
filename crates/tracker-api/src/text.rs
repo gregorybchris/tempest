@@ -1,4 +1,4 @@
-//! The rules for the text people write in a catalog. The tracker applies them to what it stores;
+//! The rules for the text people write in listings. The tracker applies them to what it stores;
 //! clients can apply them first to explain a problem sooner.
 //!
 //! Each rule trims surrounding whitespace, refuses control characters other than those it names,

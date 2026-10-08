@@ -3,12 +3,12 @@
 use leptos::html::Textarea;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use tempest_catalog_api::listing::{
+use tempest_protocol::BundleId;
+use tempest_tracker_api::listing::{
     Comment, Listing, ListingStatus, NewComment, NewReport, Vote, VoteRequest,
 };
-use tempest_catalog_api::query::ListingQuery;
-use tempest_catalog_api::text::{self, MAX_COMMENT, MAX_REPORT};
-use tempest_protocol::BundleId;
+use tempest_tracker_api::query::ListingQuery;
+use tempest_tracker_api::text::{self, MAX_COMMENT, MAX_REPORT};
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
 
@@ -86,7 +86,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
         true => "untitled".to_owned(),
         false => l.title.clone(),
     };
-    let mut steps = vec![("catalog".to_owned(), "#/".to_owned())];
+    let mut steps = vec![("listings".to_owned(), "#/".to_owned())];
     if let Some(slug) = &l.category {
         let q = ListingQuery {
             category: Some(slug.clone()),
@@ -101,9 +101,10 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
             "Only you see this. It shows once the tracker has fetched its manifest from a peer \
              that shares it, so keep sharing it.",
         )),
-        ListingStatus::Withdrawn => {
-            Some(("withdrawn", "Only you see this. Edit it to list it again."))
-        }
+        ListingStatus::Withdrawn => Some((
+            "unpublished",
+            "Only you see this. Edit it to list it again.",
+        )),
     };
     let paragraphs = present::paragraphs(&l.description)
         .into_iter()

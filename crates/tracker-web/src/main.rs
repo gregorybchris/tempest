@@ -1,7 +1,7 @@
-//! Tempest's tracker catalog UI (`specs/interfaces.md`): search the bundles a tracker's users
+//! Tempest's tracker website (`specs/interfaces.md`): search the bundles a tracker's users
 //! chose to list, narrow by category and tag, sort by relevance, health, votes or downloads,
 //! and, signed in with a Tempest key, vote, comment and edit one's own listings. The tracker
-//! serves it beside the catalog API it reads.
+//! serves it beside the API it reads.
 //!
 //! UI logic lives in plain modules with tests (`route`, `present`, `keys`, `request`), and the
 //! components stay thin, as the Leptos guidelines in `specs/interfaces.md` ask.

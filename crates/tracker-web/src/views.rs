@@ -14,7 +14,7 @@ use crate::request::{self, RequestError};
 /// What a page fetched: `None` while the first answer is on its way.
 pub type Fetched<T> = RwSignal<Option<Result<T, RequestError>>>;
 
-/// Fetches the catalog endpoint at `path()` into a signal, again whenever the signals `path`
+/// Fetches the tracker endpoint at `path()` into a signal, again whenever the signals `path`
 /// reads change. Answers that arrive after a newer request was sent are dropped, so a fast
 /// typist never sees an older search's results last.
 pub fn fetch<T>(path: impl Fn() -> String + 'static) -> (Fetched<T>, ReadSignal<bool>)
@@ -70,7 +70,7 @@ pub fn Problem(error: RequestError) -> impl IntoView {
     };
     let text = match &error {
         e if e.not_found() => {
-            "No listing is here: it may have been withdrawn, or not be listed yet.".to_owned()
+            "No listing is here: it may have been unpublished, or not be listed yet.".to_owned()
         }
         e => e.to_string(),
     };

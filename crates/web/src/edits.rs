@@ -17,6 +17,8 @@ pub const UPLOAD: &str = "limits.upload";
 pub const RATIO: &str = "sharing.ratio";
 /// The transfer's own sharing time.
 pub const TIME: &str = "sharing.time";
+/// The transfer's own sharing idle timeout.
+pub const IDLE_TIMEOUT: &str = "sharing.idle_timeout";
 /// What happens at the transfer's own sharing limit.
 pub const ACTION: &str = "sharing.action";
 
@@ -39,6 +41,8 @@ pub struct LimitsForm {
     pub ratio: String,
     /// Its sharing time.
     pub time: String,
+    /// Its sharing idle timeout.
+    pub idle_timeout: String,
     /// What happens at its sharing limit: `stop`, `remove`, or empty for the engine's.
     pub action: String,
 }
@@ -62,6 +66,7 @@ impl LimitsForm {
             upload: shown(settings, UPLOAD),
             ratio: shown(settings, RATIO),
             time: shown(settings, TIME),
+            idle_timeout: shown(settings, IDLE_TIMEOUT),
             action: match settings.get(ACTION).and_then(Value::as_str) {
                 Some(action @ ("stop" | "remove")) => action.to_owned(),
                 _ => String::new(),
@@ -76,7 +81,7 @@ impl LimitsForm {
         settings: &BTreeMap<String, Value>,
     ) -> Result<BTreeMap<String, Value>, String> {
         let mut settings = settings.clone();
-        for key in [DOWNLOAD, UPLOAD, RATIO, TIME, ACTION] {
+        for key in [DOWNLOAD, UPLOAD, RATIO, TIME, IDLE_TIMEOUT, ACTION] {
             settings.remove(key);
         }
         let fields = [
@@ -84,6 +89,12 @@ impl LimitsForm {
             (UPLOAD, "Upload", ValueKind::Limit, &self.upload),
             (RATIO, "Ratio", ValueKind::Ratio, &self.ratio),
             (TIME, "Time", ValueKind::Duration, &self.time),
+            (
+                IDLE_TIMEOUT,
+                "Idle timeout",
+                ValueKind::Duration,
+                &self.idle_timeout,
+            ),
         ];
         for (key, label, kind, text) in fields {
             if text.trim().is_empty() {
@@ -174,6 +185,7 @@ mod tests {
         let changed = LimitsForm {
             upload: "500K".to_owned(),
             time: "12h".to_owned(),
+            idle_timeout: "5m".to_owned(),
             action: "remove".to_owned(),
             ..form
         }
@@ -186,6 +198,7 @@ mod tests {
                 ("limits.upload".to_owned(), json!(500_000)),
                 ("sharing.ratio".to_owned(), Value::Null),
                 ("sharing.time".to_owned(), json!("12h")),
+                ("sharing.idle_timeout".to_owned(), json!("5m")),
                 ("sharing.action".to_owned(), json!("remove")),
                 ("profile".to_owned(), json!("archive")),
             ])

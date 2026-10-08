@@ -668,8 +668,9 @@ impl Engine {
     }
 
     /// Replaces a transfer's own settings, by dotted key, applied over the config's: session
-    /// settings, which take effect the next time it starts, and `limits.download`,
-    /// `limits.upload` and `sharing.*`, which take effect at once (see
+    /// settings and `sharing.idle_timeout`, which take effect the next time it starts, and
+    /// `limits.download`, `limits.upload` and the other `sharing.*` settings, which take effect
+    /// at once (see
     /// [`EngineConfig::transfer`]).
     pub async fn set_transfer_settings(
         &self,

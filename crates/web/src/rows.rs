@@ -327,6 +327,20 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
                 )
                 .value(sharing.time.clone().unwrap_or_else(|| "none".to_owned()))
                 .help("Stop sharing after this long complete."),
+                value_row(
+                    info,
+                    keys::IDLE_TIMEOUT,
+                    "Idle timeout",
+                    ValueKind::Duration,
+                    sharing.idle_timeout.clone().unwrap_or_default(),
+                )
+                .value(
+                    sharing
+                        .idle_timeout
+                        .clone()
+                        .unwrap_or_else(|| "none".to_owned()),
+                )
+                .help("Stop sharing a finished download once no peer has wanted anything for this long."),
                 setting(
                     info,
                     keys::ACTION,

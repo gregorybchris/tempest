@@ -247,7 +247,7 @@ peers:
 experiment:
   vary:
     peers.early.count: [2, 6]
-    peers.origin.settings.strategies.superseed: [false, true]
+    peers.origin.settings.strategies.superseed: [off, on]
 ";
     let scenario = Scenario::from_yaml(yaml).unwrap();
     let variants = scenario.variants();

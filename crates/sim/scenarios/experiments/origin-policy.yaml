@@ -15,5 +15,5 @@ peers:
     bandwidth: { up: 10Mbps, down: 50Mbps }
 experiment:
   vary:
-    strategies.superseed: [false, true]
+    strategies.superseed: [off, on]
     strategies.when_complete: [round-robin, unchanged]

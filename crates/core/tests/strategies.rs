@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use common::{CHUNK, Swarm, at, bundle, far_future};
-use tempest_core::config::{ChunkSelection, Endgame, LingerSettings, WhenComplete};
+use tempest_core::config::{ChunkSelection, Endgame, LingerSettings, Superseed, WhenComplete};
 use tempest_core::event::{
     CancelReason, CloseCause, InFlightReason, SelectReason, ServeReason, StopReason, SuperseedEnd,
 };
@@ -156,7 +156,7 @@ fn superseeding_sends_each_chunk_once_before_sharing_everything() {
     config.requests.chunks = 4;
     let mut swarm = Swarm::new();
     let mut seed_config = config.clone();
-    seed_config.strategies.superseed = true;
+    seed_config.strategies.superseed = Superseed::On;
     let origin = swarm.add_complete(1, seed_config, &content);
     swarm.nodes[origin].upload_rate = Some(1_000_000);
     let fetchers: Vec<usize> = (2..6)

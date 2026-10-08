@@ -52,7 +52,7 @@ Decides which peers are told Serving (yes), and whose requests get answered with
 
 **When complete** (D-063): nobody uploads to a complete peer, so reciprocity doesn't apply. A complete peer serves interested peers **round-robin** by default.
 
-**Superseeding** (opt-in, D-063): when a bundle is brand new and this peer is its only complete copy, offer each chunk to only one peer until every chunk has been sent once. Each peer is offered a window of ranges that grows while no other peer is being served, so that a lone downloader isn't held to one range per round trip, and shrinks to one range in a crowd (D-223).
+**Superseeding** (D-063): when a bundle is brand new and this peer is its only complete copy, offer each chunk to only one peer until every chunk has been sent once. The setting is `off`, `on` or `crowd`, the default: superseed only while two or more connected peers lack chunks, so a 1:1 send uploads normally (D-223). Each peer is offered a window of ranges that grows while no other peer is being served, so that a lone downloader isn't held to one range per round trip, and shrinks to one range in a crowd (D-223).
 
 ## Connections
 

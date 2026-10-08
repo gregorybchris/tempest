@@ -33,7 +33,7 @@ use self::conn::{Conn, Holdings, buffer_update, have_as_update};
 use self::superseed::Superseed;
 use crate::Rng;
 use crate::chunks::ChunkSet;
-use crate::config::{Config, ConfigError, WhenComplete};
+use crate::config::{Config, ConfigError, Superseed as SuperseedMode, WhenComplete};
 use crate::event::{CloseCause, Event, EventKind};
 use crate::inspect::{self, ChunkCell, ChunkState, PeerStatus};
 use crate::io::{
@@ -232,7 +232,7 @@ impl Session {
         let bundle = Bundle::new(manifest, have).map_err(|_| SessionError::HaveOutOfRange)?;
         session.complete = bundle.is_complete();
         session.started_complete = session.complete;
-        if session.complete && session.config.strategies.superseed {
+        if session.complete && session.config.strategies.superseed != SuperseedMode::Off {
             session.superseed = Some(Superseed::new(&bundle));
         }
         session.bundle = Some(bundle);
@@ -758,6 +758,7 @@ impl Session {
         if self.stopped {
             return;
         }
+        self.reveal_to_lone_peer(now);
         self.request_manifest(now);
         self.review_serving(now);
         self.pump_uploads(now);
@@ -1044,7 +1045,7 @@ impl Session {
             if peer_complete {
                 self.end_superseeding(now, crate::event::SuperseedEnd::AnotherCopy);
             } else {
-                self.offer_next(now, id);
+                self.review_offers(now, id);
             }
         }
         if self.complete && peer_complete {

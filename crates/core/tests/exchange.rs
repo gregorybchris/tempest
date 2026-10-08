@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use common::{CHUNK, Swarm, bundle, far_future};
 use proptest::prelude::*;
-use tempest_core::config::{ChunkSelection, Endgame, Upload, WhenComplete};
+use tempest_core::config::{ChunkSelection, Endgame, Superseed, Upload, WhenComplete};
 use tempest_core::content::MemoryContent;
 use tempest_core::event::CloseCause;
 use tempest_core::{Config, EventKind};
@@ -249,7 +249,7 @@ fn every_strategy_combination_completes() {
         for upload in uploads {
             for endgame in endgames {
                 for when_complete in completions {
-                    for superseed in [false, true] {
+                    for superseed in [Superseed::Off, Superseed::On, Superseed::Crowd] {
                         let mut config = Config::default();
                         config.strategies.chunk_selection = selection;
                         config.strategies.upload = upload;
@@ -284,5 +284,5 @@ fn every_strategy_combination_completes() {
             }
         }
     }
-    assert_eq!(swarms, 4 * 4 * 3 * 2 * 2);
+    assert_eq!(swarms, 4 * 4 * 3 * 2 * 3);
 }

@@ -986,7 +986,7 @@ Which one should be the default is one of the first questions for the simulator.
 **Decision:**
 
 - A complete peer serves interested peers round-robin by default.
-- Superseeding is available as an opt-in option. When a bundle is brand new and has only one complete peer, that peer offers each chunk to only one peer until every chunk has been sent once.
+- When a bundle is brand new and has only one complete peer, that peer offers each chunk to only one peer until every chunk has been sent once; D-223 sets when this is on by default.
 
 ---
 
@@ -2312,7 +2312,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 **Decision:**
 
-- A session that starts with every chunk superseeds if the setting is on. Its Have lists only empty files' chunks, which every Have must include. Have means "chunks the sender has and is willing to provide" (`protocol/messages.md`), so hiding the rest is allowed.
+- A session that starts with every chunk superseeds if the setting is on (D-223 adds the `crowd` value). Its Have lists only empty files' chunks, which every Have must include. Have means "chunks the sender has and is willing to provide" (`protocol/messages.md`), so hiding the rest is allowed.
 - Each connected peer is offered one range of the configured request size, with a HaveUpdate, preferring chunks not yet sent and not on offer to anyone else. When the peer announces the whole range, it is offered another.
 - Requests for chunks not announced to the requester are rejected with `dont_have`.
 - Superseeding ends when every chunk has been sent once, or when a connected peer turns out to have every chunk. The rest is then announced to everyone and the complete peer's upload strategy takes over.
@@ -3566,35 +3566,43 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ---
 
-## D-223: Superseeding offers a window of ranges, and stays opt-in until gigabit sends keep up
+## D-223: Superseeding offers a window of ranges, and by default only while a crowd wants the bundle
 
-**Date:** 2026-10-07 · **Status:** Decided (amended after simulation: the default stays off)
+**Date:** 2026-10-07 · **Status:** Decided (amended 2026-10-08 after simulation: the default is `crowd`)
 
-**Context:** D-063 made superseeding opt-in. In simulation, a crowd arriving at once was done once the origin had uploaded 2.7 copies under round-robin, against 1.2 with superseeding. As built (D-155), a superseeding origin offers each peer one range and waits for it to announce the whole range before offering the next, which caps a 1:1 send at about one range per round trip.
+**Context:** D-063 made superseeding opt-in. In simulation, a crowd arriving at once was done once the origin had uploaded 2.5 copies under round-robin, against 1.0 with superseeding. As built (D-155), a superseeding origin offers each peer one range and waits for it to announce the whole range before offering the next, which caps a 1:1 send at about one range per round trip. A window of ranges fixed 20 and 100 Mbps sends, but a 1 Gbps send took 4.4 s instead of 1.7 s, so the default stayed off. The owner asked to superseed by default only while two or more peers want the bundle.
 
 **Decision:**
 
 - A superseeding origin keeps a window of ranges offered to each peer. It starts at one range and grows by one each time the peer gains chunks while the origin serves no other peer; while it does, it shrinks by one, to one. `upload.superseed_window` caps it.
-- The plan was for `strategies.superseed` to default to on for a transfer that starts as its bundle's only copy, if a simulation showed the window keeps direct sends within about 5% of round-robin and keeps most of the crowd's saving. The crowd's saving holds, but gigabit direct sends stay well behind, so the default stays off. Revisit with a window sized to the link's bandwidth-delay product rather than counted in ranges.
+- `strategies.superseed` is `off`, `on` or `crowd`, and defaults to `crowd`. It applies to a session that starts with every chunk, so a download never superseeds, and ends as before (D-155) when every chunk has been sent once or another complete peer connects.
+- In `crowd` mode the origin offers ranges only while two or more connected peers lack chunks. A connection counts from when it opens, until its peer is known to have every chunk.
+- A connection that opens while no other peer lacks chunks is announced every chunk in the opening Have, as without superseeding, so a 1:1 send behaves as round-robin. Chunks announced are never hidden again, so the switch is one-way per connection:
+  - When a second peer opens, the first keeps everything it was shown. The newcomers are offered ranges, of chunks nobody has been sent, as in `on` mode. A chunk the first peer requests counts as sent, so the newcomers aren't offered it afterwards.
+  - When peers leave or complete and at most one lacks chunks, every remaining peer is announced everything not yet announced to it, and its offered ranges lapse.
+  - If a second peer then returns, only new connections are hidden from.
+- `on` always hides, as before.
 
 This revises D-063 and D-155.
 
-**Follow-up (owner, 2026-10-08):** superseed by default only while two or more peers want a bundle that starts as its only copy, so a 1:1 send uploads normally. To be confirmed in simulation, as above.
+**Simulation:** paired runs, 3 seeds each, of [`superseed-crowd`](../crates/sim/scenarios/experiments/superseed-crowd.yaml) and [`superseed-direct`](../crates/sim/scenarios/experiments/superseed-direct.yaml). `on` has the default window. Times are medians per run, averaged over the seeds. Round-robin is `off`.
 
-**Simulation:** paired runs, 3 seeds each, of [`superseed-crowd`](../crates/sim/scenarios/experiments/superseed-crowd.yaml) and [`superseed-direct`](../crates/sim/scenarios/experiments/superseed-direct.yaml); "one range" is the behavior as built before this decision, "window" the default cap. Times are means of the seeds' medians.
-
-| Scenario | Round-robin | Superseeding, one range | Superseeding, window |
+| Scenario | Round-robin | Superseeding on | Crowd mode |
 | --- | --- | --- | --- |
-| Crowd of 100 at once: median time to complete | 138 s | 60 s | 61 s |
-| Same: copies the origin uploaded | 2.53 | 1.06 | 1.06 |
-| Crowd of 100 over ~1 min: median time to complete | 105 s | 27.5 s | 27.8 s |
-| 1:1, 64 MiB, 100 ms apart, 20 Mbps upload | 40.0 s | 78.4 s | 40.2 s |
-| Same at 100 Mbps | 6.6 s | 56.9 s | 6.5 s |
-| Same at 1 Gbps | 1.7 s | 52.0 s | 4.4 s |
+| Crowd of 100 at once: median time to complete | 132 s | 61 s | 63 s |
+| Same: copies the origin uploaded | 2.51 | 1.04 | 1.08 |
+| Crowd of 100 over ~1 min: median time to complete | 106 s | 28 s | 29 s |
+| 1:1, 64 MiB, 100 ms apart, 20 Mbps upload | 40.0 s | 40.2 s | 40.0 s |
+| Same at 100 Mbps | 6.6 s | 6.5 s | 6.6 s |
+| Same at 1 Gbps | 1.7 s | 4.4 s | 1.7 s |
+
+The 1:1 runs in crowd mode are identical to round-robin, since the downloader is the only peer. The crowds keep 97% and 98% of superseeding's time saving. The gradual crowd's origin keeps seeding for six minutes, so its copies uploaded are not comparable.
+
+The cost is a crowd whose origin is not the bottleneck: the golden `crowd` scenario (40 peers, 4 MiB, origin at twice a peer's upload) had a median completion of 9.6 s with `off`, 11.5 s with `on` and 11.3 s with `crowd`, and the rarest chunk had 27, 5 and 10 copies, because peers have fewer chunks to trade while the origin hides the rest. Its baseline and the other golden baselines were regenerated for the new default (`mixed` and `routers` moved within noise, `strategic` improved, and `sessions` completed 26 peers at the median seed against 27).
 
 A core swarm test of 8 MiB over 40 Mbps and a 200 ms round trip took 3.2 s with the window against 2.7 s without superseeding, mostly while the window grows. Raising the cap shortens the gigabit send (64 ranges: 2.3 s) but slows the 100 Mbps one by about 12%, apparently through the downloader's pipelining, whose requests in flight settle lower. Variants that grew the window faster or started it larger let early arrivals in the gradual crowd hold ranges that others could have been sent, and lost much of that crowd's saving.
 
-**Rationale:** Sending each chunk out of the origin about once is the classic result this tool should demonstrate, and the window removes most of its cost for direct sends. A default that slows the common 1:1 send on fast links would cost more than the crowd case gains.
+**Rationale:** Sending each chunk out of the origin about once is the classic result this tool should demonstrate, and a lone downloader gains nothing from hiding chunks. Counting peers that lack chunks needs no new messages and no timing, and never has to un-announce a chunk. The first peer of a crowd is shown everything, which costs little: what it requests counts as sent.
 
 ---
 

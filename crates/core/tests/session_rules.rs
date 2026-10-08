@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use common::{file_bytes, peer_id};
-use tempest_core::config::WhenComplete;
+use tempest_core::config::{Superseed, WhenComplete};
 use tempest_core::content::MemoryContent;
 use tempest_core::event::ServeReason;
 use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
@@ -604,7 +604,7 @@ fn ranges_must_fit_when_starting_with_a_manifest() {
 #[test]
 fn a_superseeding_peer_announces_only_what_it_offers() {
     let mut config = Config::default();
-    config.strategies.superseed = true;
+    config.strategies.superseed = Superseed::On;
     config.upload.superseed_window = 1;
     let mut session = complete(config);
     assert!(session.is_superseeding());
@@ -640,7 +640,7 @@ fn a_superseeding_peer_announces_only_what_it_offers() {
 #[test]
 fn a_superseeding_peer_keeps_a_window_of_ranges_on_offer() {
     let mut config = Config::default();
-    config.strategies.superseed = true;
+    config.strategies.superseed = Superseed::On;
     config.upload.superseed_window = 3;
     config.requests.chunks = 4;
     let mut session = complete(config);
@@ -675,6 +675,133 @@ fn a_superseeding_peer_keeps_a_window_of_ranges_on_offer() {
     let next = offers(sent(&session.poll_actions()));
     assert_eq!(next.len(), 1, "{next:?}");
     assert!(first.iter().chain(&more).all(|r| *r != next[0]));
+}
+
+/// Accepts a connection `conn` from peer `n` and completes the opening with an empty Have.
+fn open_peer(session: &mut Session, conn: ConnId, n: u8) {
+    connect(session, conn, peer_id(n), Direction::Accepted);
+    let id = session.bundle_id();
+    control(session, conn, Message::Hello(hello(id)));
+    control(session, conn, Message::Have(Have::default()));
+}
+
+/// The chunks announced to `conn` by HaveUpdates in `actions`.
+fn announced_to(actions: &[Action], conn: ConnId) -> Vec<u32> {
+    let mut chunks = Vec::new();
+    for action in actions {
+        if let Action::Send {
+            conn: c,
+            message: Message::HaveUpdate(update),
+        } = action
+            && *c == conn
+        {
+            chunks.extend(update.added.chunks());
+        }
+    }
+    chunks
+}
+
+#[test]
+fn crowd_superseeding_announces_everything_to_a_lone_downloader() {
+    let mut config = Config::default();
+    config.strategies.superseed = Superseed::Crowd;
+    let mut session = complete(config);
+    assert!(session.is_superseeding());
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    let actions = session.poll_actions();
+    // Its Have lists every chunk, as a session that doesn't superseed would.
+    assert_eq!(
+        sent(&actions)[1],
+        Message::Have(Have {
+            ranges: ranges(0..40)
+        })
+    );
+    assert!(announced_to(&actions, C).is_empty());
+    // It can request any chunk straight away.
+    request(&mut session, 1, chunks(20, 1));
+    assert_eq!(
+        replies(&session.poll_actions())[0],
+        (
+            1,
+            Reply::Data {
+                start: 20,
+                count: 1
+            }
+        )
+    );
+}
+
+#[test]
+fn crowd_superseeding_offers_ranges_once_a_second_peer_wants_chunks() {
+    let mut config = Config::default();
+    config.strategies.superseed = Superseed::Crowd;
+    config.requests.chunks = 4;
+    let mut session = complete(config);
+    let second = ConnId(8);
+    open(&mut session, RangeList::new());
+    session.poll_actions();
+    open_peer(&mut session, second, 10);
+    control(&mut session, second, Message::Want(Want { wanted: true }));
+    let actions = session.poll_actions();
+    // The first peer keeps what it was shown. The second is offered one range, not everything.
+    let offered = announced_to(&actions, second);
+    assert!(!offered.is_empty() && offered.len() < 40, "{offered:?}");
+    assert_eq!(offered[..3], [0, 1, 2], "the first file");
+    assert!(announced_to(&actions, C).is_empty());
+    let inbound = Inbound::Request {
+        stream: StreamId(1),
+        message: chunks(30, 1),
+    };
+    session.handle_message(Time::ZERO, second, inbound);
+    assert_eq!(
+        reject_reason(&replies(&session.poll_actions())[0].1),
+        Some(RejectReason::DontHave)
+    );
+    assert!(session.is_superseeding());
+}
+
+#[test]
+fn crowd_superseeding_announces_everything_to_the_peer_left() {
+    let mut config = Config::default();
+    config.strategies.superseed = Superseed::Crowd;
+    config.requests.chunks = 4;
+    let mut session = complete(config);
+    let first = ConnId(8);
+    let second = ConnId(9);
+    open_peer(&mut session, first, 10);
+    open_peer(&mut session, second, 11);
+    let offered = announced_to(&session.poll_actions(), second);
+    assert!(session.is_superseeding());
+    // The first peer to arrive was alone when it did, so it was shown everything; the second is
+    // offered only a few ranges. When the first goes, the second is shown the rest.
+    session.handle_closed(Time::ZERO, first, Closed::Lost);
+    let mut all = offered;
+    all.extend(announced_to(&session.poll_actions(), second));
+    all.sort_unstable();
+    assert_eq!(all, (0..40).collect::<Vec<_>>());
+}
+
+#[test]
+fn crowd_superseeding_does_not_throttle_a_one_to_one_send() {
+    let mut config = Config::default();
+    config.strategies.superseed = Superseed::Crowd;
+    let mut session = complete(config);
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    session.poll_actions();
+    // No window to wait on: every request is answered, without any new announcement.
+    for (stream, start) in [(1, 0), (2, 8), (3, 16), (4, 32)] {
+        request(&mut session, stream, chunks(start, 1));
+    }
+    let actions = session.poll_actions();
+    assert_eq!(replies(&actions).len(), 4);
+    assert!(
+        replies(&actions)
+            .iter()
+            .all(|(_, r)| matches!(r, Reply::Data { .. }))
+    );
+    assert!(announced_to(&actions, C).is_empty());
 }
 
 #[test]

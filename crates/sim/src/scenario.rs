@@ -746,6 +746,7 @@ fn config_error(field: &str, error: ConfigError) -> ScenarioError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempest_core::config::Superseed;
 
     const MINIMAL: &str = "
 name: two-peers
@@ -803,7 +804,7 @@ peers:
     bandwidth: { down: 1Gbps, up: 50Mbps }
     latency: 5ms
     starts: complete
-    overrides: { strategies.superseed: true }
+    overrides: { strategies.superseed: on }
 experiment:
   vary:
     strategies.chunk_selection: [rarest-first, random]
@@ -826,7 +827,7 @@ experiment:
             "strategies.chunk_selection=rarest-first strategies.upload=propshare"
         );
         let origin = scenario.config(2, &variants[5]).unwrap();
-        assert!(origin.strategies.superseed);
+        assert_eq!(origin.strategies.superseed, Superseed::On);
         assert_eq!(origin.connections.max, 40);
         assert_eq!(
             origin.get("strategies.upload"),
@@ -936,7 +937,7 @@ relay: {{ latency: 35ms, bandwidth: 20Mbps }}
             "{MINIMAL}    overrides: {{ strategies.upload: propshare }}
 experiment:
   vary:
-    peers.origin.settings.strategies.superseed: [false, true]
+    peers.origin.settings.strategies.superseed: [off, on]
     peers.leecher.count: [1, 5]
     peers.leecher.bandwidth.up: [10Mbps]
     peers.leecher.settings.strategies.upload: [cooperative]
@@ -951,14 +952,14 @@ experiment:
         assert_eq!(variants.len(), 4);
         let last = &variants[3];
         let origin = scenario.config(0, last).unwrap();
-        assert!(origin.strategies.superseed);
+        assert_eq!(origin.strategies.superseed, Superseed::On);
         assert_eq!(
             origin.get("strategies.endgame"),
             Some(Value::String("classic".into()))
         );
         // The variant's setting for the class wins over the class's own.
         let leecher = scenario.config(1, last).unwrap();
-        assert!(!leecher.strategies.superseed);
+        assert_eq!(leecher.strategies.superseed, Superseed::Crowd);
         assert_eq!(
             leecher.get("strategies.upload"),
             Some(Value::String("cooperative".into()))

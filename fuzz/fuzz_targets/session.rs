@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use tempest_core::config::{ChunkSelection, Endgame, Upload, WhenComplete};
+use tempest_core::config::{ChunkSelection, Endgame, Superseed, Upload, WhenComplete};
 use tempest_core::content::MemoryContent;
 use tempest_core::io::{Closed, ConnInfo, Direction, PathKind};
 use tempest_core::{
@@ -211,7 +211,11 @@ fn config(strategies: &Strategies) -> Config {
     } else {
         WhenComplete::Unchanged
     };
-    config.strategies.superseed = strategies.superseed;
+    config.strategies.superseed = if strategies.superseed {
+        Superseed::On
+    } else {
+        Superseed::Off
+    };
     config.requests.adaptive = strategies.adaptive;
     config.requests.chunks = 4;
     config.lingering.direct_send = strategies.direct_send;

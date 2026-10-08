@@ -1,6 +1,5 @@
-# D-223's check: does superseeding slow a 1:1 send, with a window of one offered range and with
-# the default? Results are in specs/decisions.md (D-223). The window only matters when
-# superseeding.
+# D-223's check: does superseeding slow a 1:1 send, when off, always on and only while a crowd
+# wants the bundle? Results are in specs/decisions.md (D-223).
 name: superseed-direct
 description: An origin sends a release to one downloader 100 ms away, at three upload rates.
 duration: 10m
@@ -16,5 +15,4 @@ peers:
 experiment:
   vary:
     peers.origin.bandwidth.up: [20Mbps, 100Mbps, 1Gbps]
-    peers.origin.settings.strategies.superseed: [false, true]
-    peers.origin.settings.upload.superseed_window: [1, 16]
+    peers.origin.settings.strategies.superseed: [off, on, crowd]

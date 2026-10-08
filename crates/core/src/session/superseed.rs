@@ -9,6 +9,12 @@
 //! range per round trip, and shrinks to one range in a crowd. Superseeding ends when
 //! every chunk has been sent once, or when another peer turns out to have every chunk; then
 //! everything is announced to everyone.
+//!
+//! In `crowd` mode (D-223) the offers are made only while two or more connected peers lack
+//! chunks. A lone such peer is announced every chunk instead, so a 1:1 send is not throttled. A
+//! chunk, once announced, stays announced: when a second peer arrives, peers already shown
+//! everything keep it, and only the newcomers are offered ranges, of chunks nobody has been sent.
+//! When all but one such peer are gone, the one left is announced everything.
 
 use tempest_protocol::Message;
 use tempest_protocol::message::HaveUpdate;
@@ -18,6 +24,7 @@ use super::Session;
 use super::bundle::{Bundle, empty_file_chunks};
 use super::conn::{Holdings, Offer};
 use crate::chunks::ChunkSet;
+use crate::config::Superseed as SuperseedMode;
 use crate::event::{EventKind, SuperseedEnd};
 use crate::io::ConnId;
 use crate::time::Time;
@@ -41,11 +48,19 @@ impl Superseed {
 
 impl Session {
     /// The announcement state for a new connection while superseeding: only the empty files'
-    /// chunks, which every Have must include.
+    /// chunks, which every Have must include. In `crowd` mode, a connection that arrives while no
+    /// other peer lacks chunks is announced every chunk instead.
     pub(super) fn new_offer(&self) -> Option<Offer> {
         self.superseed.as_ref()?;
         let bundle = self.bundle.as_ref()?;
-        let mut announced = ChunkSet::new(bundle.layout.chunk_count());
+        let count = bundle.layout.chunk_count();
+        let alone = self.config.strategies.superseed == SuperseedMode::Crowd
+            && self.peers_lacking_chunks() == 0;
+        let mut announced = if alone {
+            ChunkSet::full(count)
+        } else {
+            ChunkSet::new(count)
+        };
         for chunk in empty_file_chunks(&bundle.manifest, &bundle.layout) {
             announced.insert(chunk);
         }
@@ -54,6 +69,61 @@ impl Session {
             pending: Vec::new(),
             window: 1,
         })
+    }
+
+    /// How many connections are to peers not known to have every chunk. These are the peers that
+    /// "want the bundle", whatever they have been announced: a peer that has been announced
+    /// everything can still want more. A connection whose opening is not complete counts.
+    fn peers_lacking_chunks(&self) -> usize {
+        (self.conns.values()).filter(|c| !c.is_complete()).count()
+    }
+
+    /// Whether offers are being made: always in `on` mode, in `crowd` mode while two or more
+    /// connected peers lack chunks.
+    fn offering(&self) -> bool {
+        self.config.strategies.superseed == SuperseedMode::On || self.peers_lacking_chunks() >= 2
+    }
+
+    /// Reacts to a peer's holdings changing while superseeding: offers it ranges, or, if too few
+    /// peers want the bundle, announces it everything.
+    pub(super) fn review_offers(&mut self, now: Time, id: ConnId) {
+        if self.offering() {
+            self.offer_next(now, id);
+        } else {
+            self.reveal_to_lone_peer(now);
+        }
+    }
+
+    /// Announces every chunk to the connected peers, if `crowd` mode is not offering. That is the
+    /// case for a lone downloader, and for the one left when the others go.
+    pub(super) fn reveal_to_lone_peer(&mut self, now: Time) {
+        if self.superseed.is_none() || self.offering() {
+            return;
+        }
+        let mut updates = Vec::new();
+        for (&id, conn) in &mut self.conns {
+            let open = conn.is_open();
+            let Some(offer) = conn.offer.as_mut().filter(|_| open) else {
+                continue;
+            };
+            let rest: Vec<u32> = offer.announced.iter_missing().collect();
+            if rest.is_empty() {
+                continue;
+            }
+            for &chunk in &rest {
+                offer.announced.insert(chunk);
+            }
+            offer.pending.clear();
+            updates.push((id, RangeList::from_chunks(rest)));
+        }
+        for (id, added) in updates {
+            let update = HaveUpdate {
+                added,
+                removed: RangeList::new(),
+            };
+            self.send(id, Message::HaveUpdate(update));
+        }
+        self.review_serving(now);
     }
 
     /// Tops up a peer's window of offered ranges, dropping the ranges it now has.

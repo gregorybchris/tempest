@@ -72,9 +72,23 @@ pub struct Strategies {
     pub when_complete: WhenComplete,
     /// Whether a peer that starts with every chunk superseeds: it offers each chunk to only one
     /// peer until every chunk has been sent once (D-063). For a bundle's only, brand-new copy.
-    pub superseed: bool,
+    pub superseed: Superseed,
     /// How to finish the last chunks (D-061).
     pub endgame: Endgame,
+}
+
+/// When a peer that starts with every chunk superseeds (D-063, D-223).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Superseed {
+    /// Never: every chunk is offered to everyone at once.
+    Off,
+    /// Always, until every chunk has been sent once.
+    On,
+    /// While two or more connected peers lack chunks. A lone downloader is shown every chunk, so
+    /// a 1:1 send is not slowed. Chunks once shown are never hidden again.
+    #[default]
+    Crowd,
 }
 
 /// A chunk selection strategy (D-059).

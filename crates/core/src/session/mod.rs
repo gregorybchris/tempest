@@ -29,7 +29,7 @@ use tempest_protocol::tree::{VerifyError, verify_data};
 use tempest_protocol::{Address, BundleId, Manifest, Message, PeerId, RangeList};
 
 use self::bundle::Bundle;
-use self::conn::{Conn, Holdings, buffer_update, have_as_update};
+use self::conn::{Conn, Holdings, have_as_update};
 use self::superseed::Superseed;
 use crate::Rng;
 use crate::chunks::ChunkSet;
@@ -1004,14 +1004,8 @@ impl Session {
             // A peer that has chunks has the manifest.
             conn.lacks_manifest = false;
         }
-        if self.bundle.is_none() {
-            if !buffer_update(&mut conn.holdings, update, max) {
-                return Err(Fail {
-                    reason: GoodbyeReason::Done,
-                    message: "too many Have ranges before the manifest".to_owned(),
-                });
-            }
-            return Ok(());
+        if let Holdings::Pending(pending) = &mut conn.holdings {
+            return pending.apply(&update, max);
         }
         self.apply_holdings(id, &update)
     }

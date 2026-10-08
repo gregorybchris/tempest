@@ -10,7 +10,7 @@ use tempest_protocol::tree::CHUNK_SIZE;
 use tempest_protocol::{Decode, Manifest, Message, RangeList};
 
 use super::bundle::Bundle;
-use super::conn::{Holdings, Outgoing};
+use super::conn::{Holdings, Outgoing, have_as_update};
 use super::{Fail, Outcome, Session, violation};
 use crate::chunks::ChunkSet;
 use crate::config::WhenComplete;
@@ -507,14 +507,14 @@ impl Session {
             let conn = self.conns.get_mut(&conn_id).expect("listed");
             let pending =
                 std::mem::replace(&mut conn.holdings, Holdings::Known(ChunkSet::new(count)));
-            let Holdings::Pending { updates, .. } = pending else {
+            let Holdings::Pending(pending) = pending else {
                 unreachable!("holdings are pending until the manifest");
             };
-            for update in updates {
-                if let Err(fail) = self.apply_holdings(conn_id, &update) {
-                    failed.push((conn_id, fail));
-                    break;
-                }
+            let (held, grew) = pending.finish();
+            if let Err(fail) = self.apply_holdings(conn_id, &have_as_update(held)) {
+                failed.push((conn_id, fail));
+            } else if grew {
+                self.conns.get_mut(&conn_id).expect("listed").was_incomplete = true;
             }
         }
         for (conn_id, fail) in failed {

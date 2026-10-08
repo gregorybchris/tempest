@@ -37,7 +37,7 @@ const TRACKER_WEB_NOT_BUILT: &str = r#"<!DOCTYPE html>
 </style>
 <h1>Tempest tracker</h1>
 <p>The tracker is running, but this <code>tempest</code> binary was built without its website.</p>
-<p>Build the website with <code>trunk build --release --cargo-profile web</code> in <code>crates/tracker-web</code>,
+<p>Build the website with <code>trunk build</code> in <code>crates/tracker-web</code>,
 then build <code>tempest</code> again. Meanwhile, its API answers under <code>/tempest/v1</code>, as in
 <code>/tempest/v1/listings</code>.</p>
 </html>

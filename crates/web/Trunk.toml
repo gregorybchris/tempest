@@ -3,3 +3,7 @@ target = "index.html"
 
 [serve]
 port = 8092
+
+# `trunk serve` forwards the engine's API to a running engine, such as `tempest daemon`.
+[[proxy]]
+backend = "http://127.0.0.1:4776/v1"

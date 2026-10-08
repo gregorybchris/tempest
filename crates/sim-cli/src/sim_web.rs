@@ -39,7 +39,7 @@ const NOT_BUILT: &str = r#"<!DOCTYPE html>
 </style>
 <h1>Tempest simulations</h1>
 <p>The results API is running, but this <code>tempest</code> binary was built without the results UI.</p>
-<p>Build the UI with <code>trunk build --release --cargo-profile web</code> in <code>crates/sim-web</code>,
+<p>Build the UI with <code>trunk build</code> in <code>crates/sim-web</code>,
 then build <code>tempest</code> again. Meanwhile, the API answers under <code>/v1</code>, as in
 <code>/v1/experiments</code>.</p>
 </html>

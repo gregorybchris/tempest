@@ -17,7 +17,7 @@ The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development b
 - **Keep local fuzzing short.** 10–20 seconds per target is enough to catch regressions while iterating. CI and occasional dedicated runs go longer.
 - **Iterate on small simulations.** Use few seeds and small scenarios while developing. Run the golden baselines once per milestone, or when a change could affect speed.
 - **Re-run flaky tests a few times, not dozens.** If a test fails intermittently, reproduce it a handful of times, then fix the cause or record it as a known issue.
-- **Build the web UIs in development mode while iterating.** Save release builds (`--cargo-profile web`, which runs wasm-opt) for checking size and before committing.
+- **Build the web UIs in development mode**, with `trunk build` or `trunk serve` (see Web UIs). Only releases and size checks use `--release --cargo-profile web`, which optimizes for size with wasm-opt; trunk skips wasm-opt in development builds.
 - **Avoid release builds** unless a test needs one or you're measuring performance.
 - **Don't run `cargo clean` mid-task.** It forces a full rebuild, which takes minutes. Prune stale artifacts instead (see below).
 
@@ -29,6 +29,18 @@ Each crate's integration tests are one test binary, `tests/integration/main.rs`,
 - **Snapshots.** insta names a snapshot after the module path, so the terminal UI's are `integration__screens__<name>.snap`.
 - **One process.** Plain `cargo test` runs a binary's tests on threads of one process, while nextest runs each test in its own. Tests must not change the process's environment or working directory, or share a fixed port or file; use temporary directories and port 0.
 - **Browser tests** (`#[ignore]`, D-218) run with `--ignored` and a module filter, as CI's web job does. The gallery's wasm-bindgen tests are one binary too, configured once in its `main.rs`.
+
+## Web UIs
+
+Build a UI with `trunk build` in its crate (`crates/web`, `crates/tracker-web`, `crates/sim-web`). A development build is much faster than a release one. The binaries embed whatever `dist/` folders exist, whichever way they were built, so rebuild the binary after a UI build to see it embedded.
+
+To iterate on a UI, run `trunk serve` in its crate. It rebuilds on every change and serves the page on a port of its own (`Trunk.toml`), forwarding API requests to a running backend:
+
+- **Client web UI** (`crates/web`): `tempest daemon` is the backend, on its default port 4776. `trunk serve` forwards `/v1/`, including the event stream, to it, and the page works as the engine's own would.
+- **Tracker website** (`crates/tracker-web`): `tempest tracker --catalog catalog.db` is the backend, on its default port 4777.
+- **Results UI** (`crates/sim-web`): `tempest-sim web` is the backend.
+
+To point a UI at a backend on another port, change the `[[proxy]]` backend in its `Trunk.toml` or pass `--proxy-backend`. Pass `--port` to serve on a different port than the one in `Trunk.toml`.
 
 ## Disk
 

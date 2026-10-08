@@ -25,7 +25,7 @@ const NOT_BUILT: &str = r#"<!DOCTYPE html>
 </style>
 <h1>Tempest</h1>
 <p>The engine is running, but this <code>tempest</code> binary was built without its web UI.</p>
-<p>Build the UI with <code>trunk build --release --cargo-profile web</code> in <code>crates/web</code>,
+<p>Build the UI with <code>trunk build</code> in <code>crates/web</code>,
 then build <code>tempest</code> again. Meanwhile, <code>tempest tui</code> shows the same transfers,
 and the engine's API answers under <code>/v1</code>.</p>
 </html>

@@ -3804,7 +3804,7 @@ This revises D-175, D-182 and D-189.
 
 **Options:** keep a file per target, which gives one filterable binary per topic; merge each crate's files into one target (chosen).
 
-**Decision:** Each crate with several integration test files has a single target, `tests/integration/main.rs`, with a module per former file and the shared helpers as a sibling `common` module. The target name is `integration` in every crate. The simulator's, the engine's and the other crates' former file names remain as module names, so tests are `integration module::test`. This reverses the earlier default of one target per file. The UI kit's single test file and the dev-profile settings are unchanged.
+**Decision:** Each crate with several integration test files has a single target, `tests/integration/main.rs`, with a module per former file and the shared helpers as a sibling `common` module. The target name is `integration` in every crate. The former file names remain as module names, so tests read `integration module::test`. This reverses the earlier default of one target per file. The UI kit's single test file and the dev-profile settings are unchanged.
 
 **Consequences:**
 

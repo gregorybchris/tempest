@@ -126,7 +126,10 @@ async fn download(
     handle.finished().await.context("the download failed")?;
     let status = outcome?;
     let manifest = status.manifest.context("complete without a manifest")?;
-    let folder = args.output.join(manifest.name());
+    let folder = match manifest.single_file() {
+        Some(path) => args.output.join(path),
+        None => args.output.join(manifest.name()),
+    };
     eprintln!(
         "downloaded {} in {}",
         bytes(manifest.total_size()),

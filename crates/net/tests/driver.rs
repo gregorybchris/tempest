@@ -223,6 +223,46 @@ async fn a_new_folder_is_made_for_the_bundle_and_never_reused() {
     .await;
 }
 
+/// A bundle of one file goes straight into the directory, and a file already there stops it.
+#[tokio::test]
+async fn a_single_file_lands_in_the_directory_and_never_replaces_one() {
+    within(async {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let manifest = make_bundle(source.path(), &[("one.bin", contents(50_000, 3))], vec![]);
+        let seeder = start_node(config());
+        let (_seeding, _) = share(&seeder, source.path(), &manifest).await;
+        let leecher = start_node(config());
+        let download = || {
+            leecher.download(
+                manifest.bundle_id(),
+                Destination::NewFolderIn(target.path().to_owned()),
+                vec![record(seeder.endpoint())],
+            )
+        };
+
+        let mut first = download().await.unwrap();
+        first.status.wait_for(|s| s.complete).await.unwrap();
+        first.shutdown();
+        first.finished().await.unwrap();
+        assert_eq!(
+            fs::read(target.path().join("one.bin")).unwrap(),
+            fs::read(source.path().join("one.bin")).unwrap()
+        );
+
+        let error = download().await.unwrap().finished().await.unwrap_err();
+        assert!(
+            matches!(&error, DriverError::Storage(StorageError::Io { path, source })
+                if path == &target.path().join("one.bin")
+                    && source.kind() == std::io::ErrorKind::AlreadyExists),
+            "{error:?}"
+        );
+        leecher.shutdown().await;
+        seeder.shutdown().await;
+    })
+    .await;
+}
+
 /// On several threads, as the client runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn three_peers_share_a_bundle() {

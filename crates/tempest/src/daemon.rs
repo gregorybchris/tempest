@@ -47,6 +47,7 @@ pub fn daemon(args: DaemonArgs) -> Result<()> {
 pub async fn run(config: EngineConfig, ready: impl FnOnce(&str)) -> Result<()> {
     let data_dir = config.data_dir()?;
     {
+        let file_config = config.clone();
         let engine = match Engine::open(config).await {
             Err(EngineError::Busy(dir)) => {
                 return Err(anyhow!(
@@ -57,7 +58,15 @@ pub async fn run(config: EngineConfig, ready: impl FnOnce(&str)) -> Result<()> {
             opened => opened.context("cannot start the engine")?,
         };
         // Settings changed through the API since the file was written apply too.
-        let api = engine.settings().await?.settings.api;
+        let view = engine.settings().await?;
+        for (key, file) in file_config.overridden_by(&view.changed) {
+            eprintln!(
+                "setting   {key} is {file} in the config, overridden by {} set through the API; \
+                 reset it in a UI or with DELETE /v1/settings/{key} to use the config's",
+                view.changed[&key]
+            );
+        }
+        let api = view.settings.api;
         let server = match ApiServer::bind(&api, &data_dir).await {
             Ok(server) => server,
             Err(error) => {

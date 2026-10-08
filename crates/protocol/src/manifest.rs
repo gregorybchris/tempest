@@ -231,6 +231,14 @@ impl Manifest {
         &self.entries
     }
 
+    /// The entry's path, if the bundle is exactly one file entry.
+    pub fn single_file(&self) -> Option<&str> {
+        match self.entries.as_slice() {
+            [entry] if entry.as_file().is_some() => Some(&entry.path),
+            _ => None,
+        }
+    }
+
     /// The bundle ID.
     pub fn bundle_id(&self) -> BundleId {
         manifest_hash(&self.to_bytes())

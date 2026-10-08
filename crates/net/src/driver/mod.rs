@@ -121,8 +121,9 @@ pub enum Destination {
     /// Directly in this directory, which may already hold some of them (see
     /// [`Storage::create_download`]).
     Dir(PathBuf),
-    /// In a new folder named after the bundle, created inside this directory once the manifest
-    /// arrives. The download fails if something by that name is already there.
+    /// Inside this directory once the manifest arrives: a bundle of one file is written straight
+    /// into it, any other in a new folder named after the bundle. The download fails if
+    /// something by that name is already there.
     NewFolderIn(PathBuf),
 }
 
@@ -132,6 +133,25 @@ impl Destination {
         match self {
             Self::Dir(dir) => Ok(dir),
             Self::NewFolderIn(parent) => {
+                if let Some(path) = manifest.single_file() {
+                    let file = parent.join(path);
+                    let check = {
+                        let parent = parent.clone();
+                        move || {
+                            std::fs::create_dir_all(&parent)
+                                .map_err(|source| (parent.clone(), source))?;
+                            match file.symlink_metadata() {
+                                Ok(_) => Err((file, std::io::ErrorKind::AlreadyExists.into())),
+                                Err(_) => Ok(()),
+                            }
+                        }
+                    };
+                    return match tokio::task::spawn_blocking(check).await {
+                        Ok(Ok(())) => Ok(parent),
+                        Ok(Err((path, source))) => Err(StorageError::Io { path, source }),
+                        Err(_) => panic!("preparing the download folder panicked"),
+                    };
+                }
                 // The name is a valid path segment, as every manifest's is.
                 let dir = parent.join(manifest.name());
                 let create = {

@@ -107,7 +107,7 @@ async fn downloads_find_a_seeder_on_the_local_network() {
                 .wait_for(|status| status.complete)
                 .await
                 .expect("the download stopped before completing");
-            let got = fs::read(target.path().join("lan/lan.bin")).unwrap();
+            let got = fs::read(target.path().join("lan.bin")).unwrap();
             assert!(got == fs::read(source.path().join("lan.bin")).unwrap());
         }
         for (node, ..) in &downloads {

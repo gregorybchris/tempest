@@ -68,14 +68,14 @@ impl Sharer {
 }
 
 /// The lines `stream` yields, read on another thread.
+/// It keeps reading once the receiver is gone, so the child never writes to a closed pipe,
+/// which would make its next `eprintln!` panic.
 fn lines(stream: impl std::io::Read + Send + 'static) -> mpsc::Receiver<String> {
     let (lines, received) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stream).lines() {
             let Ok(line) = line else { break };
-            if lines.send(line).is_err() {
-                break;
-            }
+            let _ = lines.send(line);
         }
     });
     received

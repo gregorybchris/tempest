@@ -31,10 +31,10 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | Crate | Contents | May depend on |
 | --- | --- | --- |
 | `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization, serde for tracker JSON) |
-| `core` | Sans-IO peer and bundle logic, strategies, decision events | `protocol` |
-| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `protocol`, `core`, `tracker-api` |
+| `core` | Sans-IO peer and bundle logic, strategies, decision events | (none) |
+| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `core`, `tracker-api` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `tracker-api` |
-| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `protocol`, `tracker-api` |
+| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `tracker-api` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results and the queries the results UI reads (D-204) | `core`, `sim-api` |
 | `sim-api` | The simulation results API's types and query strings, shared by its server and the results UI (D-204) | (none) |
 | `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
@@ -42,15 +42,17 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `web` | Client web UI | `ui-kit`, `api` |
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
 | `sim-web` | Simulation results UI, served by `tempest-sim web` | `ui-kit`, `sim-api` |
-| `tracker-api` | The types and text rules of a tracker's listing API, shared by the tracker, the client and the tracker website (D-206, D-234) | `protocol` |
-| `tracker-web` | The tracker website (D-210, D-234) | `ui-kit`, `tracker-api`, `protocol` |
-| `tracker` | Tracker server: peer-list service, and a catalog (its internal store) with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `tracker-api`, `net` |
-| `relay` | Relay library | `protocol`, `net` (D-185) |
+| `tracker-api` | The types and text rules of a tracker's listing API, shared by the tracker, the client and the tracker website (D-206, D-234) | (none) |
+| `tracker-web` | The tracker website (D-210, D-234) | `ui-kit`, `tracker-api` |
+| `tracker` | Tracker server: peer-list service, and a catalog (its internal store) with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `tracker-api`, `net` |
+| `relay` | Relay library | `net` (D-185) |
 | `assets` | Serving embedded web UIs' files, and embedding them from build scripts (D-201); shared by the binaries that embed a UI (D-214, D-236) | (none) |
 | `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI and web UI; embeds the client web UI's built files (D-201). It has no tracker or relay server, only their clients in `net` (D-236) | the client's crates, not `sim`, `tracker` or `relay` |
 | `tracker-cli` | The `tempest-tracker` binary (package `tempest-tracker-cli`): runs a tracker, with its catalog and website, which it embeds, and the operator commands (D-236) | `tracker`, `tracker-api`, `net`, `assets` |
 | `relay-cli` | The `tempest-relay` binary (package `tempest-relay-cli`): runs a relay (D-236) | `relay`, `net` |
 | `sim-cli` | The `tempest-sim` binary (package `tempest-sim-cli`): runs scenarios, checks baselines and serves the results UI, which it embeds (D-214) | `sim`, `sim-api`, `assets` |
+
+The last column lists the workspace crates each may use besides `protocol`, which any crate may use.
 
 `protocol` and `core` must never depend on async runtimes, sockets, the clock or global randomness. `protocol` is the code other implementers should be able to read alongside the spec.
 
@@ -73,5 +75,4 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 
 ## Open questions
 
-- Release tooling. (Testing and CI: D-123, D-132, D-141.)
 - Error handling, logging and metrics conventions.

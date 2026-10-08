@@ -18,7 +18,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 
 - Every route is under `/v1`. A later, incompatible version gets a new prefix.
 - Request bodies are JSON and must be sent as `application/json`; anything else gets 415. Browsers can't send such requests to another origin without asking first, and the API never says yes.
-- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `no_files` (409, nothing on disk to show yet), `local_only` (403, the action works only on the engine's own machine), `reveal_failed` (500, the file manager didn't start), `unsupported_media_type` (415), `internal` (500) and `unavailable` (503, the engine is shutting down).
+- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `no_files` (409, nothing on disk to show yet), `local_only` (403, the action works only on the engine's own machine), `reveal_failed` (500, the file manager didn't start), `unsupported_media_type` (415), `tracker` (502, a tracker refused or couldn't be reached while publishing, unpublishing or signing in), `internal` (500) and `unavailable` (503, the engine is shutting down, or another engine holds its data directory).
 - A transfer's ID is its bundle ID in hex.
 
 ## Routes
@@ -88,7 +88,7 @@ Settings changed through the API are kept in the state database and apply over t
 
 `tempest list`, `start`, `stop` and `remove` use the API of the daemon on the same data directory. When no daemon answers, they open the engine's state themselves without running any transfer, make the change, and say so. Only one engine uses a data directory at a time.
 
-`tempest share` and `tempest get` hand their transfer to the daemon when one answers: `share` prints the link and returns, and `get` follows the download to completion. Every option that describes the transfer itself, such as `--tracker` or `--created`, goes to the daemon in the add request (D-228). Only `--standalone` and the options of a separate process (its port, identity, binding, relay and LAN settings) run them without the daemon (D-175).
+`tempest share` and `tempest get` hand their transfer to the daemon when one answers: `share` prints the link and returns, and `get` follows the download to completion. Every option that describes the transfer itself, such as `--tracker` or `--created`, goes to the daemon in the add request (D-228). Only `--standalone` and the options of a separate process (its port, identity, binding, relay, LAN and port mapping settings) run them without the daemon (D-175).
 
 A `tempest tui` or `tempest web` with no daemon runs an engine of its own. Quitting it while transfers are active asks whether to hand them to a daemon or stop them. Handing over shuts the engine down and starts a daemon in the background on the same data directory, which resumes them (D-228).
 

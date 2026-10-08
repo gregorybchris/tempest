@@ -1,6 +1,6 @@
 # Development
 
-How to work on Tempest efficiently, for people and coding agents. These guidelines come from measuring where the M1–M9 implementation runs spent their time and disk.
+How to work on Tempest efficiently, for people and coding agents. These guidelines come from measuring where builds and tests spend their time and disk.
 
 ## Setup
 
@@ -8,7 +8,7 @@ The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development b
 
 - **macOS:** `brew install duckdb`. `.cargo/config.toml` points the build at Homebrew's copy.
 - **Hooks:** `git config core.hooksPath .githooks` enables the worktree hook (see Parallel work).
-- **Elsewhere:** install DuckDB's library and set `DUCKDB_LIB_DIR`, or build with `--features tempest-sim/bundled-duckdb` to compile it from source. CI and release builds use that feature. The `tempest` binary doesn't use DuckDB.
+- **Elsewhere:** install DuckDB's library and set `DUCKDB_LIB_DIR`, or build with `--features tempest-sim/bundled-duckdb` to compile it from source, as CI does. The `tempest` binary doesn't use DuckDB.
 
 ## Iterating
 
@@ -45,7 +45,7 @@ To point a UI at a backend on another port, change the `[[proxy]]` backend in it
 
 ## Disk
 
-The `target/` directory is a build cache, and cargo never deletes stale artifacts from it. A full build of the workspace is about 4 GB, but during a day of agent work it grew past 30 GB, from:
+The `target/` directory is a build cache, and cargo never deletes stale artifacts from it. It grows to many times the size of a full build, from:
 - old compiled copies of crates and test binaries left behind by every change;
 - incremental caches;
 - separate builds for tests, release, WebAssembly and fuzzing.
@@ -60,12 +60,12 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 
 ## Releasing locally
 
-CI builds releases when a version tag is pushed (D-211). Releases contain only `tempest`; the simulator is built from source (D-233). While CI is unavailable, the same archives can be built on one Mac with dist (D-232):
+CI builds releases when a version tag is pushed (D-211). Releases contain only `tempest`; the servers and the simulator are built from source (D-233, D-236). The same archives can also be built on one Mac with dist (D-232):
 
 - **Tools:** trunk and the `wasm32-unknown-unknown` target for the web UIs; rustup targets for each platform; `zig` and `cargo-zigbuild` for Linux; `llvm` and `cargo-xwin` for Windows. Dist picks the cross compiler itself.
-- **Web UIs first.** Build the client UI and the tracker website with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
+- **Web UI first.** Build the client web UI with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
 - **Per target:** `dist build --artifacts=local --target <triple>` writes archives and checksums to `target/distrib`. `--artifacts=all` on one target also writes the installers, the Homebrew formulas and `sha256.sum`.
-- **Smoke test** each binary that can run here: `--version`, `--help` and `tempest web` on a spare port. The Intel macOS binaries run under Rosetta.
+- **Smoke test** each binary that can run here: `--version`, `--help` and `tempest web --set api.port=<spare port>`. The Intel macOS binaries run under Rosetta.
 - **Publishing** is separate: a GitHub release with these files, and the formulas pushed to the tap.
 - **Disk:** each target's `dist` profile build takes several GB. Delete a target's `target/<triple>/dist` once it is packaged.
 

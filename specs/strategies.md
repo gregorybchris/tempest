@@ -36,8 +36,9 @@ Finishes the last chunks without waiting on the slowest peer (D-061). Endgame be
 | --- | --- |
 | **Limited** (default) | Request each remaining chunk from up to *k* additional peers (default *k* = 2) |
 | Classic | Request each remaining chunk from every peer that has it |
+| Off | No endgame: each chunk is requested from one peer at a time. An experimental contrast |
 
-In both, when a copy arrives, the duplicate requests are cancelled by resetting their streams.
+In Limited and Classic, when a copy arrives, the duplicate requests are cancelled by resetting their streams.
 
 ## Upload
 

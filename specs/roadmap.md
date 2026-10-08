@@ -7,7 +7,7 @@ The milestones after M0 are implemented with a Claude workflow.
 | # | Milestone | Done when you can… |
 | --- | --- | --- |
 | **M0** ✓ | Rust UI quality prototype (done: Leptos chosen, D-117) | Compare Leptos, Dioxus and server-rendered axum + Datastar/htmx in four palettes (green phosphor, amber phosphor, neon vector, beige-era), including a rich interactive chart, and decide whether Rust meets the bar. If not, fall back to Vite + TypeScript + React ([interfaces.md](interfaces.md)) |
-| **M1** | Protocol crate | Run `tempest share --dry-run ./folder` (or a dev command) to produce a manifest and bundle ID. All test vectors pass, and every message encodes and decodes (with property tests and fuzzing) |
+| **M1** ✓ | Protocol crate | Run `tempest share --dry-run ./folder` (or a dev command) to produce a manifest and bundle ID. All test vectors pass, and every message encodes and decodes (with property tests and fuzzing) |
 | **M2** ✓ | Core + simulator skeleton | Watch two simulated peers exchange a bundle, then a 1,000-peer swarm. Runs replay deterministically. Results land in DuckDB |
 | **M3** ✓ | Simulator validation | Reproduce the classic rarest-first and choking results (Bharambe et al., Legout et al.), then run the first experiments from [simulation.md](simulation.md) |
 | **M4** ✓ | First real transfer | Run `tempest share ./folder` on one machine and `tempest get <link>` on another, on a LAN, using a link with a direct address over QUIC |

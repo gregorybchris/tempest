@@ -54,7 +54,7 @@ How routers, relays, disks and sessions are modeled is in D-165; strategic clien
 One YAML file describes a **scenario** (the world) and the **experiment** run in it (the variants to compare). The fields are provisional (D-157); the simulator's `scenario` module defines them, and [`crates/sim/scenarios/`](../crates/sim/scenarios/) has examples. In outline:
 
 ```yaml
-name: flash-crowd
+name: release-day
 seeds: 20
 bundle: { files: [{ size: 4GiB }] }
 peers:
@@ -112,7 +112,7 @@ The simulator reproduces the classic results qualitatively. Numbers are medians 
 
 Validation exposed three client weaknesses, since fixed: a crowd arriving together locked half its peers out for a minute (D-169), and requests and freed slots leaked upload to peers the choke had refused (D-170).
 
-Two effects can hide piece selection. In the `flash-crowd` example, peers arrive over minutes, the origin stays and every peer sees most of the swarm, so random selection corrects itself (as Massoulié and Vojnović predict) and matches rarest-first. And an origin whose upload is the bottleneck sends what newcomers ask for first, which is chosen at random before rarity is known; it answers every peer in turn (D-154), so it sends several copies of some chunks before one of others, whatever the peers' selection.
+Two effects can hide piece selection. In [`flash-crowd`](../crates/sim/scenarios/flash-crowd.yaml), peers arrive over minutes, the origin stays and every peer sees most of the swarm, so random selection corrects itself (as Massoulié and Vojnović predict) and matches rarest-first. And an origin whose upload is the bottleneck sends what newcomers ask for first, which is chosen at random before rarity is known; it answers every peer in turn (D-154), so it sends several copies of some chunks before one of others, whatever the peers' selection.
 
 ## Experiment backlog
 

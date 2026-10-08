@@ -96,6 +96,32 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duratio
     deserializer.deserialize_any(DurationVisitor)
 }
 
+/// `Option<Duration>` as a duration or `null`, for a setting that can be off.
+pub mod optional {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::Duration;
+
+    pub fn serialize<S: Serializer>(
+        duration: &Option<Duration>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match duration {
+            Some(duration) => super::serialize(duration, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Duration>, D::Error> {
+        #[derive(Deserialize)]
+        struct Wrapped(#[serde(with = "crate::config::duration")] Duration);
+        let wrapped = Option::<Wrapped>::deserialize(deserializer)?;
+        Ok(wrapped.map(|Wrapped(duration)| duration))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;

@@ -1,12 +1,12 @@
-//! Keeping the session's connections useful: the connection limit (D-064), peer exchange, and
-//! when to stop sharing (D-065, D-066).
+//! Keeping the session's connections useful: the connection limit (D-064), peer exchange with
+//! a farewell list on leaving (D-224), and when to stop sharing (D-065, D-066).
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use rand::seq::IteratorRandom;
-use tempest_protocol::Message;
+use tempest_protocol::{Message, PeerId};
 use tempest_protocol::message::{GoodbyeReason, MAX_PEER_RECORDS, PeerRecord, Peers};
 
 use super::Session;
@@ -75,36 +75,72 @@ impl Session {
         let interval = self.config.connections.peer_exchange_interval;
         for id in due {
             let recipient = self.conns[&id].peer();
-            let others: BTreeMap<_, _> = self
-                .conns
-                .values()
-                .filter(|c| c.is_open() && c.peer() != recipient)
-                .filter_map(|c| {
-                    let hello = c.hello.as_ref()?;
-                    let record = PeerRecord {
-                        peer_id: c.peer(),
-                        addresses: hello.addresses.clone(),
-                        relay: hello.relay,
-                    };
-                    Some((c.peer(), record))
-                })
-                .collect();
-            let peers = others
+            let peers = self
+                .connected_records(recipient)
                 .into_values()
                 .choose_multiple(&mut self.rng, MAX_PEER_RECORDS);
             self.conns.get_mut(&id).expect("listed").next_peers = Some(now + interval);
-            if peers.is_empty() {
-                continue;
-            }
-            let count = peers.len() as u32;
-            self.send(id, Message::Peers(Peers { peers }));
-            let kind = EventKind::PeersShared {
-                conn: id,
-                peer: recipient,
-                count,
-            };
-            self.emit(now, kind);
+            self.send_peers(now, id, peers, false);
         }
+    }
+
+    /// Before leaving the swarm, tells each connected peer about up to 50 peers this one knows,
+    /// so that a peer that knew the swarm only through this one isn't stranded (D-224). Peers it
+    /// is connected to come first, since they are known to be reachable, then peers it could
+    /// have dialed. The protocol exempts this last Peers from the once-a-minute limit.
+    pub(super) fn say_farewell(&mut self, now: Time) {
+        if !self.config.connections.peer_exchange {
+            return;
+        }
+        let open: Vec<ConnId> = (self.conns.iter())
+            .filter(|(_, c)| c.is_open())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in open {
+            let recipient = self.conns[&id].peer();
+            let connected = self.connected_records(recipient);
+            let mut peers = (connected.values().cloned())
+                .choose_multiple(&mut self.rng, MAX_PEER_RECORDS);
+            let room = MAX_PEER_RECORDS - peers.len();
+            let others = (self.known.iter())
+                .filter(|&(peer, _)| *peer != recipient && !connected.contains_key(peer))
+                .map(|(_, known)| known.record.clone())
+                .choose_multiple(&mut self.rng, room);
+            peers.extend(others);
+            self.send_peers(now, id, peers, true);
+        }
+    }
+
+    /// The records of the open connections' peers other than `recipient`, with the addresses
+    /// from their Hello.
+    fn connected_records(&self, recipient: PeerId) -> BTreeMap<PeerId, PeerRecord> {
+        (self.conns.values())
+            .filter(|c| c.is_open() && c.peer() != recipient)
+            .filter_map(|c| {
+                let hello = c.hello.as_ref()?;
+                let record = PeerRecord {
+                    peer_id: c.peer(),
+                    addresses: hello.addresses.clone(),
+                    relay: hello.relay,
+                };
+                Some((c.peer(), record))
+            })
+            .collect()
+    }
+
+    /// Sends Peers with `peers` on connection `id`, unless there are none.
+    fn send_peers(&mut self, now: Time, id: ConnId, peers: Vec<PeerRecord>, farewell: bool) {
+        if peers.is_empty() {
+            return;
+        }
+        let kind = EventKind::PeersShared {
+            conn: id,
+            peer: self.conns[&id].peer(),
+            count: peers.len() as u32,
+            farewell,
+        };
+        self.send(id, Message::Peers(Peers { peers }));
+        self.emit(now, kind);
     }
 
     /// Forgets a random known peer that isn't connected or being dialed, to make room for
@@ -128,31 +164,32 @@ impl Session {
         }
     }
 
-    /// Whether the public-swarm lingering rule applies: this peer downloaded the bundle and the
-    /// user didn't choose to keep sharing (D-065).
+    /// Whether the public-swarm lingering rule applies: this peer downloaded the bundle, so it
+    /// stops at the ratio or idle limits in `lingering` (D-065). A peer that started complete
+    /// shares until stopped.
     fn lingers(&self) -> bool {
-        let linger = &self.config.lingering;
-        self.complete && !self.started_complete && !linger.keep_sharing && !linger.direct_send
+        self.complete && !self.started_complete && !self.config.lingering.direct_send
     }
 
     /// When lingering ends for lack of interest, if no peer wants anything now.
     pub(super) fn linger_deadline(&self) -> Option<Time> {
         let since = self.idle_since.filter(|_| self.lingers())?;
-        Some(since + self.config.lingering.idle_timeout)
+        Some(since + self.config.lingering.idle_timeout?)
     }
 
     /// Stops sharing once lingering is over, or once a direct send is delivered.
     pub(super) fn check_linger(&mut self, now: Time) {
-        if self.stopped || !self.complete || self.config.lingering.keep_sharing {
+        if self.stopped || !self.complete {
             return;
         }
         let linger = &self.config.lingering;
+        let ratio_reached = |ratio| self.uploaded as f64 >= ratio * self.downloaded as f64;
         let reason = if linger.direct_send {
             let waiting = self.conns.values().any(|c| c.is_open() && !c.is_complete());
             (self.delivered && !waiting).then_some(StopReason::Delivered)
         } else if !self.lingers() {
             None
-        } else if self.uploaded as f64 >= linger.ratio * self.downloaded as f64 {
+        } else if linger.ratio.is_some_and(ratio_reached) {
             Some(StopReason::RatioReached)
         } else if self.linger_deadline().is_some_and(|t| t <= now) {
             Some(StopReason::NobodyWants)

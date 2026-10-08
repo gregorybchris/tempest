@@ -672,9 +672,11 @@ impl Session {
         self.send(conn, Message::Have(Have { ranges }));
     }
 
-    /// Stops sharing: closes every connection and stops dialing or accepting.
+    /// Stops sharing: tells each connected peer about the others, closes every connection and
+    /// stops dialing or accepting.
     fn stop(&mut self, now: Time, reason: GoodbyeReason, message: &str) {
         self.stopped = true;
+        self.say_farewell(now);
         let conns: Vec<ConnId> = self.conns.keys().copied().collect();
         for conn in conns {
             self.close(now, conn, reason, message.to_owned());

@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use common::{CHUNK, Swarm, at, bundle, far_future};
-use tempest_core::config::{ChunkSelection, Endgame, WhenComplete};
+use tempest_core::config::{ChunkSelection, Endgame, LingerSettings, WhenComplete};
 use tempest_core::event::{
     CancelReason, CloseCause, InFlightReason, SelectReason, ServeReason, StopReason, SuperseedEnd,
 };
@@ -250,7 +250,7 @@ fn a_finished_peer_stops_once_nobody_wants_anything() {
     // The origin started complete, so it never stops on its own.
     assert_eq!(stopped(&swarm, 0), None);
 
-    let swarm = lingering_pair(|c| c.lingering.keep_sharing = true);
+    let swarm = lingering_pair(|c| c.lingering = LingerSettings::KEEP_SHARING);
     assert_eq!(stopped(&swarm, 1), None);
     assert!(!swarm.nodes[1].session.is_stopped());
 }
@@ -259,7 +259,7 @@ fn a_finished_peer_stops_once_nobody_wants_anything() {
 fn a_finished_peer_stops_at_its_ratio() {
     let content = bundle(&[60 * CHUNK]);
     let mut config = Config::default();
-    config.lingering.ratio = 0.05;
+    config.lingering.ratio = Some(0.05);
     config.requests.chunks = 2;
     let mut swarm = Swarm::new();
     let origin = swarm.add_complete(1, config.clone(), &content);

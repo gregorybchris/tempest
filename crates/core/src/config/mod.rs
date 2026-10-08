@@ -343,28 +343,39 @@ impl Default for ConnectionSettings {
     }
 }
 
-/// When to stop sharing after completing (D-065, D-066).
+/// When a session that downloaded the bundle stops sharing it (D-065, D-224), and when the
+/// sender of a direct send does (D-066).
+///
+/// A session that started with every chunk, such as a bundle's origin, shares until stopped.
+/// The engine sets these from its own `sharing.*` settings, which are the user-facing ones; the
+/// simulator sets them directly.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LingerSettings {
-    /// Keep sharing indefinitely, as the user chose.
-    pub keep_sharing: bool,
-    /// After downloading, stop once uploaded ≥ `ratio` × downloaded.
-    pub ratio: f64,
-    /// After downloading, stop once no peer has wanted anything for this long.
-    #[serde(with = "duration")]
-    pub idle_timeout: Duration,
+    /// Stop once uploaded ≥ `ratio` × downloaded; `None` for no ratio limit.
+    pub ratio: Option<f64>,
+    /// Stop once no connected peer has wanted anything for this long; `None` to wait forever.
+    #[serde(with = "duration::optional")]
+    pub idle_timeout: Option<Duration>,
     /// This session is the sender of a direct send: stop once a recipient has every chunk and
     /// no connected peer still lacks any.
     pub direct_send: bool,
 }
 
+impl LingerSettings {
+    /// Share until stopped: no ratio limit and no idle timeout.
+    pub const KEEP_SHARING: Self = Self {
+        ratio: None,
+        idle_timeout: None,
+        direct_send: false,
+    };
+}
+
 impl Default for LingerSettings {
     fn default() -> Self {
         Self {
-            keep_sharing: false,
-            ratio: 1.0,
-            idle_timeout: Duration::from_secs(600),
+            ratio: Some(1.0),
+            idle_timeout: Some(Duration::from_secs(600)),
             direct_send: false,
         }
     }
@@ -470,12 +481,18 @@ impl Config {
             }
         }
         for (field, value) in [
-            ("requests.in_flight_factor", self.requests.in_flight_factor),
+            (
+                "requests.in_flight_factor",
+                Some(self.requests.in_flight_factor),
+            ),
             ("lingering.ratio", self.lingering.ratio),
         ] {
-            if !(value.is_finite() && value > 0.0) {
+            if value.is_some_and(|value| !(value.is_finite() && value > 0.0)) {
                 return Err(ConfigError::NotPositive(field));
             }
+        }
+        if self.lingering.idle_timeout == Some(Duration::ZERO) {
+            return Err(ConfigError::Zero("lingering.idle_timeout"));
         }
         Ok(())
     }
@@ -563,7 +580,7 @@ mod tests {
             Err(ConfigError::Zero("upload.parallel_responses"))
         );
         let mut config = Config::default();
-        config.lingering.ratio = f64::NAN;
+        config.lingering.ratio = Some(f64::NAN);
         assert_eq!(
             config.validate(),
             Err(ConfigError::NotPositive("lingering.ratio"))
@@ -584,6 +601,21 @@ mod tests {
         assert_eq!(config.upload.review_interval, Duration::from_millis(2500));
         assert_eq!(config.connections.redial_delay, Duration::from_secs(5));
         assert_eq!(config.get("upload.review_interval"), Some(json!("2500ms")));
+    }
+
+    #[test]
+    fn lingering_limits_can_be_switched_off() {
+        let mut config = Config::default();
+        config.set("lingering.ratio", json!(null)).unwrap();
+        config.set("lingering.idle_timeout", json!(null)).unwrap();
+        assert_eq!(config.lingering, LingerSettings::KEEP_SHARING);
+        config.set("lingering.idle_timeout", json!("2m")).unwrap();
+        assert_eq!(config.lingering.idle_timeout, Some(Duration::from_secs(120)));
+        assert_eq!(config.get("lingering.idle_timeout"), Some(json!("2m")));
+        assert_eq!(
+            config.set("lingering.idle_timeout", json!("0s")),
+            Err(ConfigError::Zero("lingering.idle_timeout"))
+        );
     }
 
     #[test]

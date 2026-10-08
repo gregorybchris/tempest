@@ -277,6 +277,10 @@ pub struct UploadSettings {
     /// BitTorrent and PropShare: how often the optimistic slots rotate.
     #[serde(with = "duration")]
     pub optimistic_interval: Duration,
+    /// While superseeding: the most ranges, each of `requests.chunks` chunks, on offer to one
+    /// peer at once. Each peer's window grows toward this while no other peer is being served
+    /// (D-223).
+    pub superseed_window: u32,
 }
 
 impl Default for UploadSettings {
@@ -290,6 +294,7 @@ impl Default for UploadSettings {
             review_interval: Duration::from_secs(10),
             optimistic_slots: 1,
             optimistic_interval: Duration::from_secs(30),
+            superseed_window: 16,
         }
     }
 }
@@ -436,6 +441,7 @@ impl Config {
         for (field, value) in [
             ("upload.max_open_requests", self.upload.max_open_requests),
             ("upload.parallel_responses", self.upload.parallel_responses),
+            ("upload.superseed_window", self.upload.superseed_window),
             (
                 "requests.initial_in_flight",
                 self.requests.initial_in_flight,

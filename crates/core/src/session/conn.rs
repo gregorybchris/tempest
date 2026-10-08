@@ -90,8 +90,10 @@ pub(super) struct Outgoing {
 pub(super) struct Offer {
     /// Every chunk announced to it.
     pub announced: ChunkSet,
-    /// The range it was offered last, until it has every chunk of it.
-    pub pending: Option<(u32, u32)>,
+    /// The ranges offered to it that it doesn't have every chunk of yet, as (start, count).
+    pub pending: Vec<(u32, u32)>,
+    /// How many ranges it may have on offer at once.
+    pub window: u32,
 }
 
 /// An accepted request for chunks, waiting for or using an upload slot.

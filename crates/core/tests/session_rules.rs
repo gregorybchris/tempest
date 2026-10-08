@@ -605,6 +605,7 @@ fn ranges_must_fit_when_starting_with_a_manifest() {
 fn a_superseeding_peer_announces_only_what_it_offers() {
     let mut config = Config::default();
     config.strategies.superseed = true;
+    config.upload.superseed_window = 1;
     let mut session = complete(config);
     assert!(session.is_superseeding());
     open(&mut session, RangeList::new());
@@ -634,6 +635,46 @@ fn a_superseeding_peer_announces_only_what_it_offers() {
             removed: RangeList::new(),
         }))
     );
+}
+
+#[test]
+fn a_superseeding_peer_keeps_a_window_of_ranges_on_offer() {
+    let mut config = Config::default();
+    config.strategies.superseed = true;
+    config.upload.superseed_window = 3;
+    config.requests.chunks = 4;
+    let mut session = complete(config);
+    open(&mut session, RangeList::new());
+    control(&mut session, C, Message::Want(Want { wanted: true }));
+    let offers = |messages: Vec<Message>| -> Vec<RangeList> {
+        messages
+            .into_iter()
+            .filter_map(|m| match m {
+                Message::HaveUpdate(update) => Some(update.added),
+                _ => None,
+            })
+            .collect()
+    };
+    // The window starts at one range and grows by one each time the peer gains chunks, while
+    // nobody else waits to be served.
+    let first = offers(sent(&session.poll_actions()));
+    assert_eq!(first.len(), 2, "{first:?}");
+    assert_eq!(first[0], ranges(0..3));
+    let update = |added: RangeList| HaveUpdate {
+        added,
+        removed: RangeList::new(),
+    };
+    control(&mut session, C, Message::HaveUpdate(update(ranges(0..2))));
+    let more = offers(sent(&session.poll_actions()));
+    assert_eq!(more.len(), 1, "{more:?}");
+
+    // At its limit, a range is offered only once the peer has a whole one.
+    control(&mut session, C, Message::HaveUpdate(update(ranges(3..4))));
+    assert!(offers(sent(&session.poll_actions())).is_empty());
+    control(&mut session, C, Message::HaveUpdate(update(ranges(2..3))));
+    let next = offers(sent(&session.poll_actions()));
+    assert_eq!(next.len(), 1, "{next:?}");
+    assert!(first.iter().chain(&more).all(|r| *r != next[0]));
 }
 
 #[test]

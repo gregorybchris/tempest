@@ -1,0 +1,24 @@
+# D-223's check: how much superseeding saves when a crowd fetches a release from an origin whose
+# upload is the bottleneck, arriving at once or within a minute or two, with a window of one
+# offered range and with the default. Results are in specs/decisions.md (D-223). The window only
+# matters when superseeding.
+name: superseed-crowd
+description: 100 home peers fetch a release from an origin with half their upload.
+duration: 1h
+seeds: 3
+bundle: { files: [{ size: 32MiB }] }
+network: { latency: 25ms }
+peers:
+  - class: origin
+    starts: complete
+    bandwidth: { up: 5Mbps, down: 100Mbps }
+  - class: home
+    count: 100
+    bandwidth: { up: 10Mbps, down: 50Mbps }
+experiment:
+  vary:
+    peers.home.arrivals:
+      - { pattern: at-once }
+      - { pattern: flash-crowd, decay: 1m }
+    peers.origin.settings.strategies.superseed: [false, true]
+    peers.origin.settings.upload.superseed_window: [1, 16]

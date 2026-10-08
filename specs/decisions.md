@@ -3564,21 +3564,33 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ---
 
-## D-223: A new share superseeds by default, offering a window of ranges
+## D-223: Superseeding offers a window of ranges, and stays opt-in until gigabit sends keep up
 
-**Date:** 2026-10-07 · **Status:** Decided (confirm with simulation)
+**Date:** 2026-10-07 · **Status:** Decided (amended after simulation: the default stays off)
 
 **Context:** D-063 made superseeding opt-in. In simulation, a crowd arriving at once was done once the origin had uploaded 2.7 copies under round-robin, against 1.2 with superseeding. As built (D-155), a superseeding origin offers each peer one range and waits for it to announce the whole range before offering the next, which caps a 1:1 send at about one range per round trip.
 
 **Decision:**
 
-- `strategies.superseed` defaults to on for a transfer that starts as its bundle's only copy.
-- A superseeding origin keeps a window of several ranges offered to each peer, so a single downloader is never throttled to one range per round trip.
-- Before the default changes, a simulation compares round-robin and superseeding with the window on a flash crowd and on a 1:1 direct send. If the window still slows direct sends, revisit.
+- A superseeding origin keeps a window of ranges offered to each peer. It starts at one range and grows by one each time the peer gains chunks while the origin serves no other peer; while it does, it shrinks by one, to one. `upload.superseed_window` caps it.
+- The plan was for `strategies.superseed` to default to on for a transfer that starts as its bundle's only copy, if a simulation showed the window keeps direct sends within about 5% of round-robin and keeps most of the crowd's saving. The crowd's saving holds, but gigabit direct sends stay well behind, so the default stays off. Revisit with a window sized to the link's bandwidth-delay product rather than counted in ranges.
 
 This revises D-063 and D-155.
 
-**Rationale:** Sending each chunk out of the origin about once is the classic result this tool should demonstrate, and the window removes its cost for direct sends.
+**Simulation:** paired runs, 3 seeds each, of [`superseed-crowd`](../crates/sim/scenarios/experiments/superseed-crowd.yaml) and [`superseed-direct`](../crates/sim/scenarios/experiments/superseed-direct.yaml); "one range" is the behavior as built before this decision, "window" the default cap. Times are means of the seeds' medians.
+
+| Scenario | Round-robin | Superseeding, one range | Superseeding, window |
+| --- | --- | --- | --- |
+| Crowd of 100 at once: median time to complete | 138 s | 60 s | 61 s |
+| Same: copies the origin uploaded | 2.53 | 1.06 | 1.06 |
+| Crowd of 100 over ~1 min: median time to complete | 105 s | 27.5 s | 27.8 s |
+| 1:1, 64 MiB, 100 ms apart, 20 Mbps upload | 40.0 s | 78.4 s | 40.2 s |
+| Same at 100 Mbps | 6.6 s | 56.9 s | 6.5 s |
+| Same at 1 Gbps | 1.7 s | 52.0 s | 4.4 s |
+
+A core swarm test of 8 MiB over 40 Mbps and a 200 ms round trip took 3.2 s with the window against 2.7 s without superseeding, mostly while the window grows. Raising the cap shortens the gigabit send (64 ranges: 2.3 s) but slows the 100 Mbps one by about 12%, apparently through the downloader's pipelining, whose requests in flight settle lower. Variants that grew the window faster or started it larger let early arrivals in the gradual crowd hold ranges that others could have been sent, and lost much of that crowd's saving.
+
+**Rationale:** Sending each chunk out of the origin about once is the classic result this tool should demonstrate, and the window removes most of its cost for direct sends. A default that slows the common 1:1 send on fast links would cost more than the crowd case gains.
 
 ---
 

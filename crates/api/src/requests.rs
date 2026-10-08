@@ -61,6 +61,13 @@ pub struct AddRequest {
     /// Add a download stopped.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stopped: bool,
+    /// Trackers to find peers through, and for a share to name in its link, besides the
+    /// engine's own.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub trackers: Vec<String>,
+    /// A share's creation time, in milliseconds since the Unix epoch. Defaults to now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<i64>,
 }
 
 /// `PUT /v1/transfers/{id}/name`.

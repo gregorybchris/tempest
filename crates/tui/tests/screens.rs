@@ -229,6 +229,8 @@ fn settings() -> SettingsView {
             "relays.known",
             json!([format!("{key}@relay.example.org:4775")]),
         ),
+        ("ui.network_explained", json!(true)),
+        ("lan.enabled", json!(false)),
     ];
     for (key, value) in &changes {
         config.set(key, value.clone()).unwrap();
@@ -666,4 +668,34 @@ fn help_in_the_detail_lists_its_keys() {
     press_code(&mut app, KeyCode::Enter);
     press(&mut app, "?");
     insta::assert_snapshot!(draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn a_completed_transfer_shows_a_notice() {
+    let mut app = app();
+    let mut done = app.model.transfers()[0].clone();
+    done.status = Status::Sharing;
+    done.progress = 1.0;
+    done.completed = Some(1);
+    app.apply(ApiEvent::Transfer(Box::new(done)));
+    insta::assert_snapshot!(draw(&app, 80, 12).backend());
+}
+
+#[test]
+fn the_first_run_explains_the_network_defaults() {
+    let mut app = app();
+    let mut view = settings();
+    view.settings.ui.network_explained = false;
+    let _ = app.load_settings();
+    let reply = Reply::Loaded(Box::new(view), Default::default());
+    app.finished(&Request::Settings, Ok(reply));
+    insta::assert_snapshot!(draw(&app, 80, 24).backend());
+}
+
+#[test]
+fn quitting_an_embedded_engine_asks_what_to_do_with_its_transfers() {
+    let mut app = app();
+    app.origin = Origin::Embedded;
+    press(&mut app, "q");
+    insta::assert_snapshot!(draw(&app, 80, 16).backend());
 }

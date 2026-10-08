@@ -487,6 +487,12 @@ async fn the_clients_settings_writes_round_trip() {
     });
     let (status, body) = send(&app, Method::PATCH, "/v1/settings", Some(changes.clone())).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    let network = json!({ keys::PORT_MAPPING: false, keys::LAN: false });
+    let (status, body) = send(&app, Method::PATCH, "/v1/settings", Some(network)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let explained = json!({ prefs::NETWORK_EXPLAINED: true });
+    let (status, body) = send(&app, Method::PATCH, "/v1/settings", Some(explained)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (_, body) = send(&app, Method::GET, "/v1/settings", None).await;
     let info: SettingsInfo = serde_json::from_value(body).unwrap();
     let settings = &info.settings;
@@ -515,7 +521,9 @@ async fn the_clients_settings_writes_round_trip() {
     assert_eq!(settings.trackers, ["https://tracker.example.org/announce"]);
     assert_eq!(settings.relays.known, [relay]);
     assert!(!settings.relays.from_trackers);
+    assert!(!settings.port_mapping.enabled && !settings.lan.enabled);
     let ui = &settings.ui;
+    assert!(ui.network_explained);
     assert_eq!(ui.theme, "vector");
     assert!(ui.scanlines && ui.clean);
     assert_eq!(prefs::columns(ui).len(), 2);
@@ -935,4 +943,44 @@ async fn the_event_stream_resumes_after_the_last_event_seen() {
         }
     });
     end.await.expect("the stream ends");
+}
+
+/// What `share` and `get` can give for one transfer, the API takes (D-228).
+#[tokio::test]
+async fn a_share_takes_its_own_trackers_and_creation_time() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    let app = router(engine.clone(), Access::Local);
+    let shared = root.path().join("notes");
+    std::fs::create_dir_all(&shared).unwrap();
+    std::fs::write(shared.join("a.txt"), b"hello").unwrap();
+    let tracker = "https://tracker.example.org/announce";
+
+    let body = json!({ "path": shared, "trackers": [tracker], "created": 1_700_000_000_000_i64 });
+    let (status, share) = send(&app, Method::POST, "/v1/transfers", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{share}");
+    let link: Link = share["link"].as_str().unwrap().parse().unwrap();
+    assert_eq!(link.trackers, [tracker]);
+
+    // The creation time is part of the bundle, so another time makes another bundle.
+    let other = json!({ "path": shared, "created": 1_700_000_000_001_i64 });
+    let (status, other) = send(&app, Method::POST, "/v1/transfers", Some(other)).await;
+    assert_eq!(status, StatusCode::CREATED, "{other}");
+    assert_ne!(other["id"], share["id"]);
+
+    let bad = json!({ "path": shared, "trackers": ["ftp://nope"], "created": 5 });
+    let response = send(&app, Method::POST, "/v1/transfers", Some(bad)).await;
+    assert_error(response, StatusCode::BAD_REQUEST, "invalid_request");
+
+    // A download takes trackers too, and names them in its link; a creation time is a share's.
+    let body = json!({ "link": nobodys_link(7), "stopped": true, "trackers": [tracker] });
+    let (status, download) = send(&app, Method::POST, "/v1/transfers", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{download}");
+    let link: Link = download["link"].as_str().unwrap().parse().unwrap();
+    assert_eq!(link.trackers, [tracker]);
+    let body = json!({ "link": nobodys_link(8), "created": 5 });
+    let response = send(&app, Method::POST, "/v1/transfers", Some(body)).await;
+    assert_error(response, StatusCode::BAD_REQUEST, "invalid_request");
+
+    engine.shutdown().await;
 }

@@ -41,6 +41,10 @@ pub struct Settings {
     pub trackers: Vec<String>,
     /// The relays to pick a home relay from.
     pub relays: Relays,
+    /// Asking the router to forward the peer port.
+    pub port_mapping: Switch,
+    /// Finding peers on the local network.
+    pub lan: Switch,
     /// Speed limits over every transfer together.
     pub limits: Limits,
     /// When a complete transfer stops sharing.
@@ -67,6 +71,14 @@ pub struct Relays {
     pub known: Vec<String>,
     /// Also pick from the relays trackers recommend.
     pub from_trackers: bool,
+}
+
+/// `port_mapping` and `lan`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Switch {
+    /// Whether it is on.
+    pub enabled: bool,
 }
 
 /// `limits`, in bytes per second, `None` for no limit.
@@ -143,6 +155,10 @@ pub mod keys {
     pub const RELAYS: &str = "relays.known";
     /// Whether to use relays trackers suggest.
     pub const RELAYS_FROM_TRACKERS: &str = "relays.from_trackers";
+    /// Whether to ask the router to forward the peer port.
+    pub const PORT_MAPPING: &str = "port_mapping.enabled";
+    /// Whether to find peers on the local network.
+    pub const LAN: &str = "lan.enabled";
 }
 
 /// What kind of value a setting takes, as typed.

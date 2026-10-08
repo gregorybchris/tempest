@@ -110,6 +110,8 @@ pub enum Dialog {
     Views,
     /// The keys.
     Help,
+    /// What the network defaults share, on the first run (D-227).
+    Network,
 }
 
 /// The page's state. It is `Copy`; every copy is the same state.

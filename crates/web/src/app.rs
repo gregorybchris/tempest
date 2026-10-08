@@ -198,6 +198,7 @@ fn look(config: Config, ui: Ui) {
     ui.notify.set(notify::enabled());
     // The look the engine has, once known.
     let saved = StoredValue::new(None::<(Theme, bool, bool)>);
+    let saved_network = StoredValue::new(None::<()>);
     Effect::new(move |_| {
         config.info.with(|info| {
             let Some(settings) = info.as_ref().map(|i| &i.settings.ui) else {
@@ -209,6 +210,12 @@ fn look(config: Config, ui: Ui) {
                 ui.theme.set(theme);
                 ui.scanlines.set(settings.scanlines);
                 ui.clean.set(settings.clean);
+            }
+            // The first run says what the network defaults share, once.
+            if !settings.network_explained && saved_network.get_value().is_none() {
+                saved_network.set_value(Some(()));
+                ui.dialog.set(Some(Dialog::Network));
+                config.change_quietly(prefs::NETWORK_EXPLAINED, json!(true));
             }
             let columns = prefs::columns(settings);
             if ui.columns.with_untracked(|c| *c != columns) {

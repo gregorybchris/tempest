@@ -390,3 +390,33 @@ fn the_cli_publishes_and_unpublishes_through_the_daemon() {
     assert!(stdout(&again).contains("withdrawn"), "{}", stdout(&again));
     assert_eq!(tracker.listing_status(&id), 404);
 }
+
+#[test]
+fn share_options_for_one_transfer_do_not_run_it_standalone() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("notes.txt");
+    fs::write(&source, b"some notes").unwrap();
+    let created = "1700000000000";
+    // Nothing listens there, which announcing copes with.
+    let tracker = "http://127.0.0.1:9/announce";
+
+    let a = root.path().join("a");
+    let daemon = Daemon::start(&a, &[]);
+    let shared = run(tempest(&a)
+        .args(["share", "--created", created, "--tracker", tracker])
+        .arg(&source));
+    assert!(stderr(&shared).contains("daemon"), "{}", stderr(&shared));
+    let link = field(&shared, "link");
+    assert!(link.contains("tracker=http"), "{link}");
+
+    // The daemon made the same bundle a standalone dry run does, so it took the creation time.
+    let dry = run(tempest(&a)
+        .args(["share", "--dry-run", "--created", created])
+        .arg(&source));
+    assert_eq!(field(&shared, "bundle"), field(&dry, "bundle"));
+    let listed = transfers(&a);
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0]["link"].as_str().unwrap().contains("tracker=http"));
+
+    daemon.interrupt();
+}

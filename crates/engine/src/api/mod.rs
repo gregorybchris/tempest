@@ -237,12 +237,14 @@ async fn add_transfer(State(engine): State<Engine>, Json(request): Json<AddReque
         category,
         tags,
         stopped,
+        trackers,
+        created,
     } = request;
     let info = match (link, path) {
         (Some(link), None) => {
-            if name.is_some() || !comment.is_empty() {
+            if name.is_some() || !comment.is_empty() || created.is_some() {
                 return Err(ApiError::invalid(
-                    "name and comment describe a new bundle; rename a download instead",
+                    "name, comment and created describe a new bundle; rename a download instead",
                 ));
             }
             let options = AddOptions {
@@ -250,6 +252,7 @@ async fn add_transfer(State(engine): State<Engine>, Json(request): Json<AddReque
                 category,
                 tags,
                 stopped,
+                trackers,
             };
             engine.add_link(&link, options).await?
         }
@@ -267,6 +270,8 @@ async fn add_transfer(State(engine): State<Engine>, Json(request): Json<AddReque
                 comment,
                 category,
                 tags,
+                trackers,
+                created,
             };
             engine.add_path(&path, options).await?
         }

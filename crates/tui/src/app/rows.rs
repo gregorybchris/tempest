@@ -17,7 +17,9 @@ use crate::form::{Field, Form};
 use crate::format;
 use crate::prefs;
 
+use tempest_api::network;
 pub use tempest_api::settings::ValueKind;
+use tempest_api::settings::keys;
 
 /// What changing a row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +28,8 @@ pub enum Edit {
     None,
     /// Asks for a new value of its setting.
     Value(ValueKind),
-    /// Switches its setting on or off.
-    Toggle,
+    /// Switches its setting, which is on or off now, to the other.
+    Toggle(bool),
     /// Steps its setting through these values.
     Cycle(&'static [&'static str]),
     /// Opens the alternative limits' schedule.
@@ -117,8 +119,9 @@ pub fn describe_schedule(schedule: &Schedule) -> String {
     schedule.describe()
 }
 
-fn yes_no(on: bool) -> &'static str {
-    if on { "on" } else { "off" }
+/// A switch as a row's value.
+fn switch(on: bool) -> &'static str {
+    if on { "[ ●] on" } else { "[● ] off" }
 }
 
 /// `text` with its first letter in upper case.
@@ -189,8 +192,8 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
                 Row::setting(
                     "Switched on",
                     "limits.alternative.enabled",
-                    yes_no(alternative.enabled),
-                    Edit::Toggle,
+                    switch(alternative.enabled),
+                    Edit::Toggle(alternative.enabled),
                     "On, they apply whatever the schedule says.",
                 ),
                 Row::setting(
@@ -265,6 +268,8 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
             ],
         },
     ];
+
+    sections.push(network_section(settings));
 
     let mut categories = vec![Row::setting(
         "Default folder",
@@ -355,6 +360,36 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
     sections
 }
 
+/// The network defaults, each a switch with a sentence on what it shares (D-227).
+fn network_section(settings: &tempest_engine::EngineConfig) -> Section {
+    let on = |key: &str| match key {
+        keys::PORT_MAPPING => settings.port_mapping.enabled,
+        keys::LAN => settings.lan.enabled,
+        _ => settings.relays.from_trackers,
+    };
+    Section {
+        title: "Network",
+        note: Some(
+            "On by default so direct sends work behind home routers. Move to a row to read what \
+             it shares."
+                .to_owned(),
+        ),
+        rows: network::FEATURES
+            .iter()
+            .map(|feature| {
+                let on = on(feature.key);
+                Row::setting(
+                    feature.label,
+                    feature.key,
+                    switch(on),
+                    Edit::Toggle(on),
+                    feature.says,
+                )
+            })
+            .collect(),
+    }
+}
+
 /// The Catalog area's sections.
 pub fn catalog_sections(view: &SettingsView) -> Vec<Section> {
     let settings = &view.settings;
@@ -370,13 +405,7 @@ pub fn catalog_sections(view: &SettingsView) -> Vec<Section> {
         Row::new("+ Add a tracker", "", Edit::NewTracker)
             .help("An http:// or https:// URL. Every transfer announces to it."),
     );
-    let mut relays = vec![Row::setting(
-        "Use relays trackers suggest",
-        "relays.from_trackers",
-        yes_no(settings.relays.from_trackers),
-        Edit::Toggle,
-        "Also pick a home relay from those the trackers recommend.",
-    )];
+    let mut relays: Vec<Row> = Vec::new();
     relays.extend(relay_identities(view).into_iter().map(|relay| {
         Row::new(relay.clone(), "", Edit::Relay(relay)).help("enter changes it; x removes it.")
     }));
@@ -562,9 +591,8 @@ impl App {
                 let target = ValueTarget::Setting { key, kind, about };
                 self.modal = Some(value_edit(target, text, "none"));
             }
-            Edit::Toggle => {
+            Edit::Toggle(on) => {
                 let key = row.key?;
-                let on = row.value == "on";
                 return Some(self.change_settings([(key, json!(!on))], Some(about)));
             }
             Edit::Cycle(values) => {
@@ -650,10 +678,9 @@ impl App {
     pub(super) fn add_entry(&mut self) -> Option<Request> {
         self.settings.as_ref()?;
         let relays = self.area == Area::Catalog
-            && self.current_row().is_some_and(|row| {
-                matches!(row.edit, Edit::Relay(_) | Edit::NewRelay)
-                    || row.key == Some("relays.from_trackers")
-            });
+            && self
+                .current_row()
+                .is_some_and(|row| matches!(row.edit, Edit::Relay(_) | Edit::NewRelay));
         let target = match self.area {
             Area::Settings => {
                 let form = Form::new(vec![

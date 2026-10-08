@@ -43,7 +43,7 @@ use tempest_engine::api::QueuePlace;
 use tempest_engine::api::client::ApiClient;
 use tokio::sync::mpsc;
 
-use crate::app::{Action, App, Look, Origin, Reply, Request};
+use crate::app::{Action, App, Exit, Look, Origin, Reply, Request};
 use crate::model::Connection;
 use crate::theme::Theme;
 
@@ -65,9 +65,10 @@ enum Message {
     Finished(Request, Result<Reply, String>),
 }
 
-/// Runs the TUI in the terminal against the engine `client` reaches, until the user quits.
-/// Must be called within a multi-threaded tokio runtime.
-pub async fn run(client: ApiClient, origin: Origin) -> io::Result<()> {
+/// Runs the TUI in the terminal against the engine `client` reaches, until the user quits, and
+/// returns what the user chose to do with the engine's active transfers. Must be called within
+/// a multi-threaded tokio runtime.
+pub async fn run(client: ApiClient, origin: Origin) -> io::Result<Exit> {
     let (sender, messages) = mpsc::unbounded_channel();
     let stop_input = Arc::new(AtomicBool::new(false));
     let input = read_input(sender.clone(), stop_input.clone());
@@ -78,7 +79,10 @@ pub async fn run(client: ApiClient, origin: Origin) -> io::Result<()> {
     if let Some(request) = app.load_settings() {
         let loaded = tokio::time::timeout(SETTINGS_WAIT, carry_out(&client, &request)).await;
         let result = loaded.unwrap_or_else(|_| Err("the engine took too long".to_owned()));
-        app.finished(&request, result);
+        // What the first answer calls for, such as recording that the first-run note was shown.
+        if let Some(next) = app.finished(&request, result) {
+            tokio::spawn(send(client.clone(), next, sender.clone()));
+        }
     }
     let mut terminal = ratatui::try_init()?;
     // Pasted links arrive whole rather than as keys; not every terminal supports it.
@@ -99,7 +103,7 @@ async fn main_loop(
     client: &ApiClient,
     sender: mpsc::UnboundedSender<Message>,
     mut messages: mpsc::UnboundedReceiver<Message>,
-) -> io::Result<()> {
+) -> io::Result<Exit> {
     let mut ticks = tokio::time::interval(Duration::from_secs(1));
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -113,7 +117,7 @@ async fn main_loop(
                 }
             }
             message = messages.recv() => {
-                let Some(message) = message else { return Ok(()) };
+                let Some(message) = message else { return Ok(app.exit()) };
                 handle(&mut app, client, &sender, message);
                 // Take in everything already waiting before drawing again.
                 while let Ok(message) = messages.try_recv() {
@@ -122,7 +126,7 @@ async fn main_loop(
             }
         }
         if app.quit {
-            return Ok(());
+            return Ok(app.exit());
         }
     }
 }

@@ -5,6 +5,7 @@ mod catalog;
 mod daemon;
 mod engine;
 mod get;
+mod handoff;
 mod peer;
 mod progress;
 mod relay;
@@ -44,10 +45,10 @@ enum Command {
     /// Remove transfers, keeping their files unless asked not to.
     Remove(transfers::RemoveArgs),
     /// Open the terminal UI, on the daemon if one is running, or else on an engine of its own
-    /// that stops when it quits.
+    /// that stops when it quits, unless asked to hand its transfers to a daemon.
     Tui(tui::TuiArgs),
     /// Open the web UI, on the daemon if one is running, or else on an engine run here until
-    /// Ctrl-C.
+    /// Ctrl-C, which asks whether to hand its transfers to a daemon.
     Web(web::WebArgs),
     /// Run the engine, which does every transfer and serves the API that the CLI and UIs use,
     /// and the web UI.

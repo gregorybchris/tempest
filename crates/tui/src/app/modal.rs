@@ -75,6 +75,13 @@ pub enum Modal {
         /// What saying yes asks.
         request: Box<Request>,
     },
+    /// The first run's account of the network defaults (D-227). Any key closes it.
+    Network,
+    /// Quitting an engine that runs only for this TUI while transfers are active (D-228).
+    Quit {
+        /// How many transfers are active.
+        active: usize,
+    },
     /// Choosing the list's optional columns.
     Columns {
         /// The columns switched on.
@@ -379,6 +386,8 @@ impl App {
                 Modal::Form(form) => self.form_key(*form, key),
                 Modal::Confirm { request, .. } if is(key, KeyCode::Enter) => Outcome::Ask(*request),
                 Modal::Confirm { .. } => Outcome::Close,
+                Modal::Network => Outcome::Close,
+                Modal::Quit { active } => self.quit_key(active, key),
                 Modal::Columns { chosen, cursor } => self.columns_key(chosen, cursor, key),
             }
         };
@@ -418,6 +427,23 @@ impl App {
                 self.share.form.paste(text);
             }
             _ => {}
+        }
+    }
+
+    /// `d` or enter hands the active transfers to a daemon, `s` stops them with the engine,
+    /// and esc stays.
+    fn quit_key(&mut self, active: usize, key: KeyEvent) -> Outcome {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('d') => {
+                self.hand_off = true;
+                self.quit = true;
+                Outcome::Close
+            }
+            KeyCode::Char('s') => {
+                self.quit = true;
+                Outcome::Close
+            }
+            _ => Outcome::Open(Modal::Quit { active }),
         }
     }
 
@@ -810,6 +836,12 @@ impl App {
             ],
             Modal::Pick { .. } => &[("j/k", "choose"), ("enter", "pick"), ("esc", "cancel")],
             Modal::Confirm { .. } => &[("enter", "yes"), ("esc", "no")],
+            Modal::Network => &[("esc", "close")],
+            Modal::Quit { .. } => &[
+                ("d", "hand to a daemon"),
+                ("s", "stop them"),
+                ("esc", "stay"),
+            ],
             Modal::Columns { .. } => &[
                 ("j/k", "choose"),
                 ("space", "show/hide"),

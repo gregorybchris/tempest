@@ -8,13 +8,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::{fit, form};
+use super::{fit, form, rows};
 use crate::app::{AddField, AddForm, App, FormKind, Modal, PickKind, Target, TextKind, ValueEdit};
 use crate::columns::Column;
 use crate::commands::{self, Command};
 use crate::form::Form;
 use crate::input::Input;
 use crate::theme::Theme;
+use tempest_api::network;
 
 /// The most matches the palette lists at once.
 const PALETTE_ROWS: usize = 12;
@@ -55,10 +56,80 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             detail,
             ..
         }) => draw_confirm(frame, &app.theme, area, title, text, detail),
+        Some(Modal::Network) => draw_network(frame, &app.theme, area),
+        Some(Modal::Quit { active }) => draw_quit(frame, &app.theme, area, *active),
         Some(Modal::Columns { chosen, cursor }) => {
             draw_columns(frame, &app.theme, area, chosen, *cursor);
         }
     }
+}
+
+/// A key and what it does, as a dim line.
+fn key_line<'a>(theme: &Theme, keys: &[(&'a str, &'a str)]) -> Line<'a> {
+    let mut spans = vec![Span::raw(" ")];
+    for (key, action) in keys {
+        spans.push(Span::styled(
+            *key,
+            Style::new().fg(theme.hot).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {action}   "),
+            Style::new().fg(theme.dim),
+        ));
+    }
+    Line::from(spans)
+}
+
+/// What the first run says about the network defaults (D-227).
+fn draw_network(frame: &mut Frame, theme: &Theme, area: Rect) {
+    let width = 66.min(area.width.saturating_sub(4));
+    let room = usize::from(width).saturating_sub(4);
+    let mut lines: Vec<Line> = Vec::new();
+    let paragraph = |text: &str, style: Style, lines: &mut Vec<Line>| {
+        for line in rows::wrap(text, room) {
+            lines.push(Line::styled(format!(" {line}"), style));
+        }
+        lines.push(Line::raw(""));
+    };
+    paragraph(network::INTRO, Style::new().fg(theme.fg), &mut lines);
+    for feature in network::FEATURES {
+        let text = format!("{}. {}", feature.label, feature.says);
+        paragraph(&text, Style::new().fg(theme.fg), &mut lines);
+    }
+    lines.push(key_line(theme, &[("esc", "close")]));
+    let height = lines.len() as u16 + 2;
+    let inner = popup(frame, theme, area, (width, height), "Before you start");
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The question on quitting an engine that runs only for the TUI (D-228).
+fn draw_quit(frame: &mut Frame, theme: &Theme, area: Rect, active: usize) {
+    let width = 64.min(area.width.saturating_sub(4));
+    let room = usize::from(width).saturating_sub(4);
+    let what = match active {
+        1 => "1 transfer is".to_owned(),
+        n => format!("{n} transfers are"),
+    };
+    let text = format!(
+        "{what} running on an engine that stops when this closes. A daemon can carry on \
+         sharing and downloading in the background."
+    );
+    let mut lines: Vec<Line> = rows::wrap(&text, room)
+        .into_iter()
+        .map(|line| Line::styled(format!(" {line}"), Style::new().fg(theme.fg)))
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(key_line(
+        theme,
+        &[
+            ("d", "hand to a daemon"),
+            ("s", "stop them"),
+            ("esc", "stay"),
+        ],
+    ));
+    let height = lines.len() as u16 + 2;
+    let inner = popup(frame, theme, area, (width, height), "Quit");
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// A box of `width` by `height` centered in `area`, cleared, with a titled border. Returns

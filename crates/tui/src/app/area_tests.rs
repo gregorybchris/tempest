@@ -67,12 +67,11 @@ fn values_are_typed_checked_and_sent() {
     let Some(Modal::Value(edit)) = &app.modal else {
         panic!()
     };
-    assert_eq!(edit.input.text(), "5", "the prompt starts with the value");
-    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
-    type_keys(&mut app, "none");
+    assert_eq!(edit.input.text(), "", "no limit is the default (D-220)");
+    type_keys(&mut app, "5");
     assert_eq!(
         changes(press(&mut app, KeyCode::Enter)),
-        change("queue.max_active_uploads", Value::Null)
+        change("queue.max_active_uploads", json!(5))
     );
 }
 
@@ -221,7 +220,7 @@ fn trackers_and_relays_are_added_and_removed() {
 
     // In the relays section, `a` adds a relay.
     press(&mut app, KeyCode::Tab);
-    assert_eq!(app.current_row().unwrap().key, Some("relays.from_trackers"));
+    assert_eq!(app.current_row().unwrap().edit, Edit::NewRelay);
     press(&mut app, KeyCode::Char('a'));
     let key = "ab".repeat(32);
     type_keys(&mut app, &format!("{key}@relay.example.org"));

@@ -19,6 +19,9 @@ pub const SCANLINES: &str = "ui.scanlines";
 /// The setting switching the web UI's effects off.
 pub const CLEAN: &str = "ui.clean";
 
+/// The setting recording that the first-run explanation of the network defaults was shown.
+pub const NETWORK_EXPLAINED: &str = "ui.network_explained";
+
 /// The optional columns `ui` shows, in the list's order, or the default ones.
 pub fn columns(ui: &UiSettings) -> Vec<Column> {
     match &ui.columns {

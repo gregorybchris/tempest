@@ -120,6 +120,10 @@ pub struct Session {
     events: Vec<Event>,
 }
 
+/// How long a connection may take to complete the opening sequence. A peer that never sends
+/// Hello and Have would otherwise hold a connection slot, and a dial slot, forever.
+pub const OPENING_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The most addresses kept for one known peer. Merging records from several sources keeps the
 /// newest.
 pub const MAX_PEER_ADDRESSES: usize = 16;
@@ -413,7 +417,8 @@ impl Session {
                 .chunk_requests()
                 .next()
                 .map(|_| c.progress_at + self.config.requests.snub_timeout);
-            [c.retry_at, snub, c.next_peers]
+            let opening = (!c.is_open()).then(|| c.connected_at + OPENING_TIMEOUT);
+            [c.retry_at, snub, c.next_peers, opening]
         });
         let review = self.uploader.next_review();
         let dial = self.next_dial.filter(|_| self.may_dial());
@@ -442,6 +447,14 @@ impl Session {
             .collect();
         for id in due {
             self.fill(now, id);
+        }
+        let stalled: Vec<ConnId> = (self.conns.iter())
+            .filter(|(_, c)| !c.is_open() && c.connected_at + OPENING_TIMEOUT <= now)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in stalled {
+            let message = "the opening sequence did not complete in time".to_owned();
+            self.close(now, id, GoodbyeReason::ProtocolViolation, message);
         }
         self.check_snubs(now);
         self.request_manifest(now);

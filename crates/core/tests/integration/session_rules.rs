@@ -12,8 +12,8 @@ use tempest_core::event::ServeReason;
 use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
 use tempest_core::upload::{ServeDecision, UploadContext, UploadStrategy};
 use tempest_core::{
-    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_PEER_ADDRESSES, Reply, RequestId,
-    Response, Rng, Session, StreamId, Time,
+    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_PEER_ADDRESSES, OPENING_TIMEOUT,
+    Reply, RequestId, Response, Rng, Session, StreamId, Time,
 };
 use tempest_protocol::message::{
     Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, PeerRecord, Peers,
@@ -916,6 +916,30 @@ fn a_new_peer_record_never_holds_its_relay_address_as_a_direct_one() {
             relay: Some(addr(9)),
         }]
     );
+}
+
+#[test]
+fn an_opening_that_never_completes_is_closed() {
+    let bundle_id = content().manifest().bundle_id();
+    let mut session = complete(Config::default());
+    connect(&mut session, C, peer_id(10), Direction::Dialed);
+    // Hello arrives, but never Have.
+    control(&mut session, C, Message::Hello(hello(bundle_id)));
+    session.poll_actions();
+    let deadline = Time::ZERO + OPENING_TIMEOUT;
+    assert!(session.next_timer().is_some_and(|t| t <= deadline));
+    session.handle_timer(deadline);
+    let closed = session.poll_actions().into_iter().any(|a| {
+        matches!(
+            a,
+            Action::Close {
+                conn: C,
+                reason: GoodbyeReason::ProtocolViolation,
+                ..
+            }
+        )
+    });
+    assert!(closed);
 }
 
 #[test]

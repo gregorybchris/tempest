@@ -20,6 +20,8 @@ pub(super) struct Conn {
     pub sent_opening: bool,
     /// The other peer's Hello, once received.
     pub hello: Option<Hello>,
+    /// When the connection reached the session.
+    pub connected_at: Time,
     /// When the opening sequence completed: both peers sent and received Hello and Have.
     pub opened_at: Option<Time>,
     /// The chunks the other peer has.
@@ -124,6 +126,7 @@ impl Conn {
             info,
             sent_opening: false,
             hello: None,
+            connected_at: now,
             opened_at: None,
             holdings: Holdings::Pending {
                 updates: Vec::new(),

@@ -4894,6 +4894,7 @@ dependencies = [
  "quinn",
  "reqwest",
  "ring",
+ "rustix 1.1.5",
  "rustls",
  "rustls-platform-verifier 0.6.2",
  "serde",

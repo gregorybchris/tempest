@@ -15,6 +15,7 @@
 //! - [`limit`]: speed limits for a node and for each bundle.
 //! - [`tracker`]: finding a bundle's peers through trackers.
 //! - [`publish`]: signing in to trackers and listing bundles there.
+//! - [`files_limit`]: raising the limit on open files.
 //! - [`fetch`]: fetching a manifest from one peer without joining its swarm, as a tracker does
 //!   to list a bundle.
 //! - [`lan`]: finding peers on the local network through multicast.
@@ -27,6 +28,7 @@ pub mod dirs;
 pub mod driver;
 pub mod endpoint;
 pub mod fetch;
+pub mod files_limit;
 pub mod home;
 pub mod identity;
 pub mod lan;
@@ -48,6 +50,7 @@ pub use endpoint::{
     Connection, DEFAULT_PORT, Endpoint, EndpointConfig, HandshakeError, Incoming, closed_cause,
 };
 pub use fetch::{FetchError, FetchLimits, fetch_manifest};
+pub use files_limit::raise_open_file_limit;
 pub use home::{HomeRelay, RelayChoice, RelayError, RelayFailure, RelayStatus};
 pub use identity::{Identity, IdentityError};
 pub use lan::{Lan, LanConfig};

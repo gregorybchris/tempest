@@ -386,7 +386,11 @@ impl<'a, 's> Simulation<'a, 's> {
             availability: Vec::new(),
         };
 
+        // A peer's ID comes from its slot, so that it is the same in every variant.
+        let mut first_slot = 0usize;
         for (class, spec) in scenario.peers.iter().enumerate() {
+            let class_slot = first_slot;
+            first_slot += slots[class].max(spec.count) as usize;
             // The time since the start of the class's Poisson arrivals.
             let mut poisson = Duration::ZERO;
             for k in 0..slots[class].max(spec.count) {
@@ -428,7 +432,7 @@ impl<'a, 's> Simulation<'a, 's> {
                 if spec.starts == Start::Empty {
                     sim.waiting += 1;
                 }
-                let id = peer_id(index);
+                let id = peer_id(class_slot + k as usize);
                 sim.by_id.insert(id, index);
                 sim.peers.push(Peer {
                     id,

@@ -470,9 +470,12 @@ impl Registration {
         let control = async {
             loop {
                 match read_relay_message(&mut recv).await {
-                    // The relay saw this peer's address change.
-                    Ok(Some(RelayMessage::Registered(registered))) => {
-                        shared.status.send_replace(status(&registered));
+                    // The relay saw this peer's address change. The relay address must stay
+                    // the same, since it may already be published.
+                    Ok(Some(RelayMessage::Registered(update)))
+                        if update.relay_address == registered.relay_address =>
+                    {
+                        shared.status.send_replace(status(&update));
                     }
                     // Nothing more is defined for the relay to send.
                     Ok(None) => std::future::pending().await,

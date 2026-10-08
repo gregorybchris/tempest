@@ -480,3 +480,55 @@ async fn a_relayed_transfer_finishes_over_a_direct_connection() {
     downloader.shutdown().await;
     seeder.shutdown().await;
 }
+
+/// A relay that registers the peer, then claims its relay address changed, which the protocol
+/// doesn't allow: the address may already be published.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relay_that_changes_the_relay_address_is_a_violation() {
+    use quinn::crypto::rustls::QuicServerConfig;
+    use tempest_net::{read_relay_message, tls, write_relay_message};
+    use tempest_protocol::RelayMessage;
+    use tempest_protocol::relay::{RELAY_ALPN, Registered};
+
+    let identity = Identity::generate().unwrap();
+    let crypto = QuicServerConfig::try_from(tls::server_config(&identity, RELAY_ALPN)).unwrap();
+    let server = quinn::ServerConfig::with_crypto(Arc::new(crypto));
+    let fake = quinn::Endpoint::server(server, "127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr = fake.local_addr().unwrap();
+    let identity = RelayIdentity {
+        key: identity.peer_id(),
+        host: RelayHost::Ip(addr.ip()),
+        port: addr.port(),
+    };
+
+    let node = start_node(Identity::generate().unwrap());
+    node.endpoint().set_relays(RelayChoice {
+        known: vec![identity],
+        from_trackers: false,
+    });
+    let conn = within(async { fake.accept().await.unwrap().await.unwrap() }).await;
+    let (mut send, mut recv) = within(conn.accept_bi()).await.unwrap();
+    let register = within(read_relay_message(&mut recv)).await.unwrap();
+    assert_eq!(register, Some(RelayMessage::Register));
+    let registered = |port| {
+        RelayMessage::Registered(Registered {
+            relay_address: Address::new(addr.ip(), port),
+            observed_address: conn.remote_address().into(),
+        })
+    };
+    write_relay_message(&mut send, &registered(40_000))
+        .await
+        .unwrap();
+    write_relay_message(&mut send, &registered(40_001))
+        .await
+        .unwrap();
+    let closed = within(conn.closed()).await;
+    let quinn::ConnectionError::ApplicationClosed(close) = closed else {
+        panic!("the peer closed the connection: {closed:?}");
+    };
+    assert_eq!(
+        close.error_code,
+        quinn::VarInt::from_u32(GoodbyeReason::ProtocolViolation as u32)
+    );
+    node.shutdown().await;
+}

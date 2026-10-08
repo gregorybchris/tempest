@@ -36,7 +36,7 @@ pub struct PeerArgs {
     /// A relay to pick a home relay from, as `<key>@host[:port]`, so peers that can't reach
     /// this one directly can reach it through the relay. Repeat for more; the one that answers
     /// fastest is used. Trackers may recommend more.
-    #[arg(long, value_name = "RELAY")]
+    #[arg(long, value_name = "KEY@HOST[:PORT]")]
     pub relay: Vec<RelayIdentity>,
     /// Neither look for peers on the local network nor announce this one there.
     #[arg(long)]

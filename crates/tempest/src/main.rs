@@ -101,9 +101,27 @@ fn main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(error) if error.is::<progress::Interrupted>() => {
+            eprintln!("{error}");
+            ExitCode::from(130)
+        }
         Err(error) => {
-            eprintln!("error: {error:#}");
+            eprintln!("error: {}", message(&error));
             ExitCode::FAILURE
         }
     }
+}
+
+/// An error and its causes in one line, leaving out a cause its parent already ends with,
+/// as errors that quote their source do.
+fn message(error: &anyhow::Error) -> String {
+    let mut message = error.to_string();
+    for cause in error.chain().skip(1) {
+        let cause = cause.to_string();
+        if !message.ends_with(&cause) {
+            message.push_str(": ");
+            message.push_str(&cause);
+        }
+    }
+    message
 }

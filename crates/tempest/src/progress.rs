@@ -15,6 +15,19 @@ pub fn duration(elapsed: Duration) -> String {
     }
 }
 
+/// Ctrl-C ended a command early; it says what became of the work. The command exits with 130,
+/// as a shell reports an interrupted program.
+#[derive(Debug)]
+pub struct Interrupted(pub &'static str);
+
+impl std::fmt::Display for Interrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "interrupted: {}", self.0)
+    }
+}
+
+impl std::error::Error for Interrupted {}
+
 /// A line on stderr that each update replaces. It shows nothing unless stderr is a terminal
 /// that can move the cursor, and it is cut to the terminal's width: a line that wrapped would
 /// leave a copy of itself behind at every update.

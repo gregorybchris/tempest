@@ -35,13 +35,7 @@ pub fn tui(args: TuiArgs) -> Result<()> {
         // No daemon: run the engine here, serving its API like a daemon would, so the TUI
         // takes one path either way and the CLI can reach the engine while the TUI runs.
         let engine = match Engine::open(config.clone()).await {
-            Err(EngineError::Busy(dir)) => {
-                return Err(anyhow!(
-                    "another Tempest engine is using {}, but its API isn't answering; if a \
-                     daemon is starting, try again in a moment",
-                    dir.display()
-                ));
-            }
+            Err(EngineError::Busy(dir)) => return Err(crate::engine::busy(&dir)),
             opened => opened.context("cannot start the engine")?,
         };
         let api = engine.settings().await?.settings.api;

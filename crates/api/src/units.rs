@@ -36,7 +36,11 @@ pub fn duration(seconds: u64) -> String {
 
 /// A share from 0 to 1 as a whole percentage, never rounding up to 100% before it is complete.
 pub fn percent(share: f64) -> String {
-    let share = if share.is_nan() { 0.0 } else { share.clamp(0.0, 1.0) };
+    let share = if share.is_nan() {
+        0.0
+    } else {
+        share.clamp(0.0, 1.0)
+    };
     let percent = (share * 100.0).floor();
     format!("{percent:.0}%")
 }

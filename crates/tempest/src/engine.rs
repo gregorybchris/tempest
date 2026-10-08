@@ -34,6 +34,8 @@ impl EngineArgs {
             None => None,
         };
         let path = match (&self.config, &data_dir) {
+            // A config named outright must exist; only the default one may be missing.
+            (Some(path), _) if !path.exists() => bail!("no config file at {}", path.display()),
             (Some(path), _) => path.clone(),
             (None, Some(dir)) => dir.join("config.yaml"),
             (None, None) => default_data_dir()
@@ -49,6 +51,16 @@ impl EngineArgs {
         }
         Ok(config)
     }
+}
+
+/// Why an engine can't open on `dir`: another one holds it but doesn't answer, as a daemon
+/// that is still starting doesn't.
+pub fn busy(dir: &std::path::Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "another Tempest engine is using {}, but its API isn't answering; if a daemon is \
+         starting, try again in a moment",
+        dir.display()
+    )
 }
 
 /// An engine to send commands to.
@@ -68,22 +80,25 @@ impl Target {
         }
         match Engine::open_held(config).await {
             Ok(engine) => Ok(Self::Held(engine)),
-            Err(EngineError::Busy(dir)) => bail!(
-                "another Tempest engine is using {}, but its API isn't answering; if a daemon is \
-                 starting, try again in a moment",
-                dir.display()
-            ),
+            Err(EngineError::Busy(dir)) => Err(busy(&dir)),
             Err(error) => Err(error.into()),
         }
     }
 
-    /// Runs `command` against the engine `args` name, then closes an embedded one.
+    /// Runs `command` against the engine `args` name, then closes an embedded one, saying
+    /// that no daemon runs the transfers.
     pub fn run<T>(args: &EngineArgs, command: impl AsyncFnOnce(&Target) -> Result<T>) -> Result<T> {
         let config = args.load()?;
         let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
         runtime.block_on(async {
             let target = Self::connect(config).await?;
             let result = command(&target).await;
+            if !target.is_daemon() {
+                eprintln!(
+                    "note: no daemon is running, so nothing is transferring; `tempest daemon` \
+                     runs it"
+                );
+            }
             target.close().await;
             result
         })

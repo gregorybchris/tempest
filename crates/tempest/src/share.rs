@@ -12,11 +12,11 @@ use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis
 use tempest_net::{DEFAULT_PORT, Storage, StorageConfig, TrackerClient};
 use tempest_protocol::{BundleId, Link, Manifest};
 
-use crate::engine::{EngineArgs, Target};
-use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
 use tempest_api::units::bytes;
 use tempest_api::words::peers;
 
+use crate::engine::{EngineArgs, Target};
+use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
 use crate::progress::StatusLine;
 use crate::publish::{ListingArgs, print_listing};
 
@@ -34,11 +34,11 @@ pub struct ShareArgs {
     #[arg(long, default_value = "")]
     comment: String,
     /// Serve it from here even if a daemon is running, as --port, --identity, --bind, --relay,
-    /// --no-lan and --lan-port also do.
+    /// --no-lan, --no-port-mapping and --lan-port also do.
     #[arg(long)]
     standalone: bool,
     /// The bundle's creation time, in milliseconds since the Unix epoch. Defaults to now.
-    #[arg(long, allow_hyphen_values = true)]
+    #[arg(long, allow_hyphen_values = true, value_name = "MILLIS")]
     created: Option<i64>,
     /// A tracker to announce the bundle to, and to name in the link, such as
     /// `https://tracker.example.org`. Repeat for more. A daemon also uses its config's

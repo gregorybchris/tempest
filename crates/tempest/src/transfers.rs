@@ -1,15 +1,11 @@
 //! `tempest list`, `start`, `stop` and `remove`: transfers in the engine, through the daemon's
 //! API or an engine opened here on its state.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tempest_engine::{Status, TransferInfo};
 
 use crate::engine::{EngineArgs, Target, short_id};
 use tempest_api::units::{bytes, duration, percent};
-
-/// What to say when no daemon runs the transfers.
-const NO_DAEMON: &str =
-    "no daemon is running, so nothing is transferring; `tempest daemon` runs it";
 
 #[derive(Debug, clap::Args)]
 pub struct ListArgs {
@@ -53,27 +49,8 @@ pub struct RemoveArgs {
     delete_files: bool,
 }
 
-/// Runs `command` against the engine, then closes an embedded one, saying that no daemon runs
-/// the transfers.
-fn with_target<T>(
-    engine: &EngineArgs,
-    command: impl AsyncFnOnce(&Target) -> Result<T>,
-) -> Result<T> {
-    let config = engine.load()?;
-    let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
-    runtime.block_on(async {
-        let target = Target::connect(config).await?;
-        let result = command(&target).await;
-        if !target.is_daemon() {
-            eprintln!("note: {NO_DAEMON}");
-        }
-        target.close().await;
-        result
-    })
-}
-
 pub fn list(args: ListArgs) -> Result<()> {
-    let transfers = with_target(&args.engine, async |target| target.list().await)?;
+    let transfers = Target::run(&args.engine, async |target| target.list().await)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&transfers)?);
     } else if transfers.is_empty() {
@@ -85,7 +62,7 @@ pub fn list(args: ListArgs) -> Result<()> {
 }
 
 pub fn start(args: StartArgs) -> Result<()> {
-    with_target(&args.engine, async |target| {
+    Target::run(&args.engine, async |target| {
         for query in &args.transfers {
             let transfer = target.find(query).await?;
             let started = target.start(transfer.id, args.force).await?;
@@ -101,7 +78,7 @@ pub fn start(args: StartArgs) -> Result<()> {
 }
 
 pub fn stop(args: StopArgs) -> Result<()> {
-    with_target(&args.engine, async |target| {
+    Target::run(&args.engine, async |target| {
         for query in &args.transfers {
             let transfer = target.find(query).await?;
             let stopped = target.stop(transfer.id).await?;
@@ -117,7 +94,7 @@ pub fn stop(args: StopArgs) -> Result<()> {
 }
 
 pub fn remove(args: RemoveArgs) -> Result<()> {
-    with_target(&args.engine, async |target| {
+    Target::run(&args.engine, async |target| {
         for query in &args.transfers {
             let transfer = target.find(query).await?;
             target.remove(transfer.id, args.delete_files).await?;

@@ -12,25 +12,26 @@ use tempest_engine::api::AddRequest;
 use tempest_engine::api::client::{ApiClient, ClientError};
 use tempest_engine::{Status as TransferStatus, TransferInfo};
 use tempest_net::{BundleHandle, Destination, Status};
+use tempest_protocol::link::ParseLinkError;
 use tempest_protocol::message::{GoodbyeReason, PeerRecord};
 use tempest_protocol::{Address, BundleId, Link};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::Instant;
 
-use crate::engine::{EngineArgs, Target};
-use crate::peer::{Peer, PeerArgs};
 use tempest_api::units::{bytes, percent};
 use tempest_api::words::peers;
 
-use crate::progress::{StatusLine, duration};
+use crate::engine::{EngineArgs, Target};
+use crate::peer::{Peer, PeerArgs};
+use crate::progress::{Interrupted, StatusLine, duration};
 
 #[derive(Debug, clap::Args)]
 pub struct GetArgs {
-    /// The bundle's tempest: link.
+    /// The bundle's tempest: link, as `tempest share` prints it. Quote it: it contains `&`.
     link: String,
     /// The folder to download into. The bundle is written to a new folder inside it, named
     /// after the bundle.
-    #[arg(long, short, default_value = ".")]
+    #[arg(long, short, default_value = ".", value_name = "DIR")]
     output: PathBuf,
     /// Give up after this many seconds without progress, such as when the sharer is
     /// unreachable.
@@ -40,11 +41,11 @@ pub struct GetArgs {
     #[arg(long, value_name = "URL")]
     tracker: Vec<String>,
     /// Download from here even if a daemon is running, as --port, --identity, --bind, --relay,
-    /// --no-lan and --lan-port also do.
+    /// --no-lan, --no-port-mapping and --lan-port also do.
     #[arg(long)]
     standalone: bool,
     /// The UDP port to use, 0 for any, which is the default.
-    #[arg(long)]
+    #[arg(long, value_name = "PORT")]
     port: Option<u16>,
     #[command(flatten)]
     peer: PeerArgs,
@@ -53,10 +54,15 @@ pub struct GetArgs {
 }
 
 pub fn get(args: GetArgs) -> Result<()> {
-    let link: Link = args
-        .link
-        .parse()
-        .with_context(|| format!("not a valid tempest: link: {}", args.link))?;
+    let link: Link = args.link.parse().map_err(|error| match error {
+        ParseLinkError::NotALink => anyhow!(
+            "{:?} is not a link; a link starts with tempest:? and `tempest share` prints one",
+            args.link
+        ),
+        error => {
+            anyhow!("the link is damaged or cut short ({error}); quote it, since it contains &")
+        }
+    })?;
     let record = link
         .peer
         .filter(|_| !link.addrs.is_empty() || link.relay.is_some())
@@ -238,7 +244,7 @@ async fn follow(
             }
             interrupted = &mut interrupt => {
                 interrupted.context("cannot listen for Ctrl-C")?;
-                bail!("interrupted; the daemon keeps downloading it");
+                return Err(Interrupted("the daemon keeps downloading it; `tempest list` shows it").into());
             }
         }
         let next = client.transfer(id).await.map_err(|error| match error {
@@ -346,7 +352,7 @@ impl<'a> Watch<'a> {
                 _ = tokio::time::sleep_until(deadline) => return Err(self.stalled(&last)),
                 interrupted = &mut interrupt => {
                     interrupted.context("cannot listen for Ctrl-C")?;
-                    bail!("interrupted");
+                    return Err(Interrupted("the download stopped").into());
                 }
             }
         }

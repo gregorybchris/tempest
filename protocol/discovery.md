@@ -91,4 +91,4 @@ The message is exactly 39 bytes, encoded with the primitives in [messages.md](me
 
 Clients talk to trackers over HTTPS, with JSON request and response bodies. The tracker API is defined in [trackers.md](trackers.md).
 
-**Rationale.** A tracker can then be explored with `curl` or a browser, and built with standard web tooling. The same server can also serve the tracker's catalog website.
+**Rationale.** A tracker can then be explored with `curl` or a browser, and built with standard web tooling. The same server can also serve the tracker's website.

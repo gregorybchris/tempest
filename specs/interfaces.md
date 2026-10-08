@@ -9,7 +9,7 @@ Tempest's user-facing interfaces and the quality bar they share. Decisions refer
 | Client web UI | Leptos (D-117) | Engine API (HTTP + JSON, event stream) |
 | Terminal UI | ratatui (D-090) | Engine API, or an engine of its own that it can hand to a daemon on quitting (D-228) |
 | CLI | The `tempest` binary's subcommands (D-079) | Engine API, or an embedded engine |
-| Tracker catalog | Same framework as the client web UI | Tracker server |
+| Tracker website | Same framework as the client web UI | Tracker server |
 | Simulation results UI | Same framework as the client web UI | The results API over the DuckDB results database (D-204), served by the `tempest-sim` binary (D-214) |
 
 The three web UIs share a design-system crate, `ui-kit`, with colors, typography, components and chart styles (D-076, D-198). `ui-gallery` shows all of it.
@@ -72,14 +72,14 @@ Shared by the TUI and the web UI (D-119, D-131, D-136 to D-139). Statuses and wo
 
 - **List first.** The transfers list fills the screen. Each row answers "is it working, how far, how fast, how long" and nothing else.
 - **Detail on demand.** Selecting a transfer opens its detail beside or over the list. The summary comes first: plain-language state, then files, peers and the decision log. The chunk map and rates chart are one level further in.
-- **Four areas.** Transfers, Share, Catalog (trackers and catalog), Settings (limits, queue, categories, theme). Transfers is home.
+- **Three areas.** Transfers, Share, Settings (limits, queue, network, trackers and relays, categories, theme). Transfers is home. The client is only for transfers; browsing listings happens on a tracker's website.
 - **One focus at a time.** A single pane is active, and the hint bar lists only the keys that work there.
 - **Explain, don't decode.** A stalled or errored transfer says why in a sentence and offers the fix.
 
 **Web UI (wide)**
 
 ```text
- tempest   Transfers  Share  Catalog  Settings          ↓ 12.4 MB/s  ↑ 3.1 MB/s   ◐
+ tempest   Transfers  Share  Settings                  ↓ 12.4 MB/s  ↑ 3.1 MB/s   ◐
  ──────────────────────────────────────────────────────────────────────────────────
   Filter: all ▾   tag ▾   search…                                       + Add
  ──────────────────────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ The detail panel opens as a right-hand drawer on wide windows and as a full-scre
 **TUI (80x24 and up)**
 
 ```text
- Transfers  Share  Catalog  Settings                      ↓12.4M ↑3.1M  [green]
+ Transfers  Share  Settings                              ↓12.4M ↑3.1M  [green]
  ─────────────────────────────────────────────────────────────────────────────
   Name                       Size   Progress      ↓      ↑     ETA  Status
  ▌ensemble-2026.tar         4.2G   ████████░░ 81%  9.8M  1.2M   3m  Downloading
@@ -114,10 +114,10 @@ Pressing `enter` replaces the bottom summary with a split detail pane (tabs: Sum
 
 **Navigation**
 
-- **TUI:** `1` to `4` or `[` and `]` (with `tab` for panes) switch areas. `?` shows keys for the current screen.
+- **TUI:** `1` to `3` or `[` and `]` (with `tab` for panes) switch areas. `?` shows keys for the current screen.
 - **Web:** the top bar, with the same order. Keyboard shortcuts match the TUI where they exist.
 
-**Share** is a drop or paste target: choose a file or folder, see the bundle being built, then the `tempest:` link with copy. **Catalog** lists trackers and what they offer, with search and add. **Settings** groups limits (including alternative limits), queue, categories and tags, and theme.
+**Share** is a drop or paste target: choose a file or folder, see the bundle being built, then the `tempest:` link with copy. **Settings** groups limits (including alternative limits), queue, the network defaults, the trackers every transfer announces to and the relays, categories and tags, and theme.
 
 ## Terminal UI and web UI together
 
@@ -138,17 +138,17 @@ ratatui, with a k9s/lazygit-style keyboard model (D-090):
 - `/` to filter, `:` for commands, `?` for help
 - a persistent hint bar showing available keys
 
-Keys, hints, help and the palette come from one binding table (D-191), the source of truth for what each key does; `?` shows the current screen's. Filters and sorting behave as D-192 describes. The detail, chunk map and rates chart, and what `g` means in each, follow D-194. The Share, Catalog and Settings areas follow D-196 (D-203 in the web UI), custom columns and saved views D-197, and the theme, columns and views are kept in the engine's settings (D-195).
+Keys, hints, help and the palette come from one binding table (D-191), the source of truth for what each key does; `?` shows the current screen's. Filters and sorting behave as D-192 describes. The detail, chunk map and rates chart, and what `g` means in each, follow D-194. The Share and Settings areas follow D-196 (D-203 in the web UI), custom columns and saved views D-197, and the theme, columns and views are kept in the engine's settings (D-195).
 
 The key map in outline:
 
 | Where | Keys |
 | --- | --- |
-| Everywhere | `1`-`4` or `[` `]` areas, `:` commands, `T` theme, `?` help, `q` quit; `esc` closes what is open or goes back one level |
+| Everywhere | `1`-`3` or `[` `]` areas, `:` commands, `T` theme, `?` help, `q` quit; `esc` closes what is open or goes back one level |
 | Transfers list | `j`/`k` move, `enter` detail; `a` add a link, `space` start/stop, `F` force start, `x` remove, `r` rename, `t` tags, `C` category, `m` move, `R` recheck, `o` open folder, `y` copy link, `L` limits; `K`/`J` and `<`/`>` queue; `/` filter, `f` status, `s` sort, `S` reverse, `v`/`V` views, `|` columns |
 | Detail | `tab` or `h`/`l` tabs, `j`/`k` scroll, `c` chunk map, `g` rates chart; the transfer and queue keys still apply |
 | Share | `a` fills in the form and `enter` shares; `j`/`k` choose a share, `y` copy its link, `enter` show it in Transfers |
-| Catalog, Settings | `j`/`k` move, `tab` next section, `enter` change, `a` add, `x` remove or reset |
+| Settings | `j`/`k` move, `tab` next section, `enter` change, `a` add, `x` remove or reset |
 
 Quitting a TUI that runs its own engine, while transfers are active, asks whether to hand them to a daemon or stop them (D-228). `tempest web` asks the same on Ctrl-C.
 
@@ -158,9 +158,9 @@ The TUI is minimal but powerful, giving quick access to every essential feature.
 
 The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web` opens it. It shares the TUI's logic through the `api` crate (D-200): the event-following model, finding, column priorities, explanations and saved views. Its keys come from one table, as the TUI's do, and match them where both have the command; what differs, and how the page follows the engine, is in D-202.
 
-## Tracker catalog UI
+## Tracker website
 
-`tempest tracker --catalog` serves it, embedded in the binary like the other web UIs (D-201). It searches as you type, narrows by category and tag facets, sorts by relevance, newest, seeders, votes or trending (D-209), and shows each listing's content, swarm health, votes and comments. Signing in shows a code for the user's client to sign (D-128); signed in, people vote, comment, report a listing to the operator (D-225), name their account and edit their own listings. Its views, keys and browser test are in D-210; running a public one is covered in [tracker.md](tracker.md).
+A tracker that takes listings (`tempest tracker --catalog`) serves it, with a header that names the tracker and its host, embedded in the binary like the other web UIs (D-201). It searches as you type, narrows by category and tag facets, sorts by relevance, newest, seeders, votes or trending (D-209), and shows each listing's content, swarm health, votes and comments. Signing in shows a code for the user's client to sign (D-128); signed in, people vote, comment, report a listing to the operator (D-225), name their account and edit their own listings. Its views, keys and browser test are in D-210; running a public one is covered in [tracker.md](tracker.md).
 
 ## Visualization ideas
 

@@ -399,7 +399,7 @@ Clients may use any subset, run them in parallel, and take whichever answers fir
 
 ## D-025: Tempest tracker (scope addition)
 
-**Date:** 2026-10-06 · **Status:** Decided (design to come)
+**Date:** 2026-10-06 · **Status:** Decided (design to come; revised by D-234)
 
 **Decision:** The repo includes a Tempest tracker that anyone can run. It has its own server and web frontend in Rust, branded consistently with the client. It has two parts:
 
@@ -1914,7 +1914,7 @@ This replaces the placeholder command names in earlier roadmap text (`make`, `se
 
 ## D-128: Catalog accounts
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-234)
 
 **Decision:**
 
@@ -1926,7 +1926,7 @@ This replaces the placeholder command names in earlier roadmap text (`make`, `se
 
 ## D-129: Catalog listing is opt-in
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-234)
 
 **Options considered:**
 
@@ -1962,7 +1962,7 @@ This replaces the placeholder command names in earlier roadmap text (`make`, `se
 
 ## D-131: Client layout direction
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-234)
 
 **Context:** The owner felt the M0 layout needed rethinking. The direction applies to both the TUI and the web UI (D-119).
 
@@ -2022,7 +2022,7 @@ UI screenshot tests are not required.
 
 ## D-136: Four-area app navigation, Transfers as home
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** D-131 asks for app-level navigation over transfers, share, trackers/catalog and settings.
 
@@ -2050,7 +2050,7 @@ UI screenshot tests are not required.
 
 ## D-139: Share and Catalog are screens, not dialogs
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Decision:** Creating a bundle and browsing trackers are full areas, not modal dialogs, because each has a multi-step flow (build, link; browse, search, add). Adding a transfer from a link stays a quick modal on Transfers, since it is one input.
 
@@ -3094,7 +3094,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-196: The TUI's Share, Catalog and Settings areas
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** D-136 and D-139 make Share, Catalog and Settings areas of their own. They need layouts and keys that fit the TUI's one-table key model (D-191) without letting typing clash with area keys such as `1`-`4` and `q`.
 
@@ -3218,7 +3218,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-203: The web UI's Share, Catalog and Settings areas, and its notifications
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** The web UI needs the TUI's areas (D-196), columns and views (D-197), and notifications of completions and failures (D-118). A browser offers inline controls that a terminal can't, and its notification permission belongs to the browser, not the engine. The engine's settings type doesn't build for WebAssembly.
 
@@ -3276,7 +3276,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-206: Catalog accounts, sessions and storage
 
-**Date:** 2026-10-07 · **Status:** Decided (revised by D-225)
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-225, D-234)
 
 **Context:** D-128 signs catalog users in with their Tempest key, but a browser doesn't hold the key. M9 also leaves the catalog's storage and API open.
 
@@ -3314,7 +3314,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-208: Publishing from the client
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** D-129 lets sharers opt in per tracker or with `tempest share --publish`, and D-128 signs them in with their key. The daemon holds the key, while the CLI and UIs talk to it through its API.
 
@@ -3332,7 +3332,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-209: Catalog search, facets and ranking
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** D-130 chooses Tantivy for catalog search, with typo tolerance and category and tag facets, and ranks by live swarm health, votes and downloads over time. It leaves open where the index lives, how typos and ranking work, how downloads are counted and what the query looks like.
 
@@ -3352,7 +3352,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-210: The catalog's web UI
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** D-118 and `interfaces.md` ask for a catalog UI in the client web UI's framework and quality bar, served by the tracker, with search, facets, sorting, listing pages, votes, comments, publishing and sign-in with a Tempest key (D-128). How it is served, how it routes, pages and signs in, and how it is tested in a browser were open.
 
@@ -3494,7 +3494,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-218: The catalog browser test is ignored unless run explicitly
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-234)
 
 **Context:** The browser test (D-210) passed with a note when `CHROMEDRIVER` was unset or the binary lacked the catalog UI, so a broken CI setup stayed green.
 
@@ -3766,3 +3766,30 @@ This revises D-175, D-182 and D-189.
 **Decision:** Releases contain only `tempest`. `tempest-sim` is built from source (`specs/development.md`), where development links the system DuckDB. This refines D-211.
 
 **Rationale:** The simulator is a development and research tool; its users build Tempest anyway. Releases get faster and simpler, with no C++ toolchain per platform.
+
+---
+
+## D-234: The tracker is the service; the catalog is its internals
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** "Tracker" and "catalog" named overlapping things. The client had a Catalog area for trackers and a placeholder for browsing, the CLI had `tempest catalog`, the HTTP paths said `/catalog/v1`, and the shared API crate and the tracker's website said catalog. D-025, D-139, D-196, D-203, D-206, D-208 and D-210 introduced those names.
+
+**Options:** keep "catalog" as the name of the listing service beside the tracker; make the client browse catalogs; make the tracker the one service and keep "catalog" for how it stores things (chosen).
+
+**Decision:**
+
+- The tracker is the service. Clients announce to a tracker, publish bundles to it and sign in to it. A tracker may have a website where people browse its listings.
+- "Catalog" is internal to a tracker: where it stores its listings, accounts, votes, comments, reports and search index. It appears only in the tracker crate's catalog module and storage, the operator flag `tempest tracker --catalog FILE`, the operator commands' help (`tempest tracker hide|unhide|ban|unban|reports|invite`) and the operator docs (`specs/tracker.md`).
+- The line sits at the tracker's public interface. Nothing a client or visitor touches says "catalog": client UI text, the tracker's website, CLI client commands, HTTP paths, the shared API types crate and the client's networking code. There are no compatibility shims or aliases (Tempest has not launched).
+- The client, meaning the TUI and the web UI, is only for transfers. It never browses listings; that happens on a tracker's website.
+
+**Changes:**
+
+- The client UIs have three areas: Transfers, Share and Settings. The tracker list (the trackers every transfer announces to) and the relays moved into Settings, after the network settings. A transfer is "Published to" trackers and can be unpublished from them.
+- `tempest catalog publish|unpublish|sign-in` became `tempest publish`, `tempest unpublish` and `tempest sign-in`. Publishing to a tracker without listings fails with "the tracker doesn't take listings".
+- The tracker's listing API moved under the peer-list service's prefix, `/tempest/v1/`: `session/challenges`, `session/challenges/poll`, `session` (POST signs in, DELETE signs out), `account`, `account/listings`, `info`, `listings`, `listings/{bundle}` with `vote`, `comments` and `reports`, and `comments/{id}`. The session cookie is `tempest_session`, and the sign-in signature's context is `tempest sign-in v1`.
+- The engine's `POST /v1/catalog/sign-in` became `POST /v1/trackers/sign-in`.
+- `catalog-api` became `tracker-api`, `catalog-web` became `tracker-web`, and `tempest-net`'s `catalog` module became `publish`. The website's header reads "Tracker" and the host.
+
+**Rationale:** People meet a tracker, not a catalog. One name for the service keeps every interface describing the same thing, and "catalog" stays useful for operators, who run a database file.

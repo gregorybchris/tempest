@@ -2,7 +2,7 @@
 
 > **Status: Draft (version 1).**
 
-A **tracker** is a server that helps peers in the same swarm find each other. Peers **announce** that they're participating in a bundle, and the tracker replies with other peers in that swarm. This section defines the tracker API. A tracker MAY offer more, such as a catalog website, but that is outside the protocol.
+A **tracker** is a server that helps peers in the same swarm find each other. Peers **announce** that they're participating in a bundle, and the tracker replies with other peers in that swarm. This section defines the tracker API. A tracker MAY offer more, such as a website of listings, but that is outside the protocol.
 
 ## Transport
 
@@ -13,7 +13,7 @@ Trackers are HTTPS servers. Requests and responses are JSON (`Content-Type: appl
 - Addresses are strings of the form `ip:port`, with IPv6 addresses in brackets (`[2001:db8::1]:4433`).
 - Receivers MUST ignore JSON fields they don't recognize.
 
-**Rationale.** HTTPS and JSON let anyone explore a tracker with `curl` or a browser. A tracker can be built with standard web tooling, and the same server can host a catalog website. The version in the path lets a future, incompatible API coexist with this one. Ignoring unknown fields lets either side add fields without breaking the other.
+**Rationale.** HTTPS and JSON let anyone explore a tracker with `curl` or a browser. A tracker can be built with standard web tooling, and the same server can host a website of listings. The version in the path lets a future, incompatible API coexist with this one. Ignoring unknown fields lets either side add fields without breaking the other.
 
 ## Announce
 
@@ -33,7 +33,7 @@ POST /tempest/v1/announce
 | `event` | string | `started`, `update`, `completed` or `stopped` |
 | `complete` | boolean | Whether the peer has the whole bundle |
 | `num_want` | integer | OPTIONAL. How many peers the client would like, default 50 |
-| `listing` | object | OPTIONAL. Asks the tracker to list the bundle in its catalog; see [Listing](#listing) |
+| `listing` | object | OPTIONAL. Asks the tracker to list the bundle; see [Listing](#listing) |
 
 ### Response (HTTP 200)
 
@@ -95,7 +95,7 @@ POST /tempest/v1/announce
 
 ## Listing
 
-A tracker MAY run a catalog: a website that lists bundles. A bundle is listed only when a peer that shares it asks, by adding `listing` to its announces:
+A tracker MAY take listings: it shows the bundles that their sharers asked it to list, such as on a website. A bundle is listed only when a peer that shares it asks, by adding `listing` to its announces:
 
 ```text
 "listing": { "sig": "ad66ac47…acdd0d" }
@@ -104,10 +104,10 @@ A tracker MAY run a catalog: a website that lists bundles. A bundle is listed on
 `sig` is the 64-byte Ed25519 signature, as 128 lowercase hexadecimal characters, made with the key of the announcing peer ID over the **listing message**: the 19 bytes of the ASCII text `tempest listing v1` followed by a zero byte, then the 32-byte bundle ID.
 
 - A client SHOULD include `listing` in every announce for a bundle its user chose to list on that tracker, and MUST NOT include it otherwise.
-- A tracker without a catalog MUST ignore `listing`.
-- A tracker with a catalog MUST verify the signature against `peer`. If it fails, the tracker MUST refuse the announce with `invalid_request`. Otherwise it MAY list the bundle, attributed to the peer ID. What it lists and how is up to the catalog.
+- A tracker that doesn't take listings MUST ignore `listing`.
+- A tracker that takes listings MUST verify the signature against `peer`. If it fails, the tracker MUST refuse the announce with `invalid_request`. Otherwise it MAY list the bundle, attributed to the peer ID. What it lists and how is up to the tracker.
 
-**Implementer notes.** To learn what a bundle holds, a tracker with a catalog can fetch its manifest from the swarm as any peer would: connect to a peer, open the connection with an empty Have, send ManifestRequest ([messages.md](messages.md#manifestrequest)), and check the manifest against the bundle ID.
+**Implementer notes.** To learn what a bundle holds, a tracker that takes listings can fetch its manifest from the swarm as any peer would: connect to a peer, open the connection with an empty Have, send ManifestRequest ([messages.md](messages.md#manifestrequest)), and check the manifest against the bundle ID.
 
 **Test vector.** RFC 8032's first test key (secret key `9d61b19d…1cae7f60`, peer ID `d75a9801…f707511a`) signs the listing message of bundle `3f9a` followed by 60 zeros:
 

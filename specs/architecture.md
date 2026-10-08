@@ -32,22 +32,22 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | --- | --- | --- |
 | `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization, serde for tracker JSON) |
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | `protocol` |
-| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker and catalog client, manifest fetching | `protocol`, `core`, `catalog-api` |
-| `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `catalog-api` |
-| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `protocol`, `catalog-api` |
+| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `protocol`, `core`, `tracker-api` |
+| `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `tracker-api` |
+| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `protocol`, `tracker-api` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results and the queries the results UI reads (D-204) | `core`, `sim-api` |
 | `sim-api` | The simulation results API's types and query strings, shared by its server and the results UI (D-204) | (none) |
 | `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
-| `ui-gallery` | A catalog of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
+| `ui-gallery` | A gallery of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
 | `web` | Client web UI | `ui-kit`, `api` |
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
 | `sim-web` | Simulation results UI, served by `tempest-sim web` | `ui-kit`, `sim-api` |
-| `catalog-api` | The tracker catalog API's types and text rules, shared by the tracker, the client and the catalog UI (D-206) | `protocol` |
-| `catalog-web` | Tracker catalog UI (D-210) | `ui-kit`, `catalog-api`, `protocol` |
-| `tracker` | Tracker server: peer-list service, catalog with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `catalog-api`, `net` |
+| `tracker-api` | The types and text rules of a tracker's listing API, shared by the tracker, the client and the tracker website (D-206, D-234) | `protocol` |
+| `tracker-web` | The tracker website (D-210, D-234) | `ui-kit`, `tracker-api`, `protocol` |
+| `tracker` | Tracker server: peer-list service, and a catalog (its internal store) with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `tracker-api`, `net` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
 | `assets` | Serving embedded web UIs' files, and embedding them from build scripts (D-201); shared by both binaries (D-214) | (none) |
-| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the tracker with its catalog UI; embeds the web UIs' built files (D-201) | most of the above, not `sim` |
+| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the tracker with its website; embeds the web UIs' built files (D-201) | most of the above, not `sim` |
 | `sim-cli` | The `tempest-sim` binary (package `tempest-sim-cli`): runs scenarios, checks baselines and serves the results UI, which it embeds (D-214) | `sim`, `sim-api`, `assets` |
 
 `protocol` and `core` must never depend on async runtimes, sockets, the clock or global randomness. `protocol` is the code other implementers should be able to read alongside the spec.
@@ -65,7 +65,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | Client config | YAML, with profiles + overrides | D-005, D-081 |
 | Engine API | HTTP + JSON, server-sent events with resumable IDs | D-080 |
 | Tracker API | HTTPS + JSON | D-043 |
-| Tracker catalog | SQLite store, Tantivy search index in memory | D-206, D-130, D-209 |
+| Tracker's catalog | SQLite store, Tantivy search index in memory | D-206, D-130, D-209 |
 | Simulation results | DuckDB | D-075 |
 | Web UIs | Leptos 0.8 (client-side, with server rendering and islands where useful) | D-117 |
 

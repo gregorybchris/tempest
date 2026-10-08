@@ -15,7 +15,7 @@ Tempest supports two kinds of use from the start: direct sends (sharing with a s
 
 Non-goals: anonymity. Public sharing exposes your IP address, and Tempest says so plainly. Connections between peers are always encrypted.
 
-See [decisions.md](decisions.md) for the log of design decisions and their rationale, [glossary.md](glossary.md) for terminology, [strategies.md](strategies.md) for the client's configurable download and upload strategies, [architecture.md](architecture.md) for how the code is organized, [api.md](api.md) for the engine's API, [tracker.md](tracker.md) for running a tracker and its catalog, [interfaces.md](interfaces.md) for the user interfaces and their quality bar, [roadmap.md](roadmap.md) for the implementation milestones, and [development.md](development.md) for how to build and test efficiently.
+See [decisions.md](decisions.md) for the log of design decisions and their rationale, [glossary.md](glossary.md) for terminology, [strategies.md](strategies.md) for the client's configurable download and upload strategies, [architecture.md](architecture.md) for how the code is organized, [api.md](api.md) for the engine's API, [tracker.md](tracker.md) for running a tracker, [interfaces.md](interfaces.md) for the user interfaces and their quality bar, [roadmap.md](roadmap.md) for the implementation milestones, and [development.md](development.md) for how to build and test efficiently.
 
 ## Protocol
 
@@ -50,7 +50,7 @@ The repo also includes a Tempest tracker that anyone can run, with its own serve
 The tracker has two parts:
 
 1. **Peer-list service.** Clients report which bundles they are serving, and the tracker tells them about other peers in the same swarm. This part is defined by the protocol spec.
-2. **Catalog.** A web application with high-quality search, categories, ranking, comments, and easy filtering and sorting, so people can find what they are looking for. It communicates with clients continuously, so it reflects what is actually being served on the network. This part is an application built on top of the protocol, not part of it.
+2. **Tracker website.** A web application with high-quality search, categories, ranking, comments, and easy filtering and sorting, so people can find what they are looking for. It communicates with clients continuously, so it reflects what is actually being served on the network. This part is an application built on top of the protocol, not part of it.
 
 The user interface should be beautiful and extremely easy to use.
 
@@ -81,7 +81,7 @@ I want to have control over terminology. I want to have control over which featu
 7. Create web interface for the Tempest client.
 8. Create terminal interface for the Tempest client.
 9. Create an intuitive learning guide for new users of the Tempest client.
-10. Create the Tempest tracker catalog (search, categories, comments) and its web interface, reusing the client web UI's design. The tracker's peer-list service is built alongside the client in phase 5, since public swarms depend on it.
+10. Create the Tempest tracker's listings (search, categories, comments) and its web interface, reusing the client web UI's design. The tracker's peer-list service is built alongside the client in phase 5, since public swarms depend on it.
 
 **Gate before heavy implementation (passed):** a test UI in Rust was built and met the quality bar (M0). Leptos is the web UI framework (D-117).
 

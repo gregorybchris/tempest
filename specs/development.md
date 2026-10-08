@@ -41,7 +41,7 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 CI builds releases when a version tag is pushed (D-211). Releases contain only `tempest`; the simulator is built from source (D-233). While CI is unavailable, the same archives can be built on one Mac with dist (D-232):
 
 - **Tools:** trunk and the `wasm32-unknown-unknown` target for the web UIs; rustup targets for each platform; `zig` and `cargo-zigbuild` for Linux; `llvm` and `cargo-xwin` for Windows. Dist picks the cross compiler itself.
-- **Web UIs first.** Build the client and catalog UIs with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
+- **Web UIs first.** Build the client UI and the tracker website with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
 - **Per target:** `dist build --artifacts=local --target <triple>` writes archives and checksums to `target/distrib`. `--artifacts=all` on one target also writes the installers, the Homebrew formulas and `sha256.sum`.
 - **Smoke test** each binary that can run here: `--version`, `--help` and `tempest web` on a spare port. The Intel macOS binaries run under Rosetta.
 - **Publishing** is separate: a GitHub release with these files, and the formulas pushed to the tap.

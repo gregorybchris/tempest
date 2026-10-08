@@ -113,6 +113,9 @@ pub enum DriverError {
     /// The node has shut down.
     #[error("the node has shut down")]
     Stopped,
+    /// The bundle's task panicked: a bug.
+    #[error("the bundle stopped unexpectedly: {0}")]
+    Crashed(String),
 }
 
 /// Where a download's entries are written.
@@ -292,7 +295,8 @@ impl BundleHandle {
     /// Waits for the bundle to stop: once shut down, once it is done lingering, or when storage
     /// fails. Storage is flushed and closed by then.
     pub async fn finished(self) -> Result<Summary, DriverError> {
-        self.task.await.expect("the bundle task panicked")
+        // The task only fails to finish if the runtime is shutting down.
+        self.task.await.unwrap_or(Err(DriverError::Stopped))
     }
 }
 
@@ -524,9 +528,11 @@ impl Node {
         let commands = self.commands.clone();
         let watcher = shutdown.subscribe();
         let task = tokio::spawn(async move {
-            let result = task.run(receiver, watcher, peers).await;
+            // Run apart, so that if it panics, the bundle is still unregistered and its
+            // handle hears of it.
+            let result = tokio::spawn(task.run(receiver, watcher, peers)).await;
             let _ = commands.send(Command::Unregister { bundle_id }).await;
-            result
+            result.unwrap_or_else(|error| Err(DriverError::Crashed(error.to_string())))
         });
         Ok(BundleHandle {
             events: events_receiver,

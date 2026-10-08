@@ -26,15 +26,6 @@ fn example(name: &str) -> Scenario {
     Scenario::load(&path).unwrap()
 }
 
-/// Every peer that started without the bundle completed.
-fn all_completed(result: &RunResult) -> bool {
-    result
-        .peers
-        .iter()
-        .filter(|p| p.starts == Start::Empty)
-        .all(|p| p.completed.is_some())
-}
-
 #[test]
 fn two_peers_exchange_real_verified_bytes() {
     let scenario = example("two-peers.yaml");

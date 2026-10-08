@@ -87,10 +87,12 @@ fn NewShare() -> impl IntoView {
     // Counts the seconds while the engine builds the bundle.
     if let Ok(timer) = set_interval_with_handle(
         move || {
-            building.update(|b| {
-                if let Progress::Building(_, seconds) = b {
+            building.maybe_update(|b| match b {
+                Progress::Building(_, seconds) => {
                     *seconds += 1;
+                    true
                 }
+                _ => false,
             })
         },
         Duration::from_secs(1),

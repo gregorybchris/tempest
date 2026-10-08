@@ -238,8 +238,10 @@
 
 .decisions li {
   display: grid;
-  grid-template-columns: 64px 92px minmax(0, 1fr);
+  /* Wide enough for a clock past an hour, as 1:02:03.5. */
+  grid-template-columns: 9ch 92px minmax(0, 1fr);
   gap: var(--gap-2);
+  overflow-wrap: anywhere;
 }
 
 .decisions__kind {
@@ -276,11 +278,6 @@
   gap: var(--gap-4);
   max-width: 880px;
   padding: var(--gap-4);
-}
-
-.area__stack {
-  display: grid;
-  gap: var(--gap-3);
 }
 
 .area--wide {
@@ -427,7 +424,7 @@
 
 .input--large {
   padding: 8px 10px;
-  font-size: var(--text-lg, 15px);
+  font-size: var(--text-lg);
 }
 
 .building {
@@ -767,10 +764,10 @@
 /* The first run's account of the network defaults. */
 .network {
   list-style: none;
-  margin: 0.75rem 0 0;
+  margin: var(--gap-3) 0 0;
   padding: 0;
   display: grid;
-  gap: 0.6rem;
+  gap: var(--gap-2);
 }
 
 .facts__folder {

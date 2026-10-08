@@ -175,7 +175,13 @@ fn follow(store: Store) {
     let stopper = SendWrapper::new(follower.clone());
     on_cleanup(move || stopper.stop());
     provide_context(StoredValue::new(SendWrapper::new(follower)));
-    if let Ok(sampling) = set_interval_with_handle(move || store.sample(), Duration::from_secs(1)) {
+    // Rates known before the link broke are no measure of now, so they aren't sampled.
+    let sample = move || {
+        if store.link.get_untracked() == Link::Live {
+            store.sample();
+        }
+    };
+    if let Ok(sampling) = set_interval_with_handle(sample, Duration::from_secs(1)) {
         on_cleanup(move || sampling.clear());
     }
 }
@@ -214,8 +220,12 @@ fn look(config: Config, ui: Ui) {
                 ui.scanlines.set(settings.scanlines);
                 ui.clean.set(settings.clean);
             }
-            // The first run says what the network defaults share, once.
-            if !settings.network_explained && saved_network.get_value().is_none() {
+            // The first run says what the network defaults share, once, when no other dialog
+            // is open.
+            if !settings.network_explained
+                && saved_network.get_value().is_none()
+                && ui.dialog.with(Option::is_none)
+            {
                 saved_network.set_value(Some(()));
                 ui.dialog.set(Some(Dialog::Network));
                 config.change_quietly(prefs::NETWORK_EXPLAINED, json!(true));
@@ -270,6 +280,12 @@ fn typing(ui: Ui) {
     };
     let focus = window_event_listener(ev::focusin, move |e| ui.typing.set(field(&e)));
     let blur = window_event_listener(ev::focusout, move |_| ui.typing.set(false));
+    // A dialog's field that goes with the dialog fires no focusout.
+    Effect::new(move |_| {
+        if ui.dialog.with(Option::is_none) {
+            ui.typing.set(false);
+        }
+    });
     on_cleanup(move || {
         focus.remove();
         blur.remove();
@@ -285,10 +301,15 @@ fn keyboard(store: Store, ui: Ui, controls: Controls, fields: Fields, order: Ord
         share_path: expect_context(),
     };
     let handle = window_event_listener(ev::keydown, move |e| {
-        if e.ctrl_key() || e.meta_key() || e.alt_key() {
+        // A control that handled the key, such as tabs taking the arrows, says so.
+        if e.ctrl_key() || e.meta_key() || e.alt_key() || e.default_prevented() {
             return;
         }
         let key = e.key();
+        // Enter and space on a focused button, link or switch are the control's own.
+        if matches!(key.as_str(), "Enter" | " ") && e.target().is_some_and(|t| activates(&t)) {
+            return;
+        }
         let typing = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
@@ -309,6 +330,21 @@ fn keyboard(store: Store, ui: Ui, controls: Controls, fields: Fields, order: Ord
         act(command, store, ui, controls, fields, lists);
     });
     on_cleanup(move || handle.remove());
+}
+
+/// Whether `target` is a control that enter or space activates.
+fn activates(target: &web_sys::EventTarget) -> bool {
+    let Some(element) = target.dyn_ref::<web_sys::Element>() else {
+        return false;
+    };
+    let role = element.get_attribute("role").unwrap_or_default();
+    matches!(
+        element.tag_name().to_ascii_lowercase().as_str(),
+        "button" | "a" | "input" | "select" | "textarea" | "summary"
+    ) || matches!(
+        role.as_str(),
+        "button" | "tab" | "switch" | "option" | "checkbox" | "link"
+    )
 }
 
 /// Handles `esc`: closes a dialog, leaves a field, goes back a level, or clears the filters.
@@ -357,9 +393,14 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
         sections,
         share_path: SharePath(share_path),
     } = lists;
-    // The transfer a command acts on: the open one, or the one under the cursor.
+    // The transfer a command acts on: the open one, or the one under the cursor while the
+    // filters show it.
     let target = || {
-        let id = ui.open.get_untracked().or(ui.cursor.get_untracked())?;
+        let shown = |id: &BundleId| order.ids.with_untracked(|ids| ids.contains(id));
+        let id = ui
+            .open
+            .get_untracked()
+            .or(ui.cursor.get_untracked().filter(shown))?;
         store.model.with_untracked(|m| m.transfer(&id).cloned())
     };
     let scope = ui.scope_now();
@@ -380,7 +421,8 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
         Command::First => go(Move::First),
         Command::Last => go(Move::Last),
         Command::Open => {
-            if let Some(id) = ui.cursor.get_untracked() {
+            let cursor = ui.cursor.get_untracked();
+            if let Some(id) = cursor.filter(|id| order.ids.with_untracked(|ids| ids.contains(id))) {
                 ui.open(id);
             }
         }
@@ -478,6 +520,7 @@ fn Meters() -> impl IntoView {
     let rates = move || store.model.with(|m| m.total_rates());
     let history = move |upload: bool| {
         Signal::derive(move || {
+            store.sampled.track();
             store
                 .model
                 .with(|m| present::recent(m.total_history(), SPARK_SECONDS, upload))

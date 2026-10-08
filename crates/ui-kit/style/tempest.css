@@ -1249,7 +1249,7 @@ textarea.input {
 }
 
 .sort:hover,
-.sort[aria-sort] {
+th[aria-sort] .sort {
   color: var(--fg);
 }
 

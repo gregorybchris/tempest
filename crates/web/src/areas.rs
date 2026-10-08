@@ -241,6 +241,9 @@ fn RowView(row: Row, cursor: Selector<Option<String>>) -> impl IntoView {
 #[component]
 fn InlineField(
     text: String,
+    /// Its name for screen readers: the row's label, or what the entry is.
+    #[prop(into)]
+    label: String,
     #[prop(optional)] placeholder: &'static str,
     #[prop(optional)] title: &'static str,
     #[prop(into)] save: Callback<String, Result<(), String>>,
@@ -260,6 +263,7 @@ fn InlineField(
                 type="text"
                 data-change=""
                 placeholder=placeholder
+                aria-label=label
                 title=title
                 spellcheck="false"
                 autocomplete="off"
@@ -281,10 +285,10 @@ fn InlineField(
     }
 }
 
-/// A switch that changes `key` when clicked.
-fn switch(on: bool, flip: impl Fn() + Send + Sync + 'static) -> impl IntoView {
+/// A switch named `label` that calls `flip` when clicked.
+fn switch(label: String, on: bool, flip: impl Fn() + Send + Sync + 'static) -> impl IntoView {
     view! {
-        <Switch on=on on_change=move |_| flip() attr:data-change="">
+        <Switch on=on on_change=move |_| flip() attr:data-change="" attr:aria-label=label>
             {if on { "on" } else { "off" }}
         </Switch>
     }
@@ -309,9 +313,9 @@ fn ControlView(row: Row) -> impl IntoView {
                 ValueKind::Folder => "the default",
                 _ => "none",
             };
-            view! { <InlineField text placeholder title=kind.help() save /> }.into_any()
+            view! { <InlineField text label=label.clone() placeholder title=kind.help() save /> }.into_any()
         }
-        Control::Toggle { key, on } => switch(on, move || {
+        Control::Toggle { key, on } => switch(label.clone(), on, move || {
             config.change([(key, json!(!on))], format!("{label}: {}", if on { "off" } else { "on" }));
         })
         .into_any(),
@@ -346,12 +350,12 @@ fn ControlView(row: Row) -> impl IntoView {
         Control::Schedule(schedule) => view! { <ScheduleEditor schedule /> }.into_any(),
         Control::Theme => view! { <ThemePicker theme=ui.theme /> }
             .into_any(),
-        Control::Scanlines => switch(ui.scanlines.get_untracked(), move || ui.scanlines.update(|s| *s = !*s)).into_any(),
-        Control::Clean => switch(ui.clean.get_untracked(), move || ui.clean.update(|c| *c = !*c)).into_any(),
+        Control::Scanlines => switch(label, ui.scanlines.get_untracked(), move || ui.scanlines.update(|s| *s = !*s)).into_any(),
+        Control::Clean => switch(label, ui.clean.get_untracked(), move || ui.clean.update(|c| *c = !*c)).into_any(),
         Control::Notifications => view! {
             {move || {
                 let on = ui.notify.get();
-                switch(on, move || notify::switch(!on, ui.notify, controls))
+                switch(label.clone(), on, move || notify::switch(!on, ui.notify, controls))
             }}
         }
         .into_any(),
@@ -372,7 +376,7 @@ fn ControlView(row: Row) -> impl IntoView {
                 Ok(())
             };
             view! {
-                <InlineField text=folder placeholder="/path/to/folder" save />
+                <InlineField text=folder label=format!("{name}'s folder") placeholder="/path/to/folder" save />
                 <button class="btn btn--ghost btn--small" type="button" data-remove="" title="Remove the category (x)"
                     on:click=move |_| config.remove_category(remove_name.clone())>
                     "remove"
@@ -426,7 +430,7 @@ fn list_entry(
         Ok(())
     };
     view! {
-        <InlineField text=entry save />
+        <InlineField text=entry.clone() label=entry save />
         <button class="btn btn--ghost btn--small" type="button" data-remove="" title="Remove it (x)"
             on:click=move |_| {
                 let list = rows::edited(&list_of(config, key), Some(&gone), None);
@@ -445,10 +449,14 @@ fn AddField(adds: Adds) -> impl IntoView {
     let folder = RwSignal::new(String::new());
     let problem = RwSignal::new(None::<String>);
     let input = NodeRef::<Input>::new();
-    let (label, placeholder) = match adds {
-        Adds::Category => ("Add a category", "name, such as films"),
-        Adds::Tracker => ("Add a tracker", "https://tracker.example.org"),
-        Adds::Relay => ("Add a relay", "<key>@host:port"),
+    let (label, name, placeholder) = match adds {
+        Adds::Category => ("Add a category", "Category name", "name, such as films"),
+        Adds::Tracker => (
+            "Add a tracker",
+            "Tracker URL",
+            "https://tracker.example.org",
+        ),
+        Adds::Relay => ("Add a relay", "Relay", "<key>@host:port"),
     };
     let add = move || {
         let text = first.get_untracked().trim().to_owned();
@@ -489,20 +497,21 @@ fn AddField(adds: Adds) -> impl IntoView {
         }
     };
     let field = move |value: RwSignal<String>,
+                      name: &'static str,
                       placeholder: &'static str,
                       node: Option<NodeRef<Input>>| {
         let node = node.unwrap_or_default();
         view! {
-            <input node_ref=node class="input" type="text" placeholder=placeholder spellcheck="false" autocomplete="off"
+            <input node_ref=node class="input" type="text" placeholder=placeholder aria-label=name spellcheck="false" autocomplete="off"
                 data-add="" prop:value=move || value.get() on:input=move |e| value.set(event_target_value(&e)) />
         }
     };
     view! {
         <form class="add-field" aria-label=label on:submit=move |e| { e.prevent_default(); add(); }>
             <span class="add-field__label">{format!("+ {}", label.to_lowercase())}</span>
-            {field(first, placeholder, Some(input))}
+            {field(first, name, placeholder, Some(input))}
             {(adds == Adds::Category).then(|| view! {
-                <input class="input" type="text" placeholder="/folder/for/its/downloads" spellcheck="false" autocomplete="off"
+                <input class="input" type="text" placeholder="/folder/for/its/downloads" aria-label="Its folder" spellcheck="false" autocomplete="off"
                     prop:value=move || folder.get() on:input=move |e| folder.set(event_target_value(&e)) />
             })}
             <button class="btn btn--small" type="submit">"add"</button>

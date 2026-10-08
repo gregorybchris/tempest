@@ -48,8 +48,9 @@ jobs:
       - name: Golden baselines, long
         run: target/release/tempest-sim baseline --long
       # The slow tests, among them the 1,000-peer swarm into DuckDB and the validation scenarios.
+      # The check job runs the rest.
       - name: Slow simulation tests
-        run: cargo test --release -p tempest-sim --features tempest-sim/bundled-duckdb -- --include-ignored
+        run: cargo test --release -p tempest-sim --features tempest-sim/bundled-duckdb -- --ignored
 
   web:
     runs-on: ubuntu-latest

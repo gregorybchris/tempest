@@ -148,11 +148,14 @@ impl<P> Network<P> {
 
     /// The time from a message leaving `a` to its arrival at `b`: the latency, plus a probe
     /// timeout for each time it is lost.
-    pub fn delay(&self, a: usize, b: usize, rng: &mut Rng) -> Duration {
+    #[cfg(test)]
+    fn delay(&self, a: usize, b: usize, rng: &mut Rng) -> Duration {
         self.delay_via(a, b, Duration::ZERO, rng)
     }
 
-    /// [`Network::delay`] on a path that is `detour` longer each way, such as through a relay.
+    /// The time from a message leaving `a` to its arrival at `b` on a path that is `detour`
+    /// longer each way, such as through a relay: the latency, plus a probe timeout for each time
+    /// it is lost.
     pub fn delay_via(&self, a: usize, b: usize, detour: Duration, rng: &mut Rng) -> Duration {
         let loss = self.loss(a, b);
         let mut losses = 0;
@@ -178,7 +181,8 @@ impl<P> Network<P> {
     ///
     /// Its completion, and those of other flows whose rate changed, are then in
     /// [`Network::take_completions`].
-    pub fn start(&mut self, now: Time, from: usize, to: usize, bytes: u64, payload: P) -> FlowId {
+    #[cfg(test)]
+    fn start(&mut self, now: Time, from: usize, to: usize, bytes: u64, payload: P) -> FlowId {
         self.start_limited(now, from, to, bytes, None, payload)
     }
 
@@ -257,13 +261,9 @@ impl<P> Network<P> {
             .is_some_and(|f| f.stamp == stamp)
     }
 
-    /// The payload of a running flow.
-    pub fn payload(&self, flow: FlowId) -> Option<&P> {
-        self.flows.get(flow.0)?.as_ref().map(|f| &f.payload)
-    }
-
     /// A running flow's current rate in bytes per second.
-    pub fn rate(&self, flow: FlowId) -> Option<f64> {
+    #[cfg(test)]
+    fn rate(&self, flow: FlowId) -> Option<f64> {
         self.flows.get(flow.0)?.as_ref().map(|f| f.rate)
     }
 

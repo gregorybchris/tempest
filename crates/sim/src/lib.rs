@@ -7,12 +7,12 @@
 //!
 //! - [`scenario`]: scenario files, which describe the world and the experiment (D-072).
 //! - [`engine`]: one run of one variant with one seed.
-//! - [`network`]: the message-level network model (D-069).
-//! - [`distribution`]: random draws for arrivals and session lengths.
+//! - `network`: the message-level network model (D-069).
+//! - `distribution`: random draws for arrivals and session lengths.
 //! - [`experiment`]: every variant with every seed.
 //! - [`summary`]: each run's headline metrics, and results per variant.
 //! - [`stats`]: medians with confidence intervals, and paired comparisons of variants (D-073).
-//! - [`strategic`]: the strategic client's upload strategy.
+//! - `strategic`: the strategic client's upload strategy.
 //! - [`log`]: the event log and its digest.
 //! - [`baseline`]: golden scenarios and their baselines, to check runs against (D-077).
 //! - `results`: the DuckDB results database (D-075), with the `results` feature.
@@ -21,18 +21,18 @@
 pub mod baseline;
 #[cfg(feature = "results")]
 pub mod browse;
-pub mod bundle;
-pub mod distribution;
+mod bundle;
+mod distribution;
 pub mod engine;
 pub mod experiment;
 pub mod log;
-pub mod network;
-pub mod queue;
+mod network;
+mod queue;
 #[cfg(feature = "results")]
 pub mod results;
 pub mod scenario;
 pub mod stats;
-pub mod strategic;
+mod strategic;
 pub mod summary;
 pub mod units;
 

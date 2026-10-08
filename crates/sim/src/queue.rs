@@ -70,16 +70,6 @@ impl<E> Queue<E> {
     pub fn pop(&mut self) -> Option<(Time, E)> {
         self.heap.pop().map(|Reverse(item)| (item.time, item.event))
     }
-
-    /// The number of events scheduled.
-    pub fn len(&self) -> usize {
-        self.heap.len()
-    }
-
-    /// Whether nothing is scheduled.
-    pub fn is_empty(&self) -> bool {
-        self.heap.is_empty()
-    }
 }
 
 #[cfg(test)]

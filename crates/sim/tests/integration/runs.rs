@@ -169,7 +169,15 @@ fn a_busy_swarm_completes_despite_misbehaving_peers() {
     assert!(bad > 0);
     // The run ended once the last peer completed or left, before the time limit.
     assert!(result.end < tempest_core::Time::ZERO + scenario.duration);
-    assert!(all_completed(&result) || result.peers.iter().any(|p| p.left.is_some()));
+    let unfinished = result
+        .peers
+        .iter()
+        .filter(|p| p.starts == Start::Empty && p.completed.is_none() && p.left.is_none());
+    assert_eq!(
+        unfinished.count(),
+        0,
+        "every downloader completes or leaves"
+    );
 }
 
 #[test]

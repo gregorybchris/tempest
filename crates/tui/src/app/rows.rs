@@ -753,9 +753,8 @@ impl App {
                 Ok(self.change_settings([(*key, value)], Some(about.clone())))
             }
             ValueTarget::Tracker(old) => {
-                let lower = text.to_ascii_lowercase();
-                if !(lower.starts_with("http://") || lower.starts_with("https://")) {
-                    return Err("A tracker's URL starts with http:// or https://.".to_owned());
+                if let Some(problem) = tempest_api::settings::tracker_problem(text) {
+                    return Err(problem.to_owned());
                 }
                 let mut trackers = settings.map(|s| s.trackers.clone()).unwrap_or_default();
                 match old
@@ -774,8 +773,8 @@ impl App {
                 ))
             }
             ValueTarget::Relay(old) => {
-                if !text.contains('@') {
-                    return Err("A relay is its key and address, as <key>@host:port.".to_owned());
+                if let Some(problem) = tempest_api::settings::relay_problem(text) {
+                    return Err(problem.to_owned());
                 }
                 let mut relays = view.as_ref().map(relay_identities).unwrap_or_default();
                 match old
@@ -783,6 +782,9 @@ impl App {
                     .and_then(|old| relays.iter().position(|r| r == old))
                 {
                     Some(index) => relays[index] = text.to_owned(),
+                    None if relays.iter().any(|r| r == text) => {
+                        return Err("That relay is already listed.".to_owned());
+                    }
                     None => relays.push(text.to_owned()),
                 }
                 Ok(self.change_settings(

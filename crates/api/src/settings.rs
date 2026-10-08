@@ -9,6 +9,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tempest_protocol::relay::RelayIdentity;
 
 use crate::schedule::Schedule;
 use crate::ui::UiSettings;
@@ -227,6 +228,27 @@ pub fn absolute(path: &str) -> bool {
         || Path::new(path).is_absolute()
 }
 
+/// Why `url` can't be a tracker, if it can't.
+pub fn tracker_problem(url: &str) -> Option<&'static str> {
+    let url = url.trim();
+    let scheme = url.find("://").map(|end| url[..end].to_ascii_lowercase());
+    let host = url.split_once("://").map_or("", |(_, rest)| rest);
+    match scheme.as_deref() {
+        Some("http" | "https") if !host.is_empty() && !host.starts_with('/') => None,
+        _ => Some("A tracker is an http:// or https:// URL."),
+    }
+}
+
+/// Why `relay` can't be a relay identity, if it can't: `<key>@host[:port]`, the key 64 hex
+/// characters.
+pub fn relay_problem(relay: &str) -> Option<&'static str> {
+    relay
+        .trim()
+        .parse::<RelayIdentity>()
+        .is_err()
+        .then_some("A relay is its key and address: <64 hex characters>@host[:port].")
+}
+
 /// Tags as typed: separated by commas, with or without `#`.
 pub fn parse_tags(text: &str) -> BTreeSet<String> {
     text.split(',')
@@ -267,6 +289,24 @@ mod tests {
         assert!(absolute("\\\\server\\share"));
         assert!(!absolute("films"));
         assert!(!absolute("C:films"));
+    }
+
+    #[test]
+    fn trackers_and_relays_are_checked_as_typed() {
+        assert_eq!(tracker_problem("https://t.example.org/announce"), None);
+        assert_eq!(tracker_problem("HTTP://10.0.0.2:4777"), None);
+        assert!(tracker_problem("udp://t.example.org").is_some());
+        assert!(tracker_problem("https://").is_some());
+        assert!(tracker_problem("t.example.org").is_some());
+        let key = "ab".repeat(32);
+        assert_eq!(
+            relay_problem(&format!("{key}@relay.example.org:4775")),
+            None
+        );
+        assert_eq!(relay_problem(&format!(" {key}@relay.example.org ")), None);
+        assert!(relay_problem(&format!("{key}@relay.example.org:0")).is_some());
+        assert!(relay_problem("abc@relay.example.org:4775").is_some());
+        assert!(relay_problem("relay.example.org:4775").is_some());
     }
 
     #[test]

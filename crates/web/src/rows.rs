@@ -551,32 +551,6 @@ pub fn edited(list: &[String], old: Option<&str>, new: Option<&str>) -> Vec<Stri
     list
 }
 
-/// Why `url` can't be a tracker, if it can't.
-pub fn tracker_problem(url: &str) -> Option<&'static str> {
-    let url = url.trim();
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"));
-    match rest {
-        Some(host) if !host.is_empty() && !host.starts_with('/') => None,
-        _ => Some("A tracker is an http:// or https:// URL."),
-    }
-}
-
-/// Why `relay` can't be a relay identity, if it can't: `<key>@host:port`, the key 64 hex
-/// characters.
-pub fn relay_problem(relay: &str) -> Option<&'static str> {
-    let problem = "A relay is its key and address: <64 hex characters>@host:port.";
-    let Some((key, address)) = relay.trim().split_once('@') else {
-        return Some(problem);
-    };
-    let key_ok = key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit());
-    let address_ok = address
-        .rsplit_once(':')
-        .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok());
-    (!key_ok || !address_ok).then_some(problem)
-}
-
 /// The ID of the row after or before `current` among `ids`, as the list's cursor moves.
 pub fn step(ids: &[String], current: Option<&str>, to: crate::list::Move) -> Option<String> {
     let at = current.and_then(|c| ids.iter().position(|id| id == c));
@@ -712,22 +686,6 @@ mod tests {
         assert_eq!(edited(&list, Some("a"), Some("b")), ["b"]);
         assert_eq!(edited(&list, Some("b"), None), ["a"]);
         assert_eq!(edited(&list, Some("q"), None), ["a", "b"]);
-    }
-
-    #[test]
-    fn entries_are_checked_before_sending() {
-        assert_eq!(tracker_problem("https://t.example.org/announce"), None);
-        assert_eq!(tracker_problem("http://10.0.0.2:4777"), None);
-        assert!(tracker_problem("udp://t.example.org").is_some());
-        assert!(tracker_problem("https://").is_some());
-        let key = "ab".repeat(32);
-        assert_eq!(
-            relay_problem(&format!("{key}@relay.example.org:4775")),
-            None
-        );
-        assert!(relay_problem(&format!("{key}@relay.example.org")).is_some());
-        assert!(relay_problem("abc@relay.example.org:4775").is_some());
-        assert!(relay_problem("relay.example.org:4775").is_some());
     }
 
     #[test]

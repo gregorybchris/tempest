@@ -8,7 +8,7 @@ use leptos::prelude::*;
 use serde_json::json;
 use tempest_api::requests::QueueStep;
 use tempest_api::schedule::{Schedule, Weekday};
-use tempest_api::settings::{ValueKind, keys};
+use tempest_api::settings::{self, ValueKind, keys};
 use tempest_api::{Status, TransferInfo};
 use tempest_protocol::BundleId;
 use tempest_ui_kit::components::*;
@@ -384,8 +384,8 @@ fn ControlView(row: Row) -> impl IntoView {
             }
             .into_any()
         }
-        Control::Tracker(url) => list_entry(config, keys::TRACKERS, url, rows::tracker_problem).into_any(),
-        Control::Relay(relay) => list_entry(config, keys::RELAYS, relay, rows::relay_problem).into_any(),
+        Control::Tracker(url) => list_entry(config, keys::TRACKERS, url, settings::tracker_problem).into_any(),
+        Control::Relay(relay) => list_entry(config, keys::RELAYS, relay, settings::relay_problem).into_any(),
         Control::Tag(tag) => view! {
             <span class="row__value">{row.value.clone()}</span>
             <Button small=true title="Show its transfers" on_click=move || {
@@ -474,8 +474,8 @@ fn AddField(adds: Adds) -> impl IntoView {
             }
             Adds::Tracker | Adds::Relay => {
                 let (key, check): (&'static str, fn(&str) -> Option<&'static str>) = match adds {
-                    Adds::Tracker => (keys::TRACKERS, rows::tracker_problem),
-                    _ => (keys::RELAYS, rows::relay_problem),
+                    Adds::Tracker => (keys::TRACKERS, settings::tracker_problem),
+                    _ => (keys::RELAYS, settings::relay_problem),
                 };
                 match check(&text) {
                     Some(why) => Err(why),

@@ -2022,7 +2022,7 @@ UI screenshot tests are not required.
 
 ## D-136: Four-area app navigation, Transfers as home
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-131 asks for app-level navigation over transfers, share, trackers/catalog and settings.
 
@@ -2034,7 +2034,7 @@ UI screenshot tests are not required.
 
 ## D-137: Detail is a drawer or split with the summary first
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Decision:** The detail opens as a right drawer (wide web), a bottom split (TUI) or a full sheet (narrow web). Its first view is a plain-language summary. Files, peers and decisions are tabs. The chunk map and rates chart are a further level, entered explicitly and left with `esc`. This follows D-131's "less at once" and keeps the list visible while a transfer is inspected.
 
@@ -2042,7 +2042,7 @@ UI screenshot tests are not required.
 
 ## D-138: List columns degrade by priority
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Decision:** Name, progress and status are always shown. Size, ↓ and ETA come next, then ↑. Narrow terminals and windows drop columns in reverse order rather than wrapping or truncating the core ones. Custom columns and saved views (D-118) add to this set.
 
@@ -2050,7 +2050,7 @@ UI screenshot tests are not required.
 
 ## D-139: Share and Catalog are screens, not dialogs
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Decision:** Creating a bundle and browsing trackers are full areas, not modal dialogs, because each has a multi-step flow (build, link; browse, search, add). Adding a transfer from a link stays a quick modal on Transfers, since it is one input.
 
@@ -2058,7 +2058,7 @@ UI screenshot tests are not required.
 
 ## D-140: Strict decoding of non-canonical addresses and hex
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The spec says an IPv4 address MUST be encoded with family 4, and that hashes are written as lowercase hex, but not what a receiver does with an IPv4-mapped IPv6 address sent as family 6, or with uppercase hex.
 
@@ -2070,7 +2070,7 @@ UI screenshot tests are not required.
 
 ## D-141: Toolchain pin and minimum Rust version
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-122 pins the latest stable Rust. Crates also declare a minimum supported version (`rust-version`).
 
@@ -2082,7 +2082,7 @@ UI screenshot tests are not required.
 
 ## D-142: Implicit directories count in case-insensitive path checks
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `protocol/content.md` forbade two entries whose paths differ only by case, but said nothing about the directories that implicitly contain entries. Files `A/b` and `a/c` were valid, yet macOS and Windows would write both into one folder, so the bundle could not be written identically everywhere.
 
@@ -2108,7 +2108,7 @@ When building a manifest, the client converts file names and symlink targets to 
 
 ## D-144: Link formatting and parsing details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `protocol/discovery.md` says link values are percent-encoded per RFC 3986 and unknown parameters are ignored, but not which characters are encoded, how `+` is read, or what a malformed known parameter does.
 
@@ -2123,7 +2123,7 @@ When building a manifest, the client converts file names and symlink targets to 
 
 ## D-145: Size limits for relay control messages
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `protocol/relays.md` said relay control messages use the framing of `messages.md`, whose size limits are defined per peer message type, but gave no limits for its own types.
 
@@ -2135,7 +2135,7 @@ When building a manifest, the client converts file names and symlink targets to 
 
 ## D-146: Relay identity text details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `protocol/relays.md` defines `<relay key>@<host>:<port>` with a default port of 4775, but not whether the port may be omitted or what counts as a valid host.
 
@@ -2151,7 +2151,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-147: Tracker JSON details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `protocol/trackers.md` lists the API's fields but leaves some reading rules open.
 
@@ -2167,7 +2167,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-148: The core's session and driver boundary
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-068 makes the core sans-IO but doesn't say what one state machine covers or who handles chunk bytes. The simulator must model 1,000-peer swarms of large bundles, which it can't do if every Data carries and hashes real bytes.
 
@@ -2186,7 +2186,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-149: Session policies the strategies spec leaves open
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** Implementing the session needed answers to small policy questions not covered by `specs/strategies.md` or the protocol.
 
@@ -2207,7 +2207,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-150: Settings keys and overrides
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-005 calls for profiles plus per-setting overrides, and the simulator's scenario files vary settings by dotted key (`specs/simulation.md`). The key names were undecided.
 
@@ -2226,7 +2226,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-151: Profile names and contents
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `specs/strategies.md` left profile names and their settings open, suggesting "balanced", "background", "classic BitTorrent" and "cooperative".
 
@@ -2246,7 +2246,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-152: Adaptive pipelining
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-060 keeps "measured rate × round-trip time" bytes requested from each provider, but how to measure either was open.
 
@@ -2265,7 +2265,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-153: Endgame and snubbing details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-061 sets the endgame strategies; which chunk to duplicate first, when to cancel, and what to do about a provider that never answers were open.
 
@@ -2360,7 +2360,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-158: Simulated network details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-069 sets a message-level network with fair sharing, but not how capacity is shared, how loss and ordering work, or what counts as a message.
 
@@ -2381,7 +2381,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-159: Simulated peers and runs
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-070 lists what the first simulator models; how misbehaving peers, the tracker and a run's randomness and end work was open.
 
@@ -2399,7 +2399,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-160: The `tempest sim` command
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-124 lists the CLI's verbs but has none for the simulator, which D-083 builds into the `tempest` binary.
 
@@ -2413,7 +2413,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-161: Results database layout
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-075 puts experiments, runs, summary metrics and event logs in one DuckDB file, but not how they are laid out or written.
 
@@ -2436,7 +2436,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-162: Headline metric definitions
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `specs/simulation.md` lists the headline metrics without defining them precisely.
 
@@ -2473,7 +2473,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-164: An unreproduced failure of the 1,000-peer DuckDB test
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** One run of `cargo test --release -p tempest-sim -- --include-ignored` failed in `results.rs` with the panic message lost; reruns passed.
 
@@ -2487,7 +2487,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-165: Simulated routers, relays, disks and sessions
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-070 asks the simulator to model NAT reachability with relays and hole punching, disk and hashing speed, and churn. D-159 covered only exponential sessions and three arrival patterns.
 
@@ -2526,7 +2526,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-167: Statistics across seeds
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-073 asks for medians with confidence intervals, paired seeds and meaningful-difference reporting.
 
@@ -2546,7 +2546,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-168: Availability of the rarest chunk
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-162 left the availability of the rarest chunk unmeasured. Validating rarest-first (D-078) needs it.
 
@@ -2564,7 +2564,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-169: A limit on dials in progress
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** In the first validation flash crowd, 100 peers arriving together each dialed up to 50 peers from the tracker. The first 50 filled each other's connection limits; the others filled theirs with dials that were then refused, and meanwhile refused the peers dialing them. Half the swarm waited for the 60 s redial delay before getting a byte.
 
@@ -2595,7 +2595,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-171: A set of golden scenarios, checked quickly or seed by seed
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-163 had one golden scenario, predating the model of routers, relays, disks, Weibull sessions and strategic clients (D-165, D-166). D-132 asks for a quick check by default and a longer, more certain one.
 
@@ -2614,7 +2614,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-172: QUIC endpoint, TLS and identity file details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** M4 needs concrete choices for the parts of `protocol/connections.md` it leaves to implementations: how the key is encoded and stored, how rustls and quinn are set up, and the transport's timers.
 
@@ -2635,7 +2635,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-173: Bundle storage details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-086 fixes positioned I/O on a thread pool with batched syncs. M4 needs the rest: which task owns the files, how proofs are built, how syncs are batched, how a download is laid out, and what happens to files already on disk.
 
@@ -2657,7 +2657,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-174: Production driver details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-068 and D-085 fix the shape of the engine: sans-IO sessions driven by actors over bounded channels. M4 needs the details: how tasks are split, how they avoid deadlock, how incoming connections find their bundle, and what the driver does about problems only it can see.
 
@@ -2702,7 +2702,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-176: Tracker server details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** `protocol/trackers.md` defines the peer-list API but leaves the server's own policies open: transport security, rate limits, memory bounds, errors outside the listed codes, and how the observed IP is found behind a proxy.
 
@@ -2725,7 +2725,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-177: Tracker client details
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** Clients announce to trackers (`protocol/trackers.md`) from `tempest-net`. The spec fixes the events and the duty to honor `retry_after_secs`, but not the HTTP stack, back-off, limits or which addresses to announce.
 
@@ -2766,7 +2766,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-179: Chunk-level resume
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-082 keeps verified chunks for fast resume, and D-173 left chunk-level resume for the state store. A downloader can only serve a chunk it can prove, and the proof hashes it learned came with the Data it stored, so a list of chunks alone can't be served after a restart without hashing again.
 
@@ -2849,7 +2849,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-183: Speed limits
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-118 asks for global and per-transfer speed limits, plus alternative limits that can be toggled or scheduled. Nothing says where limits are enforced, what they count, or how the toggle and the schedule combine.
 
@@ -2887,7 +2887,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-185: The relay server
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** M6 builds the relay of `protocol/relays.md`. The architecture table had the relay crate depend on `protocol` only, but a relay needs the same raw-public-key TLS, identities and framed streams as peers, which live in `net`. Several details the protocol leaves open had to be settled: how a relay closes connections, a peer registering again while still connected, how kept addresses count against capacity, which IP a lent address carries, and how the tracker takes on the relay role (D-028).
 
@@ -2930,7 +2930,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-187: Hole punching and the upgrade to direct
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** M6 upgrades relayed connections to direct ones (`protocol/relays.md`, Upgrading to a direct connection). The protocol leaves open how the work splits between session and driver, how long and how often to dial, what "stops dialing" means for attempts already under way, and how an upgrade fits the connection limit.
 
@@ -2990,7 +2990,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-190: Narrow lists drop ↑ first
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-138 drops columns in reverse priority (↑ first, then ETA), while the TUI sketch in `specs/interfaces.md` said ETA, then ↑.
 
@@ -3002,7 +3002,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-191: TUI keys for transfer controls, the queue and finding
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-118's controls and finding features need keys in the TUI. `1`-`4` and `[ ]` switch areas (D-136), so the prototype's status-filter keys (`0`-`7`, `[ ]`) clash, and the spec reserves `c` and `g` for the chunk map and rates chart in the detail pane (M7.3).
 
@@ -3022,7 +3022,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-192: How filters and sorting behave
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-118 lists filtering by name, tag and status and sorting by ten keys, but not how a query matches or which way each sort runs. The TUI and the web UI should behave alike (D-119).
 
@@ -3039,7 +3039,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-193: The API's view inside a transfer
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The detail views (D-137) need a transfer's files, peers and chunks, which the API didn't expose. Chunks are 16 KiB, so a large bundle has hundreds of thousands of them.
 
@@ -3058,7 +3058,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-194: The TUI's detail, chunk map and rates chart
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The client layout puts a transfer's detail below the list, with the chunk map and rates chart one level further in (D-137), and gives `g` to the rates chart while the list already uses it for the first transfer (D-191). The detail needs keys, and the two full-screen views a scale and a source.
 
@@ -3092,7 +3092,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-196: The TUI's Share, Catalog and Settings areas
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-136 and D-139 make Share, Catalog and Settings areas of their own. They need layouts and keys that fit the TUI's one-table key model (D-191) without letting typing clash with area keys such as `1`-`4` and `q`.
 
@@ -3112,7 +3112,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-197: Custom columns and saved views
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-118 lists custom columns and saved views without saying what they hold; D-138 says they add to the columns' priority order.
 
@@ -3128,7 +3128,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-198: The UI kit's shape
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-076 calls for one design-system crate shared by the web UIs, and the architecture lets `ui-kit` depend on nothing of Tempest's. The web UIs are served by the engine and may run with no internet access.
 
@@ -3147,7 +3147,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-199: The UI gallery and the live view benchmark
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** UI quality is checked by eye in all four themes, and the Leptos guidelines require a CI benchmark of a 1,536-cell live view. The pattern it guards against costs time in the browser's reactive graph and DOM, which a native test doesn't exercise.
 
@@ -3161,7 +3161,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-200: The API's types live in a crate of their own
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The web UI runs in the browser, so it can't depend on `engine`, whose tokio, quinn and SQLite don't build for WebAssembly. It needs the API's types, and should behave like the TUI in filtering, sorting, columns and explanations (D-119), which lived in the TUI.
 
@@ -3196,7 +3196,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-202: The web UI follows the engine and the keyboard
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The web UI needs live updates, a clear state when the engine is gone, and the TUI's keys where they make sense in a browser (D-119, D-191). A browser's `EventSource` reconnects on its own schedule, gives up on an error answer, and can't send `Last-Event-ID` on a new stream.
 
@@ -3216,7 +3216,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-203: The web UI's Share, Catalog and Settings areas, and its notifications
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The web UI needs the TUI's areas (D-196), columns and views (D-197), and notifications of completions and failures (D-118). A browser offers inline controls that a terminal can't, and its notification permission belongs to the browser, not the engine. The engine's settings type doesn't build for WebAssembly.
 
@@ -3260,7 +3260,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-205: The announce's listing field is a signature
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-129 adds an optional listing field to announces and attributes a listing to the key that asked. Announces are unsigned, so a bare flag would let anyone list a bundle in another peer's name.
 
@@ -3293,7 +3293,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-207: How the tracker fetches manifests to list bundles
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-129 has the tracker fetch a listed bundle's manifest from peers, but leaves open which peers, how often and within what limits. Every fetch is a QUIC connection the tracker opens to addresses that announces gave it.
 
@@ -3312,7 +3312,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-208: Publishing from the client
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-129 lets sharers opt in per tracker or with `tempest share --publish`, and D-128 signs them in with their key. The daemon holds the key, while the CLI and UIs talk to it through its API.
 
@@ -3330,7 +3330,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-209: Catalog search, facets and ranking
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-130 chooses Tantivy for catalog search, with typo tolerance and category and tag facets, and ranks by live swarm health, votes and downloads over time. It leaves open where the index lives, how typos and ranking work, how downloads are counted and what the query looks like.
 
@@ -3350,7 +3350,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-210: The catalog's web UI
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-118 and `interfaces.md` ask for a catalog UI in the client web UI's framework and quality bar, served by the tracker, with search, facets, sorting, listing pages, votes, comments, publishing and sign-in with a Tempest key (D-128). How it is served, how it routes, pages and signs in, and how it is tested in a browser were open.
 
@@ -3370,7 +3370,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-211: Release configuration
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** D-133 chooses cargo-dist. Its configuration leaves some details open.
 
@@ -3387,7 +3387,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-212: Cross-platform checks in CI
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** Releases (D-211) build on Windows and on Linux for arm64. Locally, `cargo check --target x86_64-pc-windows-msvc -p tempest` fails: `ring` compiles C and needs the target's headers, which a Mac lacks. A review of the code that differs by platform found each case gated or given a Windows implementation: file permissions, `O_NOFOLLOW`, positioned reads and writes, symlinks, `SO_REUSEPORT`, signals and the data directory.
 
@@ -3431,7 +3431,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-215: Merging peer records
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** A session replaced a known peer's record with any newer one, so a LAN record (one address, no relay) erased addresses and the relay learned from a tracker or peer exchange. `protocol/messages.md` also says a PeerRecord's addresses never hold a relay address, which nothing checked on receipt.
 
@@ -3447,7 +3447,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-216: Limits on incoming connections before Hello
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The node spawned a routing task for every incoming connection and waited up to `hello_timeout` for Hello. The session's connection limits apply only once Hello names a bundle, so anyone could hold any number of handshakes and tasks open.
 
@@ -3465,7 +3465,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-217: Catalog rate limits
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The catalog had no rate limits. Anyone could request sign-in codes until the challenge table was full, which blocked sign-ins for everyone, and post comments, votes and edits, or inflate download counts with fresh peer IDs, as fast as the tracker answered. D-176 limits only announces, per peer.
 
@@ -3485,7 +3485,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-218: The catalog browser test is ignored unless run explicitly
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The browser test (D-210) passed with a note when `CHROMEDRIVER` was unset or the binary lacked the catalog UI, so a broken CI setup stayed green.
 
@@ -3499,7 +3499,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 
 ## D-219: Themed form controls in the UI kit
 
-**Date:** 2026-10-07 · **Status:** Provisional
+**Date:** 2026-10-07 · **Status:** Decided
 
 **Context:** The web UIs used native selects, checkboxes and radios. Their popups and marks are drawn by the browser and operating system, so they ignored the four themes and looked like default HTML.
 

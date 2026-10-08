@@ -26,15 +26,14 @@ impl Drop for Running {
     }
 }
 
-/// The lines `stream` yields, read on another thread.
+/// The lines `stream` yields, read on another thread. The stream is read to its end even once
+/// nobody listens, so the process never fails writing to a closed pipe.
 fn lines(stream: impl Read + Send + 'static) -> mpsc::Receiver<String> {
     let (lines, received) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stream).lines() {
             let Ok(line) = line else { break };
-            if lines.send(line).is_err() {
-                break;
-            }
+            let _ = lines.send(line);
         }
     });
     received

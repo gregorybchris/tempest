@@ -48,9 +48,9 @@ fn lines(stream: impl Read + Send + 'static) -> mpsc::Receiver<String> {
     std::thread::spawn(move || {
         for line in BufReader::new(stream).lines() {
             let Ok(line) = line else { break };
-            if lines.send(line).is_err() {
-                break;
-            }
+            // Read to the end even once nobody listens, so the process never fails writing
+            // to a closed pipe.
+            let _ = lines.send(line);
         }
     });
     received

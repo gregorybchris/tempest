@@ -1189,7 +1189,7 @@ Which one should be the default is one of the first questions for the simulator.
 
 - A background engine (daemon) does all transfers and exposes an API.
 - The web UI, the TUI and the CLI are clients of that API.
-- Everything ships as one `tempest` binary with subcommands (e.g. `tempest daemon`, `tempest tui`, `tempest send`, `tempest get`).
+- Everything ships as one `tempest` binary with subcommands, except the simulator (D-214) (e.g. `tempest daemon`, `tempest tui`, `tempest send`, `tempest get`).
 - The TUI and CLI can start an embedded engine when none is running.
 
 ---
@@ -2401,7 +2401,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-160: The `tempest sim` command
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-214: the command is `tempest-sim run`)
 
 **Context:** D-124 lists the CLI's verbs but has none for the simulator, which D-083 builds into the `tempest` binary.
 
@@ -3241,7 +3241,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-204: The simulation results UI and its API
 
-**Date:** 2026-10-07 · **Status:** Decided (revised by D-222)
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-214 and D-222: `tempest-sim web` serves it)
 
 **Context:** D-074 and D-075 put simulation results in DuckDB, read by a Rust web UI. The UI is WebAssembly and can't open the database, so something must serve it; the comparisons it shows must agree with what `tempest sim run` and `tempest sim baseline` print.
 
@@ -3428,6 +3428,13 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 **Decision:** The simulator, its results UI and its DuckDB dependency move out of `tempest` into a separate binary. The `tempest` binary keeps the client, the engine, the UIs, the tracker and the relay. This refines D-079.
 
 **Rationale:** The everyday client gets smaller and builds faster. Simulation is a development and research tool.
+
+**Implementation:**
+
+- The binary is `tempest-sim`, with `run`, `baseline` and `web` as its subcommands, so `tempest sim run …` is now `tempest-sim run …` (D-160, D-204). Its package is `tempest-sim-cli` in `crates/sim-cli`, since `tempest-sim` is the library; dist names the app, archive and Homebrew formula after the package.
+- Serving embedded UIs and embedding them from build scripts moved to a small `tempest-assets` crate that both binaries use.
+- `tempest sim …` is a hidden command that fails with a message pointing to `tempest-sim`, so old muscle memory and scripts get an explanation rather than a parse error.
+- Releases ship both apps. DuckDB is bundled only into `tempest-sim`, through the package's own dist `features`. Builds of `tempest` need no DuckDB, `cargo tree -p tempest` has none, and development builds of `tempest-sim` still link the system library (specs/development.md).
 
 ---
 

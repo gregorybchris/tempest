@@ -1,7 +1,7 @@
 //! Validation against the classic BitTorrent results (D-078): Bharambe et al. and Legout et al.
 //! found rarest-first plus choking close to optimal. Each test runs a scenario in
 //! `scenarios/validation/` with all its seeds and checks the qualitative result with the
-//! statistics `tempest sim run` reports (D-167). `specs/simulation.md` records the outcome.
+//! statistics `tempest-sim run` reports (D-167). `specs/simulation.md` records the outcome.
 //!
 //! The tests take from a few seconds to half a minute each in release, so they are marked slow
 //! and run in CI's simulation job.

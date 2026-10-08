@@ -4,6 +4,6 @@ target = "index.html"
 [serve]
 port = 8093
 
-# `trunk serve` forwards the API to a running `tempest sim web`.
+# `trunk serve` forwards the API to a running `tempest-sim web`.
 [[proxy]]
 backend = "http://127.0.0.1:7340/v1"

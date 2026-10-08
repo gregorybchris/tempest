@@ -1,5 +1,5 @@
 //! What the results UI reads agrees with the runs that made the results: listings filter and
-//! sort, run details add up, comparisons match the statistics `tempest sim run` prints, and
+//! sort, run details add up, comparisons match the statistics `tempest-sim run` prints, and
 //! experiments are checked against golden baselines.
 
 use std::collections::BTreeMap;

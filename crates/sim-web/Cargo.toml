@@ -1,6 +1,6 @@
 [package]
 name = "tempest-sim-web"
-description = "Tempest's simulation results UI, served by `tempest sim web`"
+description = "Tempest's simulation results UI, served by `tempest-sim web`"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -4802,14 +4802,13 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "tempest-assets",
  "tempest-catalog-api",
  "tempest-core",
  "tempest-engine",
  "tempest-net",
  "tempest-protocol",
  "tempest-relay",
- "tempest-sim",
- "tempest-sim-api",
  "tempest-tracker",
  "tempest-tui",
  "tempfile",
@@ -4828,6 +4827,13 @@ dependencies = [
  "tempest-catalog-api",
  "tempest-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tempest-assets"
+version = "0.1.0"
+dependencies = [
+ "axum",
 ]
 
 [[package]]
@@ -4987,6 +4993,23 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tempest-sim-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "serde",
+ "serde_json",
+ "tempest-assets",
+ "tempest-sim",
+ "tempest-sim-api",
+ "tempfile",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-//! `tempest sim`: runs simulation scenarios.
+//! `tempest-sim`'s commands: running scenarios and checking baselines.
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;

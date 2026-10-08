@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// An experiment: one `tempest sim run` of a scenario.
+/// An experiment: one `tempest-sim run` of a scenario.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExperimentInfo {
     /// Its ID in the database.

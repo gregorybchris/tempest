@@ -1,10 +1,10 @@
-//! `tempest sim run` on an example scenario and on a broken one, and `tempest sim baseline`.
+//! `tempest-sim run` on an example scenario and on a broken one, and `tempest-sim baseline`.
 
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn tempest(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_tempest"))
+fn tempest_sim(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_tempest-sim"))
         .args(args)
         .output()
         .unwrap()
@@ -23,8 +23,7 @@ fn runs_a_scenario_records_it_and_prints_a_summary() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("results.duckdb");
     let digests = dir.path().join("digests.tsv");
-    let output = tempest(&[
-        "sim",
+    let output = tempest_sim(&[
         "run",
         &example("two-peers.yaml"),
         "--seeds",
@@ -60,15 +59,8 @@ fn runs_a_scenario_records_it_and_prints_a_summary() {
 #[test]
 fn no_db_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_tempest"))
-        .args([
-            "sim",
-            "run",
-            &example("two-peers.yaml"),
-            "--seed",
-            "3",
-            "--no-db",
-        ])
+    let output = Command::new(env!("CARGO_BIN_EXE_tempest-sim"))
+        .args(["run", &example("two-peers.yaml"), "--seed", "3", "--no-db"])
         .current_dir(dir.path())
         .output()
         .unwrap();
@@ -84,8 +76,7 @@ fn compares_variants_with_the_chosen_reference() {
     let vary = "experiment: { vary: { requests.chunks: [16, 1] } }\n";
     std::fs::write(&path, text + vary).unwrap();
     let run = |reference: &str| {
-        tempest(&[
-            "sim",
+        tempest_sim(&[
             "run",
             path.to_str().unwrap(),
             "--no-db",
@@ -128,7 +119,7 @@ fn a_bad_scenario_names_the_field() {
         "name: bad\nbundle: { files: [{ size: 1MiB }] }\npeers: [{ class: a, count: lots }]\n",
     )
     .unwrap();
-    let output = tempest(&["sim", "run", path.to_str().unwrap()]);
+    let output = tempest_sim(&["run", path.to_str().unwrap()]);
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
@@ -148,7 +139,6 @@ fn baselines_are_saved_then_checked() {
     std::fs::copy(example("two-peers.yaml"), &scenario).unwrap();
     let baseline = |extra: &[&str]| {
         let mut args = vec![
-            "sim",
             "baseline",
             "--scenarios",
             scenarios.to_str().unwrap(),
@@ -156,7 +146,7 @@ fn baselines_are_saved_then_checked() {
             baselines.to_str().unwrap(),
         ];
         args.extend(extra);
-        tempest(&args)
+        tempest_sim(&args)
     };
 
     assert!(baseline(&["--update"]).status.success());

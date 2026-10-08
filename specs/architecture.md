@@ -23,7 +23,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 ```
 
 - **One brain, two drivers (D-068).** All protocol and strategy logic lives in `core` as sans-IO state machines. The engine drives them with real QUIC and real time. The simulator drives them with a simulated network and simulated time.
-- **Engine + API (D-079, D-080).** One background engine per machine. The web UI, TUI and CLI are clients of its HTTP + JSON API and its live event stream. Everything ships as one `tempest` binary with subcommands. The TUI and CLI can start an embedded engine when none is running.
+- **Engine + API (D-079, D-080).** One background engine per machine. The web UI, TUI and CLI are clients of its HTTP + JSON API and its live event stream. The client ships as one `tempest` binary with subcommands; the simulator is a second binary, `tempest-sim` (D-214). The TUI and CLI can start an embedded engine when none is running.
 - **Actors (D-085).** Inside the engine, each long-lived thing (a bundle, a connection, the disk writer) is a tokio task that owns its state and talks through bounded channels. Nothing is shared behind locks.
 
 ## Crates (D-083)
@@ -41,12 +41,14 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `ui-gallery` | A catalog of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
 | `web` | Client web UI | `ui-kit`, `api` |
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
-| `sim-web` | Simulation results UI | `ui-kit`, `sim-api` |
+| `sim-web` | Simulation results UI, served by `tempest-sim web` | `ui-kit`, `sim-api` |
 | `catalog-api` | The tracker catalog API's types and text rules, shared by the tracker, the client and the catalog UI (D-206) | `protocol` |
 | `catalog-web` | Tracker catalog UI (D-210) | `ui-kit`, `catalog-api`, `protocol` |
 | `tracker` | Tracker server: peer-list service, catalog with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `catalog-api`, `net` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
-| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI, the results UI and the tracker with its catalog UI; embeds the web UIs' built files (D-201) | most of the above |
+| `assets` | Serving embedded web UIs' files, and embedding them from build scripts (D-201); shared by both binaries (D-214) | (none) |
+| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the tracker with its catalog UI; embeds the web UIs' built files (D-201) | most of the above, not `sim` |
+| `sim-cli` | The `tempest-sim` binary (package `tempest-sim-cli`): runs scenarios, checks baselines and serves the results UI, which it embeds (D-214) | `sim`, `sim-api`, `assets` |
 
 `protocol` and `core` must never depend on async runtimes, sockets, the clock or global randomness. `protocol` is the code other implementers should be able to read alongside the spec.
 

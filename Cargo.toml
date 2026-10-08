@@ -19,6 +19,7 @@ tempest-sim-api = { path = "crates/sim-api", version = "0.1.0" }
 tempest-catalog-api = { path = "crates/catalog-api", version = "0.1.0" }
 tempest-core = { path = "crates/core", version = "0.1.0" }
 tempest-sim = { path = "crates/sim", version = "0.1.0" }
+tempest-assets = { path = "crates/assets", version = "0.1.0" }
 tempest-net = { path = "crates/net", version = "0.1.0" }
 tempest-tracker = { path = "crates/tracker", version = "0.1.0" }
 tempest-engine = { path = "crates/engine", version = "0.1.0" }
@@ -31,7 +32,7 @@ anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive", "env"] }
 # Bundled so no system DuckDB is needed (D-075); json gives JSON columns and functions.
-# Links the system DuckDB library (see specs/development.md); `tempest-sim/bundled-duckdb` compiles
+# Links the system DuckDB library (see specs/development.md); `tempest-sim-cli/bundled-duckdb` compiles
 # the bundled source instead, for CI and releases.
 duckdb = "1.10506"
 # Seeds the tracker's peer sampler. Through rand it would give tempest-core OS randomness too.

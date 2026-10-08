@@ -4,10 +4,10 @@ How to work on Tempest efficiently, for people and coding agents. These guidelin
 
 ## Setup
 
-The simulator stores results in DuckDB. Development builds link the system DuckDB library instead of compiling DuckDB's C++ source, which took minutes on every cold build:
+The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development builds link the system DuckDB library instead of compiling DuckDB's C++ source, which took minutes on every cold build:
 
 - **macOS:** `brew install duckdb`. `.cargo/config.toml` points the build at Homebrew's copy.
-- **Elsewhere:** install DuckDB's library and set `DUCKDB_LIB_DIR`, or build with `--features tempest-sim/bundled-duckdb` to compile it from source. CI and release builds use that feature.
+- **Elsewhere:** install DuckDB's library and set `DUCKDB_LIB_DIR`, or build with `--features tempest-sim/bundled-duckdb` to compile it from source. CI and release builds use that feature. The `tempest` binary doesn't use DuckDB.
 
 ## Iterating
 

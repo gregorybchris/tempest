@@ -1,6 +1,5 @@
 //! The `tempest` binary.
 
-mod assets;
 mod catalog;
 mod daemon;
 mod engine;
@@ -10,8 +9,6 @@ mod peer;
 mod progress;
 mod relay;
 mod share;
-mod sim;
-mod sim_web;
 mod tracker;
 mod transfers;
 mod tui;
@@ -53,9 +50,9 @@ enum Command {
     /// Run the engine, which does every transfer and serves the API that the CLI and UIs use,
     /// and the web UI.
     Daemon(daemon::DaemonArgs),
-    /// Simulate swarms.
-    #[command(subcommand)]
-    Sim(sim::SimCommand),
+    /// Moved to the `tempest-sim` binary (D-214).
+    #[command(hide = true)]
+    Sim(SimArgs),
     /// Sign in to trackers' catalogs and list transfers there.
     #[command(subcommand)]
     Catalog(catalog::CatalogCommand),
@@ -63,6 +60,13 @@ enum Command {
     Tracker(tracker::TrackerArgs),
     /// Run a relay, which lends public addresses to peers behind routers.
     Relay(relay::RelayArgs),
+}
+
+/// What `tempest sim` was given; it only points to `tempest-sim`.
+#[derive(Debug, clap::Args)]
+struct SimArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+    _args: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -77,7 +81,9 @@ fn main() -> ExitCode {
         Command::Tui(args) => tui::tui(args),
         Command::Web(args) => web::web(args),
         Command::Daemon(args) => daemon::daemon(args),
-        Command::Sim(command) => sim::sim(command),
+        Command::Sim(_) => Err(anyhow::anyhow!(
+            "the simulator is now its own program: run `tempest-sim` with the same arguments"
+        )),
         Command::Catalog(command) => catalog::catalog(command),
         Command::Tracker(args) => tracker::tracker(args),
         Command::Relay(args) => relay::relay(args),

@@ -1,6 +1,6 @@
 //! Experiments checked against the golden baselines (D-077, D-171): an experiment whose
 //! scenario has a baseline's name is compared with it on the seeds both have, as
-//! `tempest sim baseline` would.
+//! `tempest-sim baseline` would.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -100,7 +100,7 @@ fn report(
             .iter()
             .map(|m| (m.seed, baseline::Metrics::from(&m.metrics)))
             .collect();
-        // As `tempest sim baseline` does: a quick check's few seeds by their means, more seed
+        // As `tempest-sim baseline` does: a quick check's few seeds by their means, more seed
         // by seed.
         let (method, how) = if current.len() as u32 <= QUICK_SEEDS {
             (Method::Mean, baseline::Method::Mean)

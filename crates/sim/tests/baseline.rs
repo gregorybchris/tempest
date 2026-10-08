@@ -1,6 +1,6 @@
 //! The golden scenarios against their saved baselines (D-077, D-132), in quick mode.
 //!
-//! `tempest sim baseline` runs the same check, and with `--long` over every saved seed; after a
+//! `tempest-sim baseline` runs the same check, and with `--long` over every saved seed; after a
 //! deliberate change, `--update` rewrites the baselines.
 
 use std::num::NonZeroUsize;
@@ -67,7 +67,7 @@ fn golden_scenarios_meet_their_baselines() {
             println!("{name}:\n{report}");
             assert!(!report.contains("REGRESSED"), "{name} regressed:\n{report}");
             if report.contains("improved") {
-                println!("Run `tempest sim baseline --update` to save the improvements.");
+                println!("Run `tempest-sim baseline --update` to save the improvements.");
             }
         }
     });

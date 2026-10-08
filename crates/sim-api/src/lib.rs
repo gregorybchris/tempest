@@ -1,4 +1,4 @@
-//! The simulation results API (`specs/simulation.md`): what `tempest sim web` serves from the
+//! The simulation results API (`specs/simulation.md`): what `tempest-sim web` serves from the
 //! results database, and the queries that select it.
 //!
 //! The server and the results UI both use these types, so they build for WebAssembly as well

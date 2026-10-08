@@ -16,14 +16,13 @@ license = false
 eula = false
 
 [dependencies]
+tempest-assets.workspace = true
 tempest-catalog-api.workspace = true
 tempest-core.workspace = true
 tempest-engine.workspace = true
 tempest-net.workspace = true
 tempest-protocol.workspace = true
 tempest-relay.workspace = true
-tempest-sim.workspace = true
-tempest-sim-api.workspace = true
 tempest-tracker.workspace = true
 tempest-tui.workspace = true
 
@@ -33,6 +32,9 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+
+[build-dependencies]
+tempest-assets.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

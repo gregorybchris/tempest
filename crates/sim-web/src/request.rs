@@ -24,7 +24,7 @@ impl fmt::Display for RequestError {
         match self {
             Self::Unreachable => write!(
                 f,
-                "Couldn't reach the results server. Is tempest sim web still running?"
+                "Couldn't reach the results server. Is tempest-sim web still running?"
             ),
             Self::Refused(error) => write!(f, "{}", sentence(&error.message)),
             Self::Unexpected(why) => write!(f, "The server answered oddly: {why}"),

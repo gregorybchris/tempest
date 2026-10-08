@@ -35,7 +35,7 @@ brew install gregorybchris/tap/tempest
 
 Windows users can instead download the `.msi` from the release page.
 
-To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`.
+The simulator is a separate program, `tempest-sim-cli`, installed the same way. To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest` (and `--path crates/sim-cli --features bundled-duckdb` for the simulator).
 
 ## Usage
 
@@ -59,8 +59,8 @@ tempest list             # shows its transfers; start, stop and remove control t
 tempest tui              # the terminal UI, on the daemon or an engine of its own
 tempest web              # the web UI in your browser, likewise
 
-tempest sim run crates/sim/scenarios/flash-crowd.yaml   # simulates a swarm, into tempest-sim.duckdb
-tempest sim web                                         # browses and compares the results
+tempest-sim run crates/sim/scenarios/flash-crowd.yaml   # simulates a swarm, into tempest-sim.duckdb
+tempest-sim web                                         # browses and compares the results
 ```
 
 Building the web UIs needs [trunk](https://trunkrs.dev); a binary built without them serves a page that says so. In the TUI and the web UI, `1`-`4` switch between Transfers, Share, Catalog and Settings, `:` finds any command (TUI), and `?` lists the keys of the screen you are on.

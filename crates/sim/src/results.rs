@@ -30,7 +30,7 @@ pub const SCHEMA_VERSION: i32 = 2;
 pub const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
--- One per `tempest sim run`: a scenario and the variants and seeds run in it.
+-- One per `tempest-sim run`: a scenario and the variants and seeds run in it.
 CREATE TABLE IF NOT EXISTS experiments (
     experiment_id BIGINT PRIMARY KEY,
     name VARCHAR NOT NULL,

@@ -4,7 +4,7 @@
 //! with its types (`tempest_sim_api`).
 //!
 //! Comparisons use [`crate::stats`] and baseline checks [`crate::baseline`], on the metrics
-//! the `runs` table holds, so they agree with what `tempest sim run` and `tempest sim baseline`
+//! the `runs` table holds, so they agree with what `tempest-sim run` and `tempest-sim baseline`
 //! print.
 
 mod compare;

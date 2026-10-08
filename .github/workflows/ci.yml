@@ -31,22 +31,22 @@ jobs:
       - uses: actions/checkout@v5
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p tempest --features tempest-sim/bundled-duckdb
+      - run: cargo build --release -p tempest-sim-cli --features bundled-duckdb
       # The same seed must replay the same event log (D-068), in a fresh process and whatever
       # the number of threads.
       - name: Determinism check
         run: |
           for path in crates/sim/scenarios/{swarm-1000,home-routers}.yaml crates/sim/scenarios/golden/*.yaml; do
             scenario=$(basename "$path" .yaml)
-            target/release/tempest sim run "$path" --no-db --digests "$scenario-1.tsv"
-            target/release/tempest sim run "$path" --no-db --digests "$scenario-2.tsv" --jobs 1
+            target/release/tempest-sim run "$path" --no-db --digests "$scenario-1.tsv"
+            target/release/tempest-sim run "$path" --no-db --digests "$scenario-2.tsv" --jobs 1
             cmp "$scenario-1.tsv" "$scenario-2.tsv"
             cat "$scenario-1.tsv"
           done
       # Every saved seed of every golden scenario, compared seed by seed (D-171). The check job
       # runs the quick version.
       - name: Golden baselines, long
-        run: target/release/tempest sim baseline --long
+        run: target/release/tempest-sim baseline --long
       # The slow tests, among them the 1,000-peer swarm into DuckDB and the validation scenarios.
       - name: Slow simulation tests
         run: cargo test --release -p tempest-sim --features tempest-sim/bundled-duckdb -- --include-ignored
@@ -79,12 +79,13 @@ jobs:
       - name: Build the catalog UI
         working-directory: crates/catalog-web
         run: trunk build --release --cargo-profile web
-      - run: cargo test -p tempest --test web --test sim_web --features tempest-sim/bundled-duckdb
+      - run: cargo test -p tempest --test web
+      - run: cargo test -p tempest-sim-cli --test sim_web --features bundled-duckdb
       # The catalog UI in headless Chrome: search, filters and sign-in.
       - name: Catalog browser test
         env:
           CHROMEDRIVER: ${{ env.CHROMEWEBDRIVER }}/chromedriver
-        run: cargo test -p tempest --test catalog_web --features tempest-sim/bundled-duckdb -- --ignored --nocapture
+        run: cargo test -p tempest --test catalog_web -- --ignored --nocapture
       # The 1,536-cell live view benchmark (specs/interfaces.md), in headless Chrome.
       - name: Live view benchmark
         env:
@@ -105,7 +106,7 @@ jobs:
       - uses: actions/checkout@v5
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p tempest --all-targets --features tempest-sim/bundled-duckdb -- -D warnings
+      - run: cargo clippy -p tempest --all-targets -- -D warnings
       - run: cargo test -p tempest-net -p tempest-engine
 
   # The release configuration and its generated workflow agree, and dist can plan a release.

@@ -1,4 +1,4 @@
-//! `tempest sim web`: serves the results API over a database `tempest sim run` recorded, and
+//! `tempest-sim web`: serves the results API over a database `tempest-sim run` recorded, and
 //! the results UI's page, whether its files were built into the binary or not.
 
 #![cfg(unix)]
@@ -43,9 +43,9 @@ fn serves_the_api_and_the_page() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("results.duckdb");
     let scenario = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sim/scenarios/two-peers.yaml");
-    let tempest = env!("CARGO_BIN_EXE_tempest");
+    let tempest = env!("CARGO_BIN_EXE_tempest-sim");
     let recorded = Command::new(tempest)
-        .args(["sim", "run", "--seeds", "2", "--db"])
+        .args(["run", "--seeds", "2", "--db"])
         .arg(&db)
         .arg(&scenario)
         .output()
@@ -53,7 +53,7 @@ fn serves_the_api_and_the_page() {
     assert!(recorded.status.success(), "{recorded:?}");
 
     let mut child = Command::new(tempest)
-        .args(["sim", "web", "--no-open", "--listen", "127.0.0.1:0", "--db"])
+        .args(["web", "--no-open", "--listen", "127.0.0.1:0", "--db"])
         .arg(&db)
         .arg("--baselines")
         .arg(dir.path().join("none"))

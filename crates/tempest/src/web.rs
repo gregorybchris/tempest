@@ -5,10 +5,10 @@ use anyhow::{Context, Result};
 use axum::Router;
 use serde_json::Value;
 
-use crate::assets::{self, show};
 use crate::daemon;
 use crate::engine::{EngineArgs, Target};
 use crate::handoff::Daemon;
+use tempest_assets::{self as assets, show};
 
 /// The UI's files, by their path in the page, as `crates/web/dist` held them at build time.
 static ASSETS: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));

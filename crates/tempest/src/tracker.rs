@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use tempest_assets as assets;
 use tempest_catalog_api::Category;
 use tempest_net::FetchLimits;
 use tempest_protocol::{BundleId, PeerId, RelayIdentity};
@@ -18,7 +19,7 @@ use tempest_tracker::{
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use crate::{assets, relay};
+use crate::relay;
 
 /// The catalog UI's files, by their path in the page, as `crates/catalog-web/dist` held them at
 /// build time (D-201).

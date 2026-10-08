@@ -59,7 +59,7 @@ pub fn ExperimentsPage() -> impl IntoView {
         if list.is_empty() {
             let text = match query.with_untracked(|q| q.search.is_empty()) {
                 true => {
-                    "Record one with tempest sim run, such as: tempest sim run crates/sim/scenarios/flash-crowd.yaml. It appears here as soon as it finishes."
+                    "Record one with tempest-sim run, such as: tempest-sim run crates/sim/scenarios/flash-crowd.yaml. It appears here as soon as it finishes."
                 }
                 false => {
                     "No experiment's name, description, scenario file or commit contains that."
@@ -96,7 +96,7 @@ pub fn ExperimentsPage() -> impl IntoView {
         <section class="page">
             <header class="page__head">
                 <h1 class="page__title glow">"Experiments"</h1>
-                <p class="dim">"Each "<code>"tempest sim run"</code>" of a scenario: its variants, run with the same seeds so they compare fairly."</p>
+                <p class="dim">"Each "<code>"tempest-sim run"</code>" of a scenario: its variants, run with the same seeds so they compare fairly."</p>
             </header>
             <div class="toolbar">
                 <SearchBox value=search placeholder="search name, file or commit…" node_ref=ctx.search />

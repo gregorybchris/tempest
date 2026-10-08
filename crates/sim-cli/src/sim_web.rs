@@ -1,7 +1,7 @@
-//! `tempest sim web`: the simulation results UI and the API it reads, over the DuckDB results
+//! `tempest-sim web`: the simulation results UI and the API it reads, over the DuckDB results
 //! database (D-075). The UI's files are embedded at build time when they were built (D-201).
 //!
-//! Each request opens the database read-only and closes it again, so `tempest sim run` can add
+//! Each request opens the database read-only and closes it again, so `tempest-sim run` can add
 //! experiments while the UI is open; while a run is recording, requests answer that the
 //! database is busy.
 
@@ -22,7 +22,7 @@ use tempest_sim::results::{self, Database};
 use tempest_sim_api::query::{CompareQuery, ExperimentQuery, QueryError, RunQuery};
 use tempest_sim_api::{ApiError, PREFIX};
 
-use crate::assets::{self, show};
+use tempest_assets::{self as assets, show};
 
 /// The UI's files, by their path in the page, as `crates/sim-web/dist` held them at build time.
 static ASSETS: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/sim_web_assets.rs"));
@@ -47,7 +47,7 @@ then build <code>tempest</code> again. Meanwhile, the API answers under <code>/v
 
 #[derive(Debug, clap::Args)]
 pub struct SimWebArgs {
-    /// The DuckDB results database that `tempest sim run` writes.
+    /// The DuckDB results database that `tempest-sim run` writes.
     #[arg(long, value_name = "PATH", default_value = "tempest-sim.duckdb")]
     db: PathBuf,
     /// The directory of golden baselines to check experiments against.
@@ -61,7 +61,7 @@ pub struct SimWebArgs {
     no_open: bool,
 }
 
-/// `tempest sim web`: serves the results UI and its API until Ctrl-C.
+/// `tempest-sim web`: serves the results UI and its API until Ctrl-C.
 pub fn web(args: SimWebArgs) -> Result<()> {
     if ASSETS.is_empty() {
         eprintln!(
@@ -70,7 +70,7 @@ pub fn web(args: SimWebArgs) -> Result<()> {
     }
     if !args.db.exists() {
         eprintln!(
-            "note: there is no results database at {} yet; `tempest sim run` creates it",
+            "note: there is no results database at {} yet; `tempest-sim run` creates it",
             args.db.display()
         );
     }
@@ -212,7 +212,7 @@ fn unavailable(sources: &Sources, e: results::Error) -> Failure {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
             "no_database",
-            format!("there is no results database at {path} yet; `tempest sim run` records one"),
+            format!("there is no results database at {path} yet; `tempest-sim run` records one"),
         );
     }
     match e {
@@ -226,7 +226,7 @@ fn unavailable(sources: &Sources, e: results::Error) -> Failure {
             StatusCode::SERVICE_UNAVAILABLE,
             "busy",
             format!(
-                "{path} is busy, probably recording a `tempest sim run`; try again when it ends"
+                "{path} is busy, probably recording a `tempest-sim run`; try again when it ends"
             ),
         ),
         other => error(

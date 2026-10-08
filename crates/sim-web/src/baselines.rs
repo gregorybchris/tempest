@@ -22,7 +22,7 @@ pub fn BaselinesPage() -> impl IntoView {
             return view! {
                 <Empty
                     title="No golden baselines"
-                    text="The results server reads them from crates/sim/baselines: run tempest sim web from the repository's root, or point --baselines at them.".to_owned()
+                    text="The results server reads them from crates/sim/baselines: run tempest-sim web from the repository's root, or point --baselines at them.".to_owned()
                 />
             }
             .into_any();
@@ -36,7 +36,7 @@ pub fn BaselinesPage() -> impl IntoView {
         <section class="page">
             <header class="page__head">
                 <h1 class="page__title glow">"Golden baselines"</h1>
-                <p class="dim">"Each golden scenario's saved metrics. An experiment of the same scenario is checked against them on the seeds both have, as "<code>"tempest sim baseline"</code>" checks."</p>
+                <p class="dim">"Each golden scenario's saved metrics. An experiment of the same scenario is checked against them on the seeds both have, as "<code>"tempest-sim baseline"</code>" checks."</p>
             </header>
             <div class="grid">{body}</div>
         </section>
@@ -49,7 +49,7 @@ fn Golden(b: BaselineInfo) -> impl IntoView {
     let title = format!("{} · {}", b.scenario, plural(b.seeds.len() as u64, "seed"));
     if b.experiments.is_empty() {
         let hint = format!(
-            "No experiment of this scenario yet. Record one with tempest sim run crates/sim/scenarios/golden/{}.yaml.",
+            "No experiment of this scenario yet. Record one with tempest-sim run crates/sim/scenarios/golden/{}.yaml.",
             b.scenario
         );
         return view! {

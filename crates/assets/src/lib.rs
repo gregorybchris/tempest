@@ -1,5 +1,7 @@
 //! Serving a web UI's files, embedded at build time when they were built (D-201), and opening
-//! it in a browser.
+//! it in a browser. Shared by the `tempest` and `tempest-sim` binaries.
+
+pub mod build;
 
 use axum::Router;
 use axum::http::{HeaderValue, header};

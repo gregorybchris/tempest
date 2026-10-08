@@ -100,6 +100,25 @@ pub fn ThemePicker(
     }
 }
 
+/// The app bar's button that steps to the next theme, as `T` does.
+#[component]
+pub fn ThemeButton(
+    /// The theme shown, which the button steps.
+    theme: RwSignal<Theme>,
+) -> impl IntoView {
+    view! {
+        <button
+            class="theme-button"
+            type="button"
+            title="Next theme (T)"
+            aria-label=move || format!("Theme: {}. Switch to the next.", theme.get().name())
+            on:click=move |_| theme.update(|t| *t = t.next())
+        >
+            "◐"
+        </button>
+    }
+}
+
 /// `"true"` or `"false"`, for ARIA attributes that need the words.
 pub fn bool_attr(value: bool) -> &'static str {
     if value { "true" } else { "false" }

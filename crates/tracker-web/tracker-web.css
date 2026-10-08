@@ -123,16 +123,6 @@ a.btn {
   box-shadow: 0 0 var(--glow-size) var(--up);
 }
 
-.theme-button {
-  color: var(--dim);
-  font-size: var(--text-lg);
-  padding: 2px 6px;
-}
-
-.theme-button:hover {
-  color: var(--fg);
-}
-
 /* ---------- Pages ---------- */
 
 .page {
@@ -962,13 +952,6 @@ a.tag:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-2);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .bigsearch__busy--on,
-  .signin__pulse {
-    animation: none;
-  }
 }
 
 /* ---------- Narrow windows and phones ---------- */

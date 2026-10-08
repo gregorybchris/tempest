@@ -13,7 +13,7 @@ use tempest_api::prefs;
 use tempest_api::requests::QueueStep;
 use tempest_protocol::BundleId;
 use tempest_ui_kit::components::*;
-use tempest_ui_kit::theme::apply_look;
+use tempest_ui_kit::theme::{ThemeButton, apply_look};
 use tempest_ui_kit::{Look, Theme};
 use wasm_bindgen::JsCast;
 
@@ -115,15 +115,7 @@ fn Shell() -> impl IntoView {
                 <div class="appbar__spacer"></div>
                 <Meters />
                 <SignOut />
-                <button
-                    class="theme-button"
-                    type="button"
-                    title="Next theme (T)"
-                    aria-label=move || format!("Theme: {}. Switch to the next.", ui.theme.get().name())
-                    on:click=move |_| ui.theme.update(|t| *t = t.next())
-                >
-                    "◐"
-                </button>
+                <ThemeButton theme=ui.theme />
             </header>
             <LinkBanner />
             <main class="main">{area}</main>

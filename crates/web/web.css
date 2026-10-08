@@ -12,16 +12,6 @@
   z-index: 10;
 }
 
-.theme-button {
-  color: var(--dim);
-  font-size: var(--text-lg);
-  padding: 2px 6px;
-}
-
-.theme-button:hover {
-  color: var(--fg);
-}
-
 .main {
   flex: 1;
   min-width: 0;
@@ -707,15 +697,10 @@
   background: var(--bg);
 }
 
-/* Phones: no meters or key hints, and room for the bottom navigation (D-136). */
+/* Phones: no meters (the kit makes room for the bottom navigation, D-136). */
 @media (max-width: 640px) {
-  .meters,
-  .hints {
+  .meters {
     display: none;
-  }
-
-  .app {
-    padding-bottom: 52px;
   }
 
   .toolbar .search {

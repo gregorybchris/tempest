@@ -57,7 +57,7 @@ pub struct RelayConfig {
     pub allowlist: Option<HashSet<PeerId>>,
     /// The most peers registered at once, counting the sockets kept for those that left.
     pub max_registrations: usize,
-    /// The most peers registered at once from one IP address.
+    /// The most peers registered at once from one IP address, or one IPv6 /64.
     pub max_per_ip: usize,
     /// The most bytes per second forwarded for each registered peer in each direction, or
     /// `None` for no limit. Datagrams over the limit are dropped.

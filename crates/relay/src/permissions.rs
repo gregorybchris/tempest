@@ -91,7 +91,7 @@ impl Permissions {
 
 /// The source an address counts against: its IPv4 address, or its IPv6 /64, which one host
 /// usually controls whole.
-fn source(ip: IpAddr) -> IpAddr {
+pub(crate) fn source(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => IpAddr::V6((u128::from(v6) & !((1u128 << 64) - 1)).into()),
         v4 => v4,

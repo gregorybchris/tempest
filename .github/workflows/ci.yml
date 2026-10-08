@@ -66,7 +66,7 @@ jobs:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }},trunk
       # The UI kit's and the web UIs' own tests use native-only crates, and run in the check job;
       # the gallery's are the browser benchmark.
-      - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-kit -p tempest-web -p tempest-sim-web -- -D warnings
+      - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-kit -p tempest-web -p tempest-sim-web -p tempest-catalog-web -- -D warnings
       - run: cargo clippy --target wasm32-unknown-unknown -p tempest-ui-gallery --all-targets -- -D warnings
       # The web UIs as releases embed them (D-201), then the binary serving them.
       - name: Build the web UI
@@ -75,7 +75,15 @@ jobs:
       - name: Build the simulation results UI
         working-directory: crates/sim-web
         run: trunk build --release --cargo-profile web
+      - name: Build the catalog UI
+        working-directory: crates/catalog-web
+        run: trunk build --release --cargo-profile web
       - run: cargo test -p tempest --test web --test sim_web
+      # The catalog UI in headless Chrome: search, filters and sign-in.
+      - name: Catalog browser test
+        env:
+          CHROMEDRIVER: ${{ env.CHROMEWEBDRIVER }}/chromedriver
+        run: cargo test -p tempest --test catalog_web -- --nocapture
       # The 1,536-cell live view benchmark (specs/interfaces.md), in headless Chrome.
       - name: Live view benchmark
         env:

@@ -3345,3 +3345,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Catalog store migration 2 counts downloads per bundle and day. A `completed` announce counts if the peer wasn't already a live complete peer, and only for bundles with a listing. Listings show their total downloads.
 
 **Rationale:** Rebuilding is cheap at catalog sizes and keeps the index from drifting from SQLite after a crash, so SQLite stays the one source of truth. Per-word queries give typo tolerance with exact matches still ranking first, and prefix matching makes search-as-you-type work. Swarm counts change with every announce, so they are read live rather than indexed. Logarithms keep one huge swarm or vote count from burying better text matches. Counting a peer's transition to complete stops repeated announces from inflating downloads, though new peer IDs still can; per-IP or per-account limits are still open.
+
+---
+
+## D-210: The catalog's web UI
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-118 and `interfaces.md` ask for a catalog UI in the client web UI's framework and quality bar, served by the tracker, with search, facets, sorting, listing pages, votes, comments, publishing and sign-in with a Tempest key (D-128). How it is served, how it routes, pages and signs in, and how it is tested in a browser were open.
+
+**Options:** **Serving:** a separate static site; embedded in the binary like the other UIs (D-201) and merged into the tracker's router when it runs a catalog (chosen). **Routes:** paths, which need the server to answer each with the page; the address's `#`, as the other UIs (chosen), with the API's own `ListingQuery` string after `#/?`. **More results:** infinite scroll; numbered pages (chosen). **Sign-in:** a page that only shows the code; the code with the exact `tempest catalog sign-in` command, polling for the session (chosen). **Browser test:** `wasm-bindgen-test`, which can't reach a tracker on another origin; Playwright, which brings Node into CI; WebDriver against ChromeDriver from a Rust test (chosen).
+
+**Decision:**
+
+- A crate, `catalog-web`, built by trunk into `crates/catalog-web/dist` and embedded in `tempest`. `tempest tracker --catalog` serves it at `/` beside the API; without the files, `/` says how to build them.
+- Views: browsing (`#/?q=…&category=…&tag=…&sort=…&offset=…`), a listing, its edit form, sign-in and the account with its listings. The search runs as it is typed, a moment after the last key, replacing the history entry; an answer that arrives after a newer request was sent is dropped. Facets and the old results stay while a new answer loads, dimmed.
+- The sign-in view asks for a challenge, shows the code and the command that signs it with the tracker's origin (and an invite when the catalog requires one), and polls every two seconds until the session's cookie is set or the code expires; then it returns to where the user was.
+- Keys come from one table, scoped by view: `/` search, `j`/`k`/`enter` move and open, `[`/`]` pages, `s` sort, `+`/`-` vote, `c` comment, `e` edit, `a` account, `T` theme, `esc` back. The theme follows the browser's light or dark preference until one is chosen.
+- `crates/tempest/tests/catalog_web.rs` drives headless Chrome through ChromeDriver: search with a typo, category and tag facets, the keyboard, and sign-in with `tempest catalog sign-in`. It passes with a note when the UI isn't built or `CHROMEDRIVER` isn't set; CI's web job sets both.
+
+**Rationale:** Embedding keeps the one-binary promise, and hash routes need nothing from the tracker but `/`. Numbered pages give every result a link and work with `[`/`]`. Showing the command, with the origin the signer must use, turns a code into one paste. WebDriver needs no new dependencies or toolchains, and CI's runners already have ChromeDriver.

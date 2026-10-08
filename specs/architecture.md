@@ -43,9 +43,10 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
 | `sim-web` | Simulation results UI | `ui-kit`, `sim-api` |
 | `catalog-api` | The tracker catalog API's types and text rules, shared by the tracker, the client and the catalog UI (D-206) | `protocol` |
-| `tracker` | Tracker server: peer-list service, catalog with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `catalog-api`, `net`, `ui-kit` |
+| `catalog-web` | Tracker catalog UI (D-210) | `ui-kit`, `catalog-api`, `protocol` |
+| `tracker` | Tracker server: peer-list service, catalog with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `catalog-api`, `net` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
-| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the results UI; embeds the web UIs' built files (D-201) | most of the above |
+| `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI, the results UI and the tracker with its catalog UI; embeds the web UIs' built files (D-201) | most of the above |
 
 `protocol` and `core` must never depend on async runtimes, sockets, the clock or global randomness. `protocol` is the code other implementers should be able to read alongside the spec.
 

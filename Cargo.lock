@@ -4775,6 +4775,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-catalog-web"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "leptos",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempest-catalog-api",
+ "tempest-protocol",
+ "tempest-ui-kit",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "tempest-core"
 version = "0.1.0"
 dependencies = [

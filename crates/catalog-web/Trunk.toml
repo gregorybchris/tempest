@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+
+[serve]
+port = 8094
+
+# `trunk serve` forwards the catalog API to a running `tempest tracker --catalog`.
+[[proxy]]
+backend = "http://127.0.0.1:4777/catalog/v1"

@@ -38,6 +38,7 @@ pub struct Tracker {
     catalog: Option<Arc<Mutex<Catalog>>>,
     fetcher: FetcherConfig,
     behind_proxy: bool,
+    pages: Option<Router>,
 }
 
 impl Tracker {
@@ -49,6 +50,7 @@ impl Tracker {
             catalog: None,
             fetcher: FetcherConfig::default(),
             behind_proxy: false,
+            pages: None,
         })
     }
 
@@ -63,6 +65,13 @@ impl Tracker {
     /// How a tracker with a catalog fetches pending listings' manifests.
     pub fn fetcher(mut self, config: FetcherConfig) -> Self {
         self.fetcher = config;
+        self
+    }
+
+    /// Routes to serve beside the API, such as the catalog's web UI. They must not overlap the
+    /// API's paths; requests that match neither get the API's JSON 404.
+    pub fn with_pages(mut self, pages: Router) -> Self {
+        self.pages = Some(pages);
         self
     }
 
@@ -83,10 +92,14 @@ impl Tracker {
         if self.catalog.is_some() {
             router = router.merge(catalog::routes::router());
         }
-        router
+        let router = router
             .fallback(not_found)
             .method_not_allowed_fallback(method_not_allowed)
-            .with_state(self.clone())
+            .with_state(self.clone());
+        match &self.pages {
+            Some(pages) => router.merge(pages.clone()),
+            None => router,
+        }
     }
 
     /// Serves the tracker on `listener` until `shutdown` completes, sweeping out silent peers

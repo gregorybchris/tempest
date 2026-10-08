@@ -16,7 +16,29 @@ use tempest_tracker::{
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use crate::relay;
+use crate::{assets, relay};
+
+/// The catalog UI's files, by their path in the page, as `crates/catalog-web/dist` held them at
+/// build time (D-201).
+static CATALOG_UI: assets::Assets = include!(concat!(env!("OUT_DIR"), "/catalog_web_assets.rs"));
+
+/// What `/` shows when the binary was built without the catalog UI.
+const CATALOG_UI_NOT_BUILT: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tempest catalog</title>
+<style>
+  body { background: #020b05; color: #8af2a4; font: 15px/1.6 ui-monospace, monospace; padding: 8vh 6vw; }
+  code { color: #d2ffe0; }
+</style>
+<h1>Tempest catalog</h1>
+<p>The catalog's API is running, but this <code>tempest</code> binary was built without its web UI.</p>
+<p>Build the UI with <code>trunk build --release --cargo-profile web</code> in <code>crates/catalog-web</code>,
+then build <code>tempest</code> again. Meanwhile, the API answers under <code>/catalog/v1</code>, as in
+<code>/catalog/v1/listings</code>.</p>
+</html>
+"#;
 
 #[derive(Debug, clap::Args)]
 #[command(args_conflicts_with_subcommands = true)]
@@ -196,10 +218,14 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
         let mut tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
         if let Some(catalog) = catalog {
-            eprintln!("catalog at http://{address}/catalog/v1/info");
+            eprintln!("catalog at http://{address}/");
+            if CATALOG_UI.is_empty() {
+                eprintln!("note: this binary was built without the catalog UI; the page says how to add it");
+            }
             tracker = tracker
                 .with_catalog(catalog)
-                .fetcher(args.catalog.fetcher());
+                .fetcher(args.catalog.fetcher())
+                .with_pages(assets::router(CATALOG_UI, CATALOG_UI_NOT_BUILT));
         }
         let (stop, stopped) = watch::channel(false);
         tokio::spawn(async move {

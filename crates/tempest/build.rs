@@ -1,6 +1,7 @@
 //! Embeds the web UIs in the binary when they have been built: trunk puts the client's in
-//! `crates/web/dist` and the simulation results UI's in `crates/sim-web/dist` (D-201). Without
-//! them, the binary serves a page that says how to build them.
+//! `crates/web/dist`, the simulation results UI's in `crates/sim-web/dist` and the tracker
+//! catalog's in `crates/catalog-web/dist` (D-201). Without them, the binary serves a page that
+//! says how to build them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 fn main() {
     embed("web", "web_assets.rs");
     embed("sim-web", "sim_web_assets.rs");
+    embed("catalog-web", "catalog_web_assets.rs");
 }
 
 /// Writes `out`, the list of files in the `dist` folder of the crate in `crates/{name}`, for

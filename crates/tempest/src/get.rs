@@ -111,7 +111,7 @@ async fn download(
         .node
         .download(bundle, destination, record.into_iter().collect())
         .await?;
-    let announcers = peer.announce(&trackers, &handle)?;
+    let announcers = peer.announce(&trackers, &[], &handle)?;
     if let Some(lan) = &peer.lan {
         lan.watch(&handle).await;
     }

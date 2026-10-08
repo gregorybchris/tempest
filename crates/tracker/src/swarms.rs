@@ -294,6 +294,26 @@ impl Swarms {
         }
     }
 
+    /// A bundle's live peers at `now`, each with whether it is complete.
+    pub fn peers(&self, now: Instant, bundle: &BundleId) -> Vec<(PeerEntry, bool)> {
+        let Some(swarm) = self.swarms.get(bundle) else {
+            return Vec::new();
+        };
+        swarm
+            .peers
+            .iter()
+            .filter(|(_, listing)| listing.expires > now)
+            .map(|(peer, listing)| {
+                let entry = PeerEntry {
+                    peer: *peer,
+                    addrs: listing.addrs.clone(),
+                    relay: listing.relay,
+                };
+                (entry, listing.complete)
+            })
+            .collect()
+    }
+
     /// Forgets every peer that expired by `now`, and the swarms left empty.
     pub fn sweep(&mut self, now: Instant) {
         let mut forgotten = 0;

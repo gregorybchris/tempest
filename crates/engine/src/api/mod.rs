@@ -87,6 +87,8 @@ pub fn router(engine: Engine, access: Access) -> Router {
         .route(&transfer("/category"), put(set_category))
         .route(&transfer("/settings"), put(set_transfer_settings))
         .route(&transfer("/queue"), post(move_in_queue))
+        .route(&transfer("/publish"), post(publish))
+        .route(&format!("{PREFIX}/catalog/sign-in"), post(catalog_sign_in))
         .route(
             &format!("{PREFIX}/settings"),
             get(settings).patch(change_settings),
@@ -310,6 +312,27 @@ async fn move_in_queue(
 ) -> Result {
     ok(&engine
         .move_in_queue(bundle_id(&id)?, request.to.into())
+        .await?)
+}
+
+async fn publish(
+    State(engine): State<Engine>,
+    Path(id): Path<String>,
+    Json(request): Json<PublishRequest>,
+) -> Result {
+    let invite = request.invite.as_deref();
+    ok(&engine
+        .publish(bundle_id(&id)?, &request.tracker, &request.listing, invite)
+        .await?)
+}
+
+async fn catalog_sign_in(
+    State(engine): State<Engine>,
+    Json(request): Json<CatalogSignInRequest>,
+) -> Result {
+    let invite = request.invite.as_deref();
+    ok(&engine
+        .catalog_sign_in(&request.tracker, &request.code, invite)
         .await?)
 }
 

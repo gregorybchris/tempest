@@ -45,6 +45,8 @@ pub struct EngineConfig {
     pub queue: QueueSettings,
     /// Trackers to announce every transfer to, besides those its link names.
     pub trackers: Vec<String>,
+    /// Trackers whose catalogs list every new share (D-129). Shares announce to them too.
+    pub publish: Vec<String>,
     /// Relays to pick a home relay from (D-029: none by default).
     pub relays: RelaySettings,
     /// Asking the router to forward the peer port.
@@ -587,11 +589,13 @@ impl EngineConfig {
                 ));
             }
         }
-        if let Some(url) = self.trackers.iter().find(|url| !is_http_url(url)) {
-            return Err(invalid(
-                "trackers",
-                format!("{url:?} is not an http:// or https:// URL"),
-            ));
+        for (key, urls) in [("trackers", &self.trackers), ("publish", &self.publish)] {
+            if let Some(url) = urls.iter().find(|url| !is_http_url(url)) {
+                return Err(invalid(
+                    key,
+                    format!("{url:?} is not an http:// or https:// URL"),
+                ));
+            }
         }
         Ok(())
     }
@@ -711,7 +715,7 @@ fn check_sharing(prefix: &str, sharing: &SharingLimits) -> Result<(), ConfigErro
     Ok(())
 }
 
-fn is_http_url(url: &str) -> bool {
+pub(crate) fn is_http_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     ["http://", "https://"].iter().any(|scheme| {
         lower
@@ -776,6 +780,7 @@ data_dir: /var/lib/tempest
 save_folder: /srv/downloads
 queue: { max_active_downloads: null, max_active_uploads: 2 }
 trackers: [https://tracker.example.org]
+publish: [https://catalog.example.org]
 ",
         )
         .unwrap();
@@ -992,6 +997,7 @@ notifications: { command: [sh, -c, "echo done"] }
         assert!(error("data_dir: relative/path").contains("data_dir"));
         assert!(error("queue: { max_active_downloads: 0 }").contains("max_active_downloads"));
         assert!(error("trackers: [ftp://example.org]").contains("trackers"));
+        assert!(error("publish: [tracker.example.org]").contains("publish"));
         assert!(error("limits: { upload: 0 }").contains("limits.upload"));
         assert!(
             error("limits: { alternative: { download: 0 } }")

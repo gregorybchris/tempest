@@ -403,8 +403,9 @@ impl Catalog {
         self.store.set_content(bundle, content)
     }
 
-    /// The bundles whose listings wait for their manifests, oldest first.
-    pub fn pending(&self) -> Result<Vec<BundleId>, StoreError> {
+    /// The bundles whose listings wait for their manifests, with their publishers, oldest
+    /// first.
+    pub fn pending(&self) -> Result<Vec<(BundleId, PeerId)>, StoreError> {
         self.store.pending()
     }
 

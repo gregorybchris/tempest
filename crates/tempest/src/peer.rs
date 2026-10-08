@@ -14,7 +14,7 @@ use tempest_protocol::lan::LAN_PORT;
 use tempest_protocol::{Address, RelayIdentity};
 
 /// How long a tracker request may take.
-const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
+pub const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long to wait for the home relay and port mapping before going on without them.
 const RELAY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -53,6 +53,8 @@ pub struct PeerArgs {
 /// A running node and what it needs to tell others about itself.
 pub struct Peer {
     pub node: Node,
+    /// Its key, which signs catalog sign-ins and listing requests.
+    pub identity: Identity,
     /// The addresses it advertises.
     pub addresses: Vec<Address>,
     /// LAN discovery, unless it is off or could not start.
@@ -62,8 +64,14 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// Starts announcing `handle`'s bundle to each of `trackers`.
-    pub fn announce(&self, trackers: &[String], handle: &BundleHandle) -> Result<Vec<Announcer>> {
+    /// Starts announcing `handle`'s bundle to each of `trackers`, asking those in `publish` to
+    /// list it.
+    pub fn announce(
+        &self,
+        trackers: &[String],
+        publish: &[String],
+        handle: &BundleHandle,
+    ) -> Result<Vec<Announcer>> {
         if trackers.is_empty() {
             return Ok(Vec::new());
         }
@@ -78,10 +86,18 @@ impl Peer {
             ..AnnounceConfig::new(endpoint.peer_id(), port)
         };
         let client = TrackerClient::new(TRACKER_TIMEOUT).context("cannot set up HTTPS")?;
+        let listing = self.identity.listing(&handle.bundle_id());
         let announcers = trackers
             .iter()
             .map(|tracker| {
-                Announcer::spawn(client.clone(), tracker.clone(), config.clone(), handle)
+                let listed = publish.contains(tracker).then_some(listing);
+                Announcer::spawn(
+                    client.clone(),
+                    tracker.clone(),
+                    config.clone(),
+                    handle,
+                    listed,
+                )
             })
             .collect();
         Ok(announcers)
@@ -169,7 +185,7 @@ impl PeerArgs {
             max_open_requests: config.session.upload.max_open_requests,
             ..self.endpoint_config(port)?
         };
-        let endpoint = Endpoint::bind(identity, &endpoint_config)
+        let endpoint = Endpoint::bind(identity.clone(), &endpoint_config)
             .with_context(|| format!("cannot bind UDP port {port}"))?;
         let addresses = if advertise {
             tempest_net::direct_addresses(&endpoint.local_addrs())
@@ -199,6 +215,7 @@ impl PeerArgs {
         };
         Ok(Peer {
             node: Node::start(endpoint, config),
+            identity,
             addresses,
             lan,
             relays_given: !self.relay.is_empty(),

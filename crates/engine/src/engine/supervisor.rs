@@ -1,8 +1,9 @@
 //! A supervisor per running bundle.
 
 use tempest_core::Event;
-use tempest_net::{Announcer, BundleHandle};
+use tempest_net::{AnnounceConfig, Announcer, BundleHandle, TrackerClient};
 use tempest_protocol::BundleId;
+use tempest_protocol::tracker::ListingRequest;
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{mpsc, watch};
 
@@ -13,13 +14,18 @@ async fn stopped(stop: &mut watch::Receiver<bool>) {
     let _ = stop.wait_for(|stop| *stop).await;
 }
 
-/// Owns a running bundle: forwards its decision events, takes checkpoints when asked, stops it
-/// when told, and reports how it ended.
+/// Owns a running bundle: forwards its decision events, takes checkpoints when asked, has
+/// trackers list it when it is published, stops it when told, and reports how it ended.
 pub(super) struct Supervisor {
     pub id: BundleId,
     pub generation: u64,
     pub handle: BundleHandle,
     pub announcers: Vec<Announcer>,
+    /// For announcing to trackers it is published on from now on.
+    pub tracker: TrackerClient,
+    pub announce: AnnounceConfig,
+    /// The bundle's listing request.
+    pub listing: ListingRequest,
     pub internal: mpsc::Sender<Internal>,
 }
 
@@ -28,6 +34,7 @@ impl Supervisor {
         mut self,
         mut stop: watch::Receiver<bool>,
         mut checkpoint: mpsc::Receiver<()>,
+        mut publish: mpsc::UnboundedReceiver<String>,
     ) {
         let mut status = self.handle.status.clone();
         let mut events_open = true;
@@ -39,6 +46,7 @@ impl Supervisor {
                     break;
                 }
                 Some(()) = checkpoint.recv() => self.checkpoint().await,
+                Some(tracker) = publish.recv() => self.publish(tracker),
                 event = self.handle.events.recv(), if events_open => match event {
                     Ok(event) => self.forward(event).await,
                     Err(RecvError::Lagged(missed)) => {
@@ -88,6 +96,20 @@ impl Supervisor {
             missed,
         };
         let _ = self.internal.send(message).await;
+    }
+
+    /// Announces with `listing` to `tracker`, starting to announce there if it didn't.
+    fn publish(&mut self, tracker: String) {
+        match self.announcers.iter().find(|a| a.tracker() == tracker) {
+            Some(announcer) => announcer.set_listing(Some(self.listing)),
+            None => self.announcers.push(Announcer::spawn(
+                self.tracker.clone(),
+                tracker,
+                self.announce.clone(),
+                &self.handle,
+                Some(self.listing),
+            )),
+        }
     }
 
     async fn checkpoint(&self) {

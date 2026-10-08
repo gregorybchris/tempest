@@ -13,14 +13,19 @@
 //! - [`driver`]: a [`Node`] running `tempest-core` sessions over those connections and storage.
 //! - [`limit`]: speed limits for a node and for each bundle.
 //! - [`tracker`]: finding a bundle's peers through trackers.
+//! - [`catalog`]: signing in to trackers' catalogs and listing bundles there.
+//! - [`fetch`]: fetching a manifest from one peer without joining its swarm, as a tracker does
+//!   to list a bundle.
 //! - [`lan`]: finding peers on the local network through multicast.
 //!
 //! The protocol and strategy logic stays in `tempest-core`'s sans-IO state machines (D-068). This
 //! crate moves their messages over real connections.
 
 pub mod addresses;
+pub mod catalog;
 pub mod driver;
 pub mod endpoint;
+pub mod fetch;
 pub mod home;
 pub mod identity;
 pub mod lan;
@@ -40,6 +45,7 @@ pub use driver::{
 pub use endpoint::{
     Connection, DEFAULT_PORT, Endpoint, EndpointConfig, HandshakeError, Incoming, closed_cause,
 };
+pub use fetch::{FetchError, FetchLimits, fetch_manifest};
 pub use home::{HomeRelay, RelayChoice, RelayError, RelayFailure, RelayStatus};
 pub use identity::{Identity, IdentityError};
 pub use lan::{Lan, LanConfig};

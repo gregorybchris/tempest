@@ -1,19 +1,21 @@
 //! `tempest share`: build a bundle's manifest, print its link, and serve it: through the
-//! daemon if one is running, otherwise from here.
+//! daemon if one is running, otherwise from here. With `--publish`, list it on a tracker's
+//! catalog too.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tempest_engine::api::AddRequest;
 use tempest_engine::api::client::ApiClient;
 use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis};
-use tempest_net::{DEFAULT_PORT, Storage, StorageConfig};
-use tempest_protocol::{Link, Manifest};
+use tempest_net::{DEFAULT_PORT, Storage, StorageConfig, TrackerClient};
+use tempest_protocol::{BundleId, Link, Manifest};
 
+use crate::catalog::{ListingArgs, print_listing};
 use crate::engine::{EngineArgs, Target};
-use crate::peer::{Peer, PeerArgs};
+use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
 use crate::progress::{StatusLine, bytes, peers};
 
 #[derive(Debug, clap::Args)]
@@ -40,6 +42,13 @@ pub struct ShareArgs {
     /// `https://tracker.example.org`. Repeat for more. The daemon uses its config's trackers.
     #[arg(long, value_name = "URL")]
     tracker: Vec<String>,
+    /// List the bundle on the catalog of the tracker at this URL, signing in with this
+    /// installation's key. The tracker lists it once it has fetched the manifest from the
+    /// swarm.
+    #[arg(long, value_name = "URL", conflicts_with = "dry_run")]
+    publish: Option<String>,
+    #[command(flatten)]
+    listing: ListingArgs,
     #[arg(long, value_name = "PORT", help = format!(
         "The UDP port to accept peers on, 0 for any [default: {DEFAULT_PORT}]"
     ))]
@@ -51,6 +60,15 @@ pub struct ShareArgs {
 }
 
 impl ShareArgs {
+    /// The trackers to announce to and name in the link: those given, and the one to publish
+    /// on.
+    fn trackers(&self) -> Vec<String> {
+        let mut trackers = self.tracker.clone();
+        let publish = self.publish.iter().filter(|t| !self.tracker.contains(t));
+        trackers.extend(publish.cloned());
+        trackers
+    }
+
     /// Whether to serve from here rather than through a daemon.
     fn standalone(&self) -> bool {
         self.standalone
@@ -62,6 +80,9 @@ impl ShareArgs {
 }
 
 pub fn share(args: ShareArgs) -> Result<()> {
+    if args.publish.is_none() && args.listing.edit() != Default::default() {
+        bail!("--title, --description, --category and --tag describe a listing; add --publish");
+    }
     if !args.dry_run && !args.standalone() {
         let config = args.engine.load()?;
         let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
@@ -81,7 +102,7 @@ pub fn share(args: ShareArgs) -> Result<()> {
 
     let mut link = Link::new(manifest.bundle_id());
     link.name = Some(manifest.name().to_owned());
-    link.trackers = args.tracker.clone();
+    link.trackers = args.trackers();
     if args.dry_run {
         println!("link      {link}");
         return Ok(());
@@ -107,10 +128,38 @@ async fn through_daemon(client: &ApiClient, args: &ShareArgs) -> Result<()> {
     }
     println!("bundle    {}", added.id);
     println!("link      {}", added.link);
+    if let Some(tracker) = &args.publish {
+        let listing = client
+            .publish(added.id, &args.listing.request(tracker))
+            .await
+            .with_context(|| format!("cannot publish on {tracker}"))?;
+        print_listing(tracker, &listing);
+    }
     eprintln!(
         "the daemon at {} is sharing it; `tempest list` shows it, and `tempest remove` stops it",
         client.url()
     );
+    Ok(())
+}
+
+/// Signs `peer`'s key in to `tracker`'s catalog and sets `bundle`'s listing there.
+async fn publish(
+    peer: &Peer,
+    tracker: &str,
+    listing: &ListingArgs,
+    bundle: BundleId,
+) -> Result<()> {
+    let client = TrackerClient::new(TRACKER_TIMEOUT).context("cannot set up HTTPS")?;
+    let invite = listing.invite.as_deref();
+    let session = client
+        .catalog_sign_in(tracker, &peer.identity, invite)
+        .await?;
+    let edited = client
+        .edit_listing(tracker, &session.token, &bundle, &listing.edit())
+        .await;
+    // The session was only for this; it would expire on its own.
+    let _ = client.catalog_sign_out(tracker, &session.token).await;
+    print_listing(tracker, &edited?);
     Ok(())
 }
 
@@ -137,8 +186,16 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
         .await
         .context("cannot open the shared files")?;
     let peer = args.peer.start(args.port.unwrap_or(DEFAULT_PORT), true)?;
+    if let Some(tracker) = &args.publish {
+        let published = publish(&peer, tracker, &args.listing, link.bundle).await;
+        if let Err(error) = published {
+            peer.stop().await;
+            return Err(error.context(format!("cannot publish on {tracker}")));
+        }
+    }
     let mut handle = peer.node.share(storage).await?;
-    let announcers = peer.announce(&args.tracker, &handle)?;
+    let publish: Vec<String> = args.publish.iter().cloned().collect();
+    let announcers = peer.announce(&link.trackers, &publish, &handle)?;
 
     let (relay, mapped) = tokio::join!(peer.home_relay(), peer.port_mapping());
     link.peer = Some(peer.node.endpoint().peer_id());

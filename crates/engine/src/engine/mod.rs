@@ -11,6 +11,9 @@
 //! - deleting a removed transfer's files;
 //! - moving a transfer's files to another folder ("moving").
 //!
+//! Requests to trackers' catalogs, signing in with this peer's key and listing bundles, run on
+//! the handle; only the trackers a transfer is listed on pass through the task.
+//!
 //! Every half second the task reads each running bundle's status, records what changed (the
 //! manifest's arrival, completion, progress, rates, time spent sharing), emits snapshots of
 //! transfers that changed, asks downloads for a checkpoint of their verified chunks every half
@@ -27,11 +30,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use tempest_catalog_api::account::Account;
+use tempest_catalog_api::listing::{Listing, ListingEdit};
 use tempest_core::Event;
 use tempest_net::{
     AnnounceConfig, Checkpoint, DriverError, Endpoint, EndpointConfig, HomeRelay, Identity,
     IdentityError, Inspector, Lan, LanConfig, Node, NodeConfig, PortMapping, PortMappingStatus,
-    RelayStatus, Storage, StorageError, Summary, TrackerClient,
+    RelayStatus, Storage, StorageError, Summary, TrackerClient, TrackerError,
 };
 use tempest_protocol::link::ParseLinkError;
 use tempest_protocol::{Address, BundleId, ChunkLayout, Link, Manifest, PeerId, RangeList};
@@ -126,6 +131,17 @@ pub enum EngineError {
     /// The transfer has no data on disk to check yet.
     #[error("transfer {0} has no data yet: its manifest hasn't arrived")]
     NoData(BundleId),
+    /// A tracker URL is not an `http://` or `https://` URL.
+    #[error("{0:?} is not an http:// or https:// URL")]
+    InvalidTracker(String),
+    /// A request to a tracker failed, such as signing in to its catalog.
+    #[error("tracker {tracker}: {source}")]
+    Tracker {
+        /// The tracker's URL.
+        tracker: String,
+        /// What went wrong.
+        source: TrackerError,
+    },
     /// The engine has shut down.
     #[error("the engine has shut down")]
     Stopped,
@@ -178,6 +194,8 @@ pub struct ShareOptions {
 #[derive(Debug, Clone)]
 pub struct Engine {
     commands: mpsc::Sender<Command>,
+    identity: Identity,
+    tracker: TrackerClient,
     peer_id: PeerId,
     addresses: Vec<Address>,
     home_relay: HomeRelay,
@@ -206,6 +224,7 @@ enum Command {
         Reply<TransferInfo>,
     ),
     Move(BundleId, QueueMove, Reply<Vec<TransferInfo>>),
+    Publish(BundleId, String, Reply<TransferInfo>),
     Categories(oneshot::Sender<BTreeMap<String, PathBuf>>),
     SetCategoryFolder(String, PathBuf, Reply<()>),
     RemoveCategory(String, Reply<()>),
@@ -258,6 +277,7 @@ impl Engine {
         let mut store = Store::open(&data_dir.join("state.db"))?;
         let (config, changes) = apply_saved_changes(&base, &mut store)?;
         let identity = Identity::load_or_create(&data_dir.join("identity.pem"))?;
+        let signer = identity.clone();
         let session = config.session()?;
 
         let endpoint_config = EndpointConfig {
@@ -334,8 +354,9 @@ impl Engine {
             store,
             node,
             lan,
-            tracker,
+            tracker: tracker.clone(),
             announce,
+            identity: signer.clone(),
             peer_id,
             addresses: addresses.clone(),
             internal,
@@ -345,6 +366,8 @@ impl Engine {
         tokio::spawn(task.run(receiver, internal_receiver));
         Ok(Self {
             commands,
+            identity: signer,
+            tracker,
             peer_id,
             addresses,
             home_relay,
@@ -381,6 +404,65 @@ impl Engine {
 
     async fn call<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, EngineError> {
         self.ask(command).await.unwrap_or(Err(EngineError::Stopped))
+    }
+
+    /// Lists a transfer on the catalog of the tracker at `tracker` (D-129): signs in with this
+    /// peer's key, using `invite` for a first sign-in to a catalog that needs one, sets the
+    /// listing's fields from `edit`, and from then on announces the transfer there with
+    /// `listing`. The tracker lists it once it has fetched the manifest from the swarm.
+    pub async fn publish(
+        &self,
+        id: BundleId,
+        tracker: &str,
+        edit: &ListingEdit,
+        invite: Option<&str>,
+    ) -> Result<Listing, EngineError> {
+        if !crate::config::is_http_url(tracker) {
+            return Err(EngineError::InvalidTracker(tracker.to_owned()));
+        }
+        self.get(id).await.ok_or(EngineError::NotFound(id))?;
+        let failed = |source| EngineError::Tracker {
+            tracker: tracker.to_owned(),
+            source,
+        };
+        let client = &self.tracker;
+        let session = client
+            .catalog_sign_in(tracker, &self.identity, invite)
+            .await
+            .map_err(failed)?;
+        let listing = client
+            .edit_listing(tracker, &session.token, &id, edit)
+            .await;
+        // The session was only for this; it would expire on its own.
+        let _ = client.catalog_sign_out(tracker, &session.token).await;
+        let listing = listing.map_err(failed)?;
+        let tracker = tracker.to_owned();
+        self.call(|reply| Command::Publish(id, tracker, reply))
+            .await?;
+        Ok(listing)
+    }
+
+    /// Signs this peer's key in to the catalog of the tracker at `tracker` for whoever asked
+    /// for the sign-in `code`, such as a browser showing the catalog, using `invite` for a first
+    /// sign-in to a catalog that needs one.
+    pub async fn catalog_sign_in(
+        &self,
+        tracker: &str,
+        code: &str,
+        invite: Option<&str>,
+    ) -> Result<Account, EngineError> {
+        if !crate::config::is_http_url(tracker) {
+            return Err(EngineError::InvalidTracker(tracker.to_owned()));
+        }
+        let session = self
+            .tracker
+            .catalog_sign_code(tracker, &self.identity, code, invite)
+            .await
+            .map_err(|source| EngineError::Tracker {
+                tracker: tracker.to_owned(),
+                source,
+            })?;
+        Ok(session.account)
     }
 
     /// Every transfer, in queue order.

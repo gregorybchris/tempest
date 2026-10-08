@@ -1,6 +1,7 @@
 //! The `tempest` binary.
 
 mod assets;
+mod catalog;
 mod daemon;
 mod engine;
 mod get;
@@ -54,6 +55,9 @@ enum Command {
     /// Simulate swarms.
     #[command(subcommand)]
     Sim(sim::SimCommand),
+    /// Sign in to trackers' catalogs and list transfers there.
+    #[command(subcommand)]
+    Catalog(catalog::CatalogCommand),
     /// Run a tracker, which helps peers in public swarms find each other.
     Tracker(tracker::TrackerArgs),
     /// Run a relay, which lends public addresses to peers behind routers.
@@ -73,6 +77,7 @@ fn main() -> ExitCode {
         Command::Web(args) => web::web(args),
         Command::Daemon(args) => daemon::daemon(args),
         Command::Sim(command) => sim::sim(command),
+        Command::Catalog(command) => catalog::catalog(command),
         Command::Tracker(args) => tracker::tracker(args),
         Command::Relay(args) => relay::relay(args),
     };

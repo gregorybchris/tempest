@@ -207,7 +207,7 @@ fn invites_admit_new_keys_once() {
     // Announces list only for members.
     catalog.request_listing(0, &bundle(1), &bob.id()).unwrap();
     catalog.request_listing(0, &bundle(2), &alice.id()).unwrap();
-    assert_eq!(catalog.pending().unwrap(), [bundle(2)]);
+    assert_eq!(catalog.pending().unwrap(), [(bundle(2), alice.id())]);
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn an_edit_can_ask_for_a_listing() {
         .edit_listing(1, &bundle(3), &alice.id(), &edit)
         .unwrap();
     assert_eq!(listing.status, ListingStatus::Pending);
-    assert_eq!(catalog.pending().unwrap(), [bundle(3)]);
+    assert_eq!(catalog.pending().unwrap(), [(bundle(3), alice.id())]);
     let page = catalog.published_by(&alice.id(), 0, 10).unwrap();
     assert_eq!(page.total, 1);
 }

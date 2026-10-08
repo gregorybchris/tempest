@@ -19,6 +19,7 @@ use tempest_protocol::tracker::{API_PREFIX, AnnounceRequest, ErrorCode, listing_
 use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
+use crate::fetcher::{self, FetcherConfig};
 use crate::swarms::{Refusal, Swarms, TrackerConfig};
 
 /// The largest request body accepted. An announce with every field at its limit is far smaller.
@@ -33,6 +34,7 @@ const MAX_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 pub struct Tracker {
     swarms: Arc<Mutex<Swarms>>,
     catalog: Option<Arc<Mutex<Catalog>>>,
+    fetcher: FetcherConfig,
     behind_proxy: bool,
 }
 
@@ -43,13 +45,22 @@ impl Tracker {
         Ok(Self {
             swarms: Arc::new(Mutex::new(Swarms::new(config, seed))),
             catalog: None,
+            fetcher: FetcherConfig::default(),
             behind_proxy: false,
         })
     }
 
     /// The tracker with a catalog, served under `/catalog/v1/` beside the peer-list service.
+    /// While it serves, it fetches pending listings' manifests from their swarms (see
+    /// [`fetcher`]).
     pub fn with_catalog(mut self, catalog: Catalog) -> Self {
         self.catalog = Some(Arc::new(Mutex::new(catalog)));
+        self
+    }
+
+    /// How a tracker with a catalog fetches pending listings' manifests.
+    pub fn fetcher(mut self, config: FetcherConfig) -> Self {
+        self.fetcher = config;
         self
     }
 
@@ -77,19 +88,35 @@ impl Tracker {
     }
 
     /// Serves the tracker on `listener` until `shutdown` completes, sweeping out silent peers
-    /// as it goes.
+    /// as it goes, and with a catalog, fetching pending listings' manifests.
     pub async fn serve(
         self,
         listener: TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> io::Result<()> {
         let sweeper = tokio::spawn(self.clone().sweep());
+        let fetching = match &self.catalog {
+            Some(catalog) => {
+                let run = fetcher::run(self.clone(), catalog.clone(), self.fetcher.clone());
+                Some(tokio::spawn(run))
+            }
+            None => None,
+        };
         let app = self
             .router()
             .into_make_service_with_connect_info::<SocketAddr>();
-        let result = axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown)
-            .await;
+        let served = axum::serve(listener, app).with_graceful_shutdown(shutdown);
+        let result = match fetching {
+            Some(mut fetching) => tokio::select! {
+                result = served => result,
+                // The fetcher runs until aborted; it ends only if its endpoint can't be bound.
+                ended = &mut fetching => match ended {
+                    Ok(Err(error)) => Err(error),
+                    _ => Err(io::Error::other("the manifest fetcher stopped")),
+                },
+            },
+            None => served.await,
+        };
         sweeper.abort();
         result
     }
@@ -104,7 +131,7 @@ impl Tracker {
         }
     }
 
-    fn lock(&self) -> MutexGuard<'_, Swarms> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Swarms> {
         // The swarms stay consistent even if a panic interrupted an update: every method
         // finishes its checks before changing anything.
         self.swarms

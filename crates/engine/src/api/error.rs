@@ -25,7 +25,9 @@ impl From<EngineError> for ApiError {
             | E::Build(_)
             | E::Empty(_)
             | E::InvalidPath(_)
-            | E::Fixed(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+            | E::Fixed(_)
+            | E::InvalidTracker(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+            E::Tracker { .. } => (StatusCode::BAD_GATEWAY, "tracker"),
             E::Stopped | E::Busy(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
             E::Store(_) | E::Identity(_) | E::Io { .. } | E::Bind { .. } | E::Storage(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal")

@@ -76,7 +76,7 @@ fn announce(node: &Node, tracker: &str, handle: &BundleHandle) -> Announcer {
         ..AnnounceConfig::new(endpoint.peer_id(), port.unwrap())
     };
     let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
-    Announcer::spawn(client, tracker.to_owned(), config, handle)
+    Announcer::spawn(client, tracker.to_owned(), config, handle, None)
 }
 
 /// A bundle of a few files, some several chunks long.

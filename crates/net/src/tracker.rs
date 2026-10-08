@@ -1,9 +1,10 @@
 //! Finding peers through trackers (`protocol/trackers.md`).
 //!
-//! A [`TrackerClient`] makes single requests. An [`Announcer`] keeps one bundle announced to one
-//! tracker for as long as the bundle runs: `started` when it begins, `update` every interval,
-//! `completed` when the bundle completes and `stopped` when it stops, handing the peers each
-//! response lists to the bundle.
+//! A [`TrackerClient`] makes single requests, including those to a tracker's catalog (see
+//! [`crate::catalog`]). An [`Announcer`] keeps one bundle announced to one tracker for as long as
+//! the bundle runs: `started` when it begins, `update` every interval, `completed` when the
+//! bundle completes and `stopped` when it stops, handing the peers each response lists to the
+//! bundle. Its announces carry `listing` while the user chose to list the bundle there.
 
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use serde::de::DeserializeOwned;
 use tempest_protocol::message::PeerRecord;
 use tempest_protocol::tracker::{
     self, AnnounceEvent, AnnounceRequest, AnnounceResponse, BundleStats, ErrorResponse,
+    ListingRequest,
 };
 use tempest_protocol::{Address, BundleId, PeerId};
 use tokio::sync::watch;
@@ -49,6 +51,9 @@ pub enum TrackerError {
     /// The response is larger than [`MAX_RESPONSE`].
     #[error("the tracker's response is larger than {MAX_RESPONSE} bytes")]
     TooLarge,
+    /// The tracker's URL is not an HTTP or HTTPS URL with a host.
+    #[error("the tracker's URL is not an HTTP or HTTPS URL with a host")]
+    NotHttp,
 }
 
 fn describe(error: &Option<ErrorResponse>) -> String {
@@ -74,7 +79,7 @@ impl TrackerError {
 /// Makes requests to trackers over HTTP or HTTPS. Clones share connections.
 #[derive(Debug, Clone)]
 pub struct TrackerClient {
-    http: reqwest::Client,
+    pub(crate) http: reqwest::Client,
 }
 
 impl TrackerClient {
@@ -118,7 +123,7 @@ impl TrackerClient {
         self.exchange(request).await
     }
 
-    async fn exchange<T: DeserializeOwned>(
+    pub(crate) async fn exchange<T: DeserializeOwned>(
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<T, TrackerError> {
@@ -210,25 +215,31 @@ pub struct TrackerState {
 pub struct Announcer {
     /// How it is going.
     pub state: watch::Receiver<TrackerState>,
+    tracker: String,
+    listing: watch::Sender<Option<ListingRequest>>,
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
 
 impl Announcer {
-    /// Starts announcing `bundle` to the tracker at `tracker`. Must be called within a tokio
-    /// runtime.
+    /// Starts announcing `bundle` to the tracker at `tracker`, with `listing` if the user chose
+    /// to list it there (see [`Identity::listing`](crate::Identity::listing)). Must be called
+    /// within a tokio runtime.
     pub fn spawn(
         client: TrackerClient,
         tracker: String,
         config: AnnounceConfig,
         bundle: &BundleHandle,
+        listing: Option<ListingRequest>,
     ) -> Self {
         let (state, state_receiver) = watch::channel(TrackerState::default());
         let (stop, stop_receiver) = watch::channel(false);
+        let (listing, listing_receiver) = watch::channel(listing);
         let task = AnnounceTask {
             client,
-            tracker,
+            tracker: tracker.clone(),
             config,
+            listing: listing_receiver,
             bundle: bundle.bundle_id(),
             status: bundle.status.clone(),
             peers: bundle.peer_sink(),
@@ -238,9 +249,26 @@ impl Announcer {
         };
         Self {
             state: state_receiver,
+            tracker,
+            listing,
             stop,
             task: tokio::spawn(task.run(stop_receiver)),
         }
+    }
+
+    /// The tracker's URL.
+    pub fn tracker(&self) -> &str {
+        &self.tracker
+    }
+
+    /// Starts or stops asking the tracker to list the bundle. A new request goes out with the
+    /// next update, as soon as the shortest interval allows.
+    pub fn set_listing(&self, listing: Option<ListingRequest>) {
+        self.listing.send_if_modified(|current| {
+            let changed = *current != listing;
+            *current = listing;
+            changed
+        });
     }
 
     /// Sends `stopped` (unless the tracker never heard `started`) and stops announcing.
@@ -320,9 +348,10 @@ impl Schedule {
         self.not_before = now + wait;
     }
 
-    /// This peer's relay address or external address changed: the tracker should hear it with
-    /// the next update, as soon as `min_interval` since the last announce allows.
-    fn address_changed(&mut self, now: Instant, min_interval: Duration) {
+    /// Something the tracker should hear changed, such as this peer's relay or external
+    /// address: it goes out with the next update, as soon as `min_interval` since the last
+    /// announce allows.
+    fn changed(&mut self, now: Instant, min_interval: Duration) {
         let earliest = self.succeeded_at.map_or(now, |at| at + min_interval);
         self.next_update = self.next_update.min(earliest.max(now));
     }
@@ -346,6 +375,7 @@ struct AnnounceTask {
     client: TrackerClient,
     tracker: String,
     config: AnnounceConfig,
+    listing: watch::Receiver<Option<ListingRequest>>,
     bundle: BundleId,
     status: watch::Receiver<Status>,
     peers: PeerSink,
@@ -387,15 +417,18 @@ impl AnnounceTask {
                     let address = relay.borrow_and_update().relay_address();
                     if address != relay_address {
                         relay_address = address;
-                        schedule.address_changed(Instant::now(), self.config.min_interval);
+                        schedule.changed(Instant::now(), self.config.min_interval);
                     }
                 }
                 Ok(()) = mapping.changed() => {
                     let address = mapping.borrow_and_update().address();
                     if address != external {
                         external = address;
-                        schedule.address_changed(Instant::now(), self.config.min_interval);
+                        schedule.changed(Instant::now(), self.config.min_interval);
                     }
+                }
+                Ok(()) = self.listing.changed() => {
+                    schedule.changed(Instant::now(), self.config.min_interval);
                 }
                 // Asked to stop, or the announcer was dropped.
                 _ = stop.changed() => break,
@@ -422,7 +455,7 @@ impl AnnounceTask {
             event,
             complete,
             num_want: self.config.num_want,
-            listing: None,
+            listing: *self.listing.borrow(),
         };
         let response = match self.client.announce(&self.tracker, &request).await {
             Ok(response) => response,
@@ -524,11 +557,11 @@ mod tests {
         let min_interval = Duration::from_secs(30);
         let mut s = Schedule::new(t);
         s.succeeded(t, Duration::from_secs(1800));
-        s.address_changed(t + Duration::from_secs(5), min_interval);
+        s.changed(t + Duration::from_secs(5), min_interval);
         assert_eq!(s.due(), t + min_interval);
         s.succeeded(t + min_interval, Duration::from_secs(1800));
         let later = t + Duration::from_secs(600);
-        s.address_changed(later, min_interval);
+        s.changed(later, min_interval);
         assert_eq!(s.due(), later);
     }
 

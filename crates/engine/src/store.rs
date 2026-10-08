@@ -1,5 +1,5 @@
-//! The engine's saved state, in SQLite (D-082): transfers, the chunks each has verified,
-//! categories, settings and known peers.
+//! The engine's saved state, in SQLite (D-082): transfers, the chunks each has verified, the
+//! trackers each is listed on, categories, settings and known peers.
 //!
 //! The schema is created and upgraded by numbered migrations, tracked in SQLite's
 //! `user_version`. Every call blocks briefly; the engine owns the only connection.
@@ -64,6 +64,13 @@ CREATE TABLE settings (
 ",
     "
 ALTER TABLE transfers ADD COLUMN seeding_time INTEGER NOT NULL DEFAULT 0;
+",
+    "
+CREATE TABLE publications (
+    transfer BLOB NOT NULL REFERENCES transfers (id) ON DELETE CASCADE,
+    tracker TEXT NOT NULL,
+    PRIMARY KEY (transfer, tracker)
+) STRICT;
 ",
 ];
 
@@ -146,6 +153,8 @@ pub struct TransferRow {
     pub chunks: u64,
     /// How long it has shared while complete, over every run, in milliseconds.
     pub seeding_time: u64,
+    /// The trackers whose catalogs the user chose to list it on (D-129).
+    pub publish: BTreeSet<String>,
 }
 
 impl TransferRow {
@@ -250,6 +259,7 @@ impl Store {
                     have: row.get::<_, i64>(18)?.max(0) as u64,
                     chunks: row.get::<_, i64>(19)?.max(0) as u64,
                     seeding_time: row.get::<_, i64>(20)?.max(0) as u64,
+                    publish: BTreeSet::new(),
                 },
             ))
         })?;
@@ -263,6 +273,7 @@ impl Store {
             transfer.settings = serde_json::from_str(&settings)
                 .map_err(|e| StoreError::Corrupt(format!("transfer settings: {e}")))?;
             transfer.tags = self.tags(&transfer.id)?;
+            transfer.publish = self.publications(&transfer.id)?;
             transfers.push(transfer);
         }
         Ok(transfers)
@@ -276,6 +287,16 @@ impl Store {
             .query_map([id.as_bytes()], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
         Ok(tags)
+    }
+
+    fn publications(&self, id: &BundleId) -> Result<BTreeSet<String>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare_cached("SELECT tracker FROM publications WHERE transfer = ?1")?;
+        let trackers = statement
+            .query_map([id.as_bytes()], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(trackers)
     }
 
     /// Saves a transfer, adding or replacing it.
@@ -497,6 +518,15 @@ fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError
     for tag in &t.tags {
         insert.execute(params![t.id.as_bytes(), tag])?;
     }
+    tx.execute(
+        "DELETE FROM publications WHERE transfer = ?1",
+        [t.id.as_bytes()],
+    )?;
+    let mut insert =
+        tx.prepare_cached("INSERT INTO publications (transfer, tracker) VALUES (?1, ?2)")?;
+    for tracker in &t.publish {
+        insert.execute(params![t.id.as_bytes(), tracker])?;
+    }
     Ok(())
 }
 
@@ -531,6 +561,7 @@ mod tests {
             have: 0,
             chunks: 0,
             seeding_time: 0,
+            publish: BTreeSet::new(),
         }
     }
 
@@ -555,6 +586,7 @@ mod tests {
             have: 3,
             chunks: 3,
             seeding_time: 7,
+            publish: BTreeSet::from(["https://tracker.example.org".to_owned()]),
             ..row(2, 0)
         };
         store.save_transfers([&first, &second]).unwrap();

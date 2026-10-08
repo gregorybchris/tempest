@@ -312,7 +312,10 @@ async fn announces_ask_for_listings_with_a_valid_signature() {
     let answer = announce_listed(&router, &alice, &id).await;
     assert_eq!(answer.status, StatusCode::OK);
     let catalog = tracker.catalog_handle().unwrap();
-    assert_eq!(catalog.lock().unwrap().pending().unwrap(), [id]);
+    assert_eq!(
+        catalog.lock().unwrap().pending().unwrap(),
+        [(id, alice.id())]
+    );
 
     // Pending: hidden from others, shown to its publisher.
     let path = format!("/catalog/v1/listings/{id}");

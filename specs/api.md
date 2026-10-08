@@ -41,6 +41,8 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `PUT /v1/transfers/{id}/category` | `{"category": "..."}`, or `null` | The transfer |
 | `PUT /v1/transfers/{id}/settings` | The transfer's own settings by dotted key, replacing what it had: session settings, `limits.download` and `limits.upload`, and `sharing.*` | The transfer |
 | `POST /v1/transfers/{id}/queue` | `{"to": "top" \| "up" \| "down" \| "bottom" \| <place>}` | Every transfer, in the new order |
+| `POST /v1/transfers/{id}/publish` | `{"tracker", "listing", "invite"}`: a tracker's URL, the listing's fields as the catalog's `PUT /catalog/v1/listings/{bundle}` takes them, and an optional invite | The listing, after the engine signed in with its key and set it; from then on the transfer announces there with `listing` (D-129) |
+| `POST /v1/catalog/sign-in` | `{"tracker", "code", "invite"}` | The account, after the engine signed in for whoever asked the catalog for `code`, such as a browser |
 | `GET /v1/settings` | | The settings in effect, which were changed through the API, which groups await a restart, and whether the alternative speed limits apply now |
 | `PATCH /v1/settings` | Settings by dotted key, as in the config file | As `GET`; all the changes apply, or none |
 | `DELETE /v1/settings/{key}` | | As `GET`, with the config file's value back |
@@ -78,3 +80,5 @@ Settings changed through the API are kept in the state database and apply over t
 `tempest list`, `start`, `stop` and `remove` use the API of the daemon on the same data directory. When no daemon answers, they open the engine's state themselves without running any transfer, make the change, and say so. Only one engine uses a data directory at a time.
 
 `tempest share` and `tempest get` hand their transfer to the daemon when one answers: `share` prints the link and returns, and `get` follows the download to completion. Options that only make sense for a process of its own, such as `--port` or `--identity`, and `--standalone`, run them without the daemon as before (D-175).
+
+`tempest share --publish <tracker>` also lists the share on that tracker's catalog, through the daemon's `publish` route or, standalone, by signing in itself. `tempest catalog publish` does the same for a transfer already added, and `tempest catalog sign-in <tracker> --code` signs in a browser showing the catalog. All of them sign with the engine's key.

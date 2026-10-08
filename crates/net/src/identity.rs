@@ -14,8 +14,8 @@ use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use rustls::sign::SigningKey;
-use tempest_protocol::PeerId;
-use tempest_protocol::tracker::Signature;
+use tempest_protocol::tracker::{ListingRequest, Signature, listing_message};
+use tempest_protocol::{BundleId, PeerId};
 
 /// The PEM label of a PKCS#8 private key.
 const PEM_LABEL: &str = "PRIVATE KEY";
@@ -124,6 +124,14 @@ impl Identity {
                 .try_into()
                 .expect("64-byte signature"),
         )
+    }
+
+    /// An announce's `listing` field for `bundle`: this key asks trackers to list it
+    /// (`protocol/trackers.md`, Listing).
+    pub fn listing(&self, bundle: &BundleId) -> ListingRequest {
+        ListingRequest {
+            sig: self.sign(&listing_message(bundle)),
+        }
     }
 
     /// The private key as a rustls signing key.

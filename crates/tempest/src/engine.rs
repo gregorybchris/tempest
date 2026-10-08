@@ -77,6 +77,18 @@ impl Target {
         }
     }
 
+    /// Runs `command` against the engine `args` name, then closes an embedded one.
+    pub fn run<T>(args: &EngineArgs, command: impl AsyncFnOnce(&Target) -> Result<T>) -> Result<T> {
+        let config = args.load()?;
+        let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
+        runtime.block_on(async {
+            let target = Self::connect(config).await?;
+            let result = command(&target).await;
+            target.close().await;
+            result
+        })
+    }
+
     /// The daemon's API, if one answers. Must be called within a tokio runtime.
     pub async fn daemon(config: &EngineConfig) -> Result<Option<ApiClient>> {
         let Some(client) = ApiClient::for_data_dir(&config.data_dir()?)? else {

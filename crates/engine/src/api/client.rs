@@ -21,11 +21,13 @@ pub use tempest_api::ApiEvent;
 
 use super::sse::{SseDecoder, SseEvent};
 use super::{
-    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
-    QueuePlace, QueueRequest, TagsRequest,
+    AddRequest, ApiError, CatalogSignInRequest, Category, CategoryRequest, EngineInfo, MoveRequest,
+    NameRequest, PREFIX, PublishRequest, QueuePlace, QueueRequest, TagsRequest,
 };
 use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use crate::{SettingsView, TransferInfo};
+use tempest_catalog_api::account::Account;
+use tempest_catalog_api::listing::Listing;
 
 /// Why a request to the API failed.
 #[derive(Debug, thiserror::Error)]
@@ -290,6 +292,26 @@ impl ApiClient {
     ) -> Result<Vec<TransferInfo>, ClientError> {
         let path = format!("/transfers/{id}/queue");
         self.send(Method::POST, &path, Some(&QueueRequest { to }))
+            .await
+    }
+
+    /// Lists a transfer on a tracker's catalog (see [`Engine::publish`](crate::Engine::publish)).
+    pub async fn publish(
+        &self,
+        id: BundleId,
+        request: &PublishRequest,
+    ) -> Result<Listing, ClientError> {
+        let path = format!("/transfers/{id}/publish");
+        self.send(Method::POST, &path, Some(request)).await
+    }
+
+    /// Signs the engine's key in to a tracker's catalog for whoever asked for the request's
+    /// code.
+    pub async fn catalog_sign_in(
+        &self,
+        request: &CatalogSignInRequest,
+    ) -> Result<Account, ClientError> {
+        self.send(Method::POST, "/catalog/sign-in", Some(request))
             .await
     }
 

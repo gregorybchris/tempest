@@ -375,7 +375,7 @@ async fn the_external_address_is_announced() {
         ..AnnounceConfig::new(node.endpoint().peer_id(), port(node.endpoint()))
     };
     let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
-    let announcer = Announcer::spawn(client.clone(), tracker.clone(), config, &shared);
+    let announcer = Announcer::spawn(client.clone(), tracker.clone(), config, &shared, None);
 
     // Mapping after the first announce: the announcer tells the tracker at once.
     node.endpoint().set_port_mapping(router.config());

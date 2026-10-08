@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 tempest-catalog-api.workspace = true
+tempest-net.workspace = true
 tempest-protocol.workspace = true
 
 axum = { workspace = true, features = ["query"] }
@@ -25,6 +26,7 @@ tokio.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 tower.workspace = true
 
 [lints]

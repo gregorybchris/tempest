@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 use tempest_net::{
-    AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Inspector, Lan,
-    Node, SpeedLimits, Storage, StorageConfig, Summary, TrackerClient,
+    AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Identity,
+    Inspector, Lan, Node, SpeedLimits, Storage, StorageConfig, Summary, TrackerClient,
 };
 use tempest_protocol::message::PeerRecord;
 use tempest_protocol::wire::{Decode, Encode};
@@ -54,6 +54,8 @@ pub(super) struct Parts {
     pub lan: Option<Lan>,
     pub tracker: TrackerClient,
     pub announce: AnnounceConfig,
+    /// Signs announces' listing requests.
+    pub identity: Identity,
     pub peer_id: PeerId,
     pub addresses: Vec<Address>,
     pub internal: mpsc::Sender<Internal>,
@@ -97,6 +99,8 @@ struct Run {
     /// Dropping or setting it stops the bundle.
     stop: watch::Sender<bool>,
     checkpoint: mpsc::Sender<()>,
+    /// Trackers to announce it to with `listing` from now on.
+    publish: mpsc::UnboundedSender<String>,
     /// The transfer's totals before this run.
     base_uploaded: u64,
     base_downloaded: u64,
@@ -147,6 +151,7 @@ pub(super) struct EngineTask {
     lan: Option<Lan>,
     tracker: TrackerClient,
     announce: AnnounceConfig,
+    identity: Identity,
     peer_id: PeerId,
     addresses: Vec<Address>,
     transfers: BTreeMap<BundleId, Transfer>,
@@ -197,6 +202,7 @@ impl EngineTask {
             lan,
             tracker,
             announce,
+            identity,
             peer_id,
             addresses,
             internal,
@@ -214,6 +220,7 @@ impl EngineTask {
             lan,
             tracker,
             announce,
+            identity,
             peer_id,
             addresses,
             transfers: BTreeMap::new(),
@@ -411,6 +418,10 @@ impl EngineTask {
                 let result = self.move_in_queue(id, to).await;
                 let _ = reply.send(result);
             }
+            Command::Publish(id, tracker, reply) => {
+                let result = self.publish(id, tracker).await;
+                let _ = reply.send(result);
+            }
             Command::Categories(reply) => {
                 let _ = reply.send(self.store.categories().unwrap_or_default());
             }
@@ -594,6 +605,7 @@ impl EngineTask {
             have: 0,
             chunks: 0,
             seeding_time: 0,
+            publish: BTreeSet::new(),
         };
         self.store.save_transfer(&row)?;
         if let Some(record) = link_record(&link) {
@@ -637,6 +649,7 @@ impl EngineTask {
             have: chunks,
             chunks,
             seeding_time: 0,
+            publish: self.config.publish.iter().cloned().collect(),
         };
         let mut link = Link::new(id);
         link.name = Some(manifest.name().to_owned());
@@ -667,6 +680,27 @@ impl EngineTask {
         self.reschedule().await;
         self.emit_changes();
         Ok(self.info(&id).expect("just inserted"))
+    }
+
+    /// Lists a transfer on `tracker`'s catalog from now on: saved, and told to its running
+    /// bundle's supervisor.
+    async fn publish(
+        &mut self,
+        id: BundleId,
+        tracker: String,
+    ) -> Result<TransferInfo, EngineError> {
+        if let Some(Transfer {
+            live: Live::Running(run),
+            ..
+        }) = self.transfers.get(&id)
+        {
+            let _ = run.publish.send(tracker.clone());
+        }
+        self.change(id, |t| {
+            t.row.publish.insert(tracker);
+            Ok(())
+        })
+        .await
     }
 
     /// Picks a home relay from the configured relays. A held engine runs no transfers, so
@@ -1071,14 +1105,20 @@ impl EngineTask {
     async fn attach(&mut self, id: BundleId, generation: u64, handle: BundleHandle) {
         let t = self.transfers.get_mut(&id).expect("attaching a transfer");
         let mut trackers = t.link.trackers.clone();
-        for tracker in &self.config.trackers {
+        for tracker in self.config.trackers.iter().chain(&t.row.publish) {
             if !trackers.contains(tracker) {
                 trackers.push(tracker.clone());
             }
         }
+        // It depends on the bundle alone, so one signature serves every tracker and announce.
+        let listing = self.identity.listing(&id);
         let announcers = trackers
             .into_iter()
-            .map(|url| Announcer::spawn(self.tracker.clone(), url, self.announce.clone(), &handle))
+            .map(|url| {
+                let listed = t.row.publish.contains(&url).then_some(listing);
+                let config = self.announce.clone();
+                Announcer::spawn(self.tracker.clone(), url, config, &handle, listed)
+            })
             .collect();
         if let Some(lan) = &self.lan {
             lan.watch(&handle).await;
@@ -1094,12 +1134,14 @@ impl EngineTask {
         };
         let (stop, stop_receiver) = watch::channel(false);
         let (checkpoint, checkpoint_receiver) = mpsc::channel(1);
+        let (publish, publish_receiver) = mpsc::unbounded_channel();
         let now = Instant::now();
         t.live = Live::Running(Run {
             generation,
             status: handle.status.clone(),
             stop,
             checkpoint,
+            publish,
             base_uploaded: t.row.uploaded,
             base_downloaded: t.row.downloaded,
             last_progress: now,
@@ -1118,9 +1160,12 @@ impl EngineTask {
             generation,
             handle,
             announcers,
+            tracker: self.tracker.clone(),
+            announce: self.announce.clone(),
+            listing,
             internal: self.internal.clone(),
         };
-        tokio::spawn(supervisor.run(stop_receiver, checkpoint_receiver));
+        tokio::spawn(supervisor.run(stop_receiver, checkpoint_receiver, publish_receiver));
     }
 
     /// Checks a transfer's data from scratch: now if it is idle, or once it has stopped.

@@ -413,13 +413,20 @@ impl Store {
         Ok(())
     }
 
-    /// Every pending listing's bundle, oldest first.
-    pub fn pending(&self) -> Result<Vec<BundleId>, StoreError> {
+    /// Every pending listing's bundle and publisher, oldest first.
+    pub fn pending(&self) -> Result<Vec<(BundleId, PeerId)>, StoreError> {
         let mut statement = self.conn.prepare(
-            "SELECT bundle FROM listings WHERE status = 'pending' ORDER BY created, bundle",
+            "SELECT bundle, publisher FROM listings WHERE status = 'pending'
+             ORDER BY created, bundle",
         )?;
-        let rows = statement.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
-        rows.map(|bundle| hash_of(bundle?)).collect()
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?;
+        rows.map(|row| {
+            let (bundle, publisher) = row?;
+            Ok((hash_of(bundle)?, hash_of(publisher)?))
+        })
+        .collect()
     }
 
     fn tags(&self, bundle: &BundleId) -> Result<Vec<String>, StoreError> {

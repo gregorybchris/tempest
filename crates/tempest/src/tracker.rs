@@ -7,9 +7,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tempest_catalog_api::Category;
+use tempest_net::FetchLimits;
 use tempest_protocol::{BundleId, RelayIdentity};
 use tempest_relay::RelayConfig;
-use tempest_tracker::{Catalog, CatalogConfig, DEFAULT_PORT, Tracker, TrackerConfig};
+use tempest_tracker::{
+    Catalog, CatalogConfig, DEFAULT_PORT, FetcherConfig, Tracker, TrackerConfig,
+};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -73,6 +76,19 @@ struct CatalogArgs {
     /// A category listings can be in, as `slug=Name`. Repeat for more; replaces the defaults.
     #[arg(long, value_name = "SLUG=NAME", value_parser = parse_category, requires = "catalog")]
     category: Vec<Category>,
+    /// The most manifests fetched at once, to list bundles.
+    #[arg(long, default_value_t = FetcherConfig::default().concurrency, value_name = "N",
+        requires = "catalog")]
+    fetch_concurrency: usize,
+    /// The largest manifest fetched, in bytes. Bundles with larger ones stay pending.
+    #[arg(long, default_value_t = FetcherConfig::default().limits.max_manifest,
+        value_name = "BYTES", requires = "catalog")]
+    fetch_max_manifest: u32,
+    /// Hours after the first failed fetch of a bundle's manifest to stop trying until the
+    /// tracker restarts.
+    #[arg(long, default_value_t = FetcherConfig::default().give_up.as_secs() / 3600,
+        value_name = "HOURS", requires = "catalog")]
+    fetch_give_up: u64,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -121,6 +137,19 @@ impl CatalogArgs {
             .with_context(|| format!("cannot open the catalog at {}", path.display()))?;
         Ok(Some(catalog))
     }
+
+    fn fetcher(&self) -> FetcherConfig {
+        let defaults = FetcherConfig::default();
+        FetcherConfig {
+            concurrency: self.fetch_concurrency.max(1),
+            limits: FetchLimits {
+                max_manifest: self.fetch_max_manifest,
+                ..defaults.limits
+            },
+            give_up: Duration::from_secs(self.fetch_give_up.saturating_mul(3600)),
+            ..defaults
+        }
+    }
 }
 
 pub fn tracker(args: TrackerArgs) -> Result<()> {
@@ -168,7 +197,9 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         let mut tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
         if let Some(catalog) = catalog {
             eprintln!("catalog at http://{address}/catalog/v1/info");
-            tracker = tracker.with_catalog(catalog);
+            tracker = tracker
+                .with_catalog(catalog)
+                .fetcher(args.catalog.fetcher());
         }
         let (stop, stopped) = watch::channel(false);
         tokio::spawn(async move {

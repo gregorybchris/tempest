@@ -352,7 +352,7 @@ async fn a_relay_a_tracker_recommends_becomes_home_and_is_announced() {
         ..AnnounceConfig::new(seeder.endpoint().peer_id(), port)
     };
     let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
-    let announcer = Announcer::spawn(client.clone(), tracker.clone(), config, &shared);
+    let announcer = Announcer::spawn(client.clone(), tracker.clone(), config, &shared, None);
 
     // The first announce brings the recommendation; the home relay registers with it.
     let registered = within(status.wait_for(|s| matches!(s, RelayStatus::Registered { .. })))

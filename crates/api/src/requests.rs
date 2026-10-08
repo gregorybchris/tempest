@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use tempest_catalog_api::listing::ListingEdit;
 
 /// The prefix of every route: the API's version.
 pub const PREFIX: &str = "/v1";
@@ -132,4 +133,32 @@ pub enum QueueStep {
 pub struct Category {
     /// Where downloads added in the category go.
     pub save_folder: PathBuf,
+}
+
+/// `POST /v1/transfers/{id}/publish`: list the transfer on a tracker's catalog (D-129).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishRequest {
+    /// The tracker's URL.
+    pub tracker: String,
+    /// The listing's title, description, category and tags; fields left out stay as they are.
+    #[serde(default)]
+    pub listing: ListingEdit,
+    /// An invite, for this peer's first sign-in to a catalog that requires one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite: Option<String>,
+}
+
+/// `POST /v1/catalog/sign-in`: sign this peer's key in to a tracker's catalog for whoever
+/// asked for `code`, such as a browser.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogSignInRequest {
+    /// The tracker's URL.
+    pub tracker: String,
+    /// The sign-in code the catalog showed.
+    pub code: String,
+    /// An invite, for this peer's first sign-in to a catalog that requires one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite: Option<String>,
 }

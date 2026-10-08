@@ -3288,3 +3288,40 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - Listings are pending until the tracker knows the bundle's content, and only their publisher sees them then. The first key to ask keeps a bundle's listing. Publishers edit title, description, category and tags; signed-in accounts vote up or down and comment, and delete their own comments.
 
 **Rationale:** The key never leaves the client, and the device-code flow works from any browser. Signing the authority stops a tracker from passing on another tracker's code to sign in there as the user. SQLite needs no service to run, and the shared crate keeps the tracker, the client and the UI agreeing on every body and text rule.
+
+---
+
+## D-207: How the tracker fetches manifests to list bundles
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-129 has the tracker fetch a listed bundle's manifest from peers, but leaves open which peers, how often and within what limits. Every fetch is a QUIC connection the tracker opens to addresses that announces gave it.
+
+**Options:** **Peers:** only the publisher; any peer at random; the publisher first, then complete peers, then incomplete ones (chosen). **Retries:** a fixed interval; exponential backoff (chosen). **Giving up:** never; after a number of attempts; after a time since the first failure (chosen). **State:** in the catalog's database; in memory (chosen).
+
+**Decision:**
+
+- A background task, run only with a catalog, looks at the pending listings every few seconds. For each one due, it asks up to three live peers of the swarm in turn: the publisher, then complete peers, then incomplete ones, each group in random order. It dials at most four addresses per peer, the observed one first, then its relay address.
+- It opens the connection as a peer with an empty Have and sends ManifestRequest, from an endpoint with a fresh key. A manifest larger than the limit (4 MiB by default) is refused unread; one that doesn't hash to the bundle ID is discarded.
+- At most eight bundles are fetched at once. A failed attempt waits 30 seconds, doubling up to an hour. An empty swarm waits without counting as a failure. Three days after its first failure a bundle is given up on until the tracker restarts, and stays pending.
+- `tempest tracker` takes `--fetch-concurrency`, `--fetch-max-manifest` and `--fetch-give-up`.
+
+**Rationale:** The publisher announced the listing and almost surely has the manifest; complete peers certainly do. Few peers and few addresses per attempt bound how many connections an announce can make the tracker open. The manifest limit bounds memory well below the protocol's 64 MiB, since a catalog needs only the name, size and file count. Keeping attempts in memory keeps the store simple; a restart retries everything once, which is cheap.
+
+---
+
+## D-208: Publishing from the client
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-129 lets sharers opt in per tracker or with `tempest share --publish`, and D-128 signs them in with their key. The daemon holds the key, while the CLI and UIs talk to it through its API.
+
+**Options:** **Who signs:** the CLI, loading the key file itself; the engine, through API routes (chosen). **Publish state:** a flag per transfer; the set of trackers per transfer (chosen). **Config:** tracker entries become objects with a `publish` flag; a separate `publish` list of tracker URLs (chosen).
+
+**Decision:**
+
+- The engine stores, per transfer, the trackers it is listed on, and announces there with `listing` (signed once per run). Trackers in the config's `publish` list apply to every new share; a share also announces to them.
+- `POST /v1/transfers/{id}/publish` signs in with the engine's key, sets the listing's fields, signs out, then records the tracker; a running transfer starts announcing there with `listing` at once. `POST /v1/catalog/sign-in` signs a browser's code.
+- `tempest share --publish <tracker>` with `--title`, `--description`, `--category`, `--tag` and `--invite` publishes through the daemon, or standalone with the share's own key. `tempest catalog publish` publishes a transfer already added, and `tempest catalog sign-in <tracker> --code` signs a browser in.
+
+**Rationale:** The key stays with the engine, so the catalog account is always the key that announces and serves the bundle. A set of trackers survives restarts and config changes, and a plain list in the config keeps the existing `trackers` format unchanged.

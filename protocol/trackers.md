@@ -107,6 +107,8 @@ A tracker MAY run a catalog: a website that lists bundles. A bundle is listed on
 - A tracker without a catalog MUST ignore `listing`.
 - A tracker with a catalog MUST verify the signature against `peer`. If it fails, the tracker MUST refuse the announce with `invalid_request`. Otherwise it MAY list the bundle, attributed to the peer ID. What it lists and how is up to the catalog.
 
+**Implementer notes.** To learn what a bundle holds, a tracker with a catalog can fetch its manifest from the swarm as any peer would: connect to a peer, open the connection with an empty Have, send ManifestRequest ([messages.md](messages.md#manifestrequest)), and check the manifest against the bundle ID.
+
 **Test vector.** RFC 8032's first test key (secret key `9d61b19d…1cae7f60`, peer ID `d75a9801…f707511a`) signs the listing message of bundle `3f9a` followed by 60 zeros:
 
 ```text

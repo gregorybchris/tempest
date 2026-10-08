@@ -456,3 +456,24 @@ fn help_scrolls_only_as_far_as_it_overflows() {
 fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
     tempest_engine::TransferInfo::example(seed, name, position)
 }
+
+#[test]
+fn settings_that_failed_to_load_are_asked_for_again() {
+    let mut view = settings();
+    view.settings.ui.theme = "amber".to_owned();
+    let mut app = App::new(Origin::Daemon, Theme::default());
+    assert_eq!(app.tick(), [Request::Settings]);
+    app.finished(
+        &Request::Settings,
+        Err("cannot reach the engine".to_owned()),
+    );
+    for _ in 1..SETTINGS_TICKS {
+        assert_eq!(app.tick(), [], "not at once");
+    }
+    assert_eq!(app.tick(), [Request::Settings], "but a few seconds later");
+    app.finished(
+        &Request::Settings,
+        Ok(Reply::Loaded(Box::new(view), BTreeMap::new())),
+    );
+    assert_eq!(app.theme, Theme::AMBER, "the saved theme still applies");
+}

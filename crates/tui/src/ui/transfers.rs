@@ -122,6 +122,9 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
         };
         let message = match app.model.connection {
             Connection::Connecting => "Connecting to the engine…".to_owned(),
+            Connection::Lost { .. } if app.model.transfers().is_empty() => {
+                "No transfers to show until the engine answers.".to_owned()
+            }
             _ if !app.model.transfers().is_empty() => format!(
                 "Nothing matches {}. Press esc to clear the filters.",
                 filters.describe()
@@ -167,6 +170,28 @@ fn name_width(shown: &[Column], width: u16) -> usize {
     usize::from(width.saturating_sub(MARKER + SPACING + others))
 }
 
+/// Connections out of the peers known, as `7/12`, in the Peers column's width: large counts
+/// in thousands, and only the connections if even that is too wide.
+fn connected(connections: usize, peers: usize) -> String {
+    let count = |n: usize| match n {
+        0..1000 => n.to_string(),
+        _ => format!("{}k", n / 1000),
+    };
+    let text = format!("{}/{}", count(connections), count(peers));
+    match text.len() <= usize::from(columns::width(Column::Peers)) {
+        true => text,
+        false => count(connections),
+    }
+}
+
+/// A ratio to two decimals, in the Ratio column's width.
+fn ratio(ratio: f64) -> String {
+    match ratio < 999.995 {
+        true => format!("{ratio:.2}"),
+        false => "999+".to_owned(),
+    }
+}
+
 fn cell<'a>(theme: &Theme, transfer: &TransferInfo, column: Column, name_width: usize) -> Cell<'a> {
     let dash = || "–".to_owned();
     let (text, color) = match column {
@@ -182,16 +207,14 @@ fn cell<'a>(theme: &Theme, transfer: &TransferInfo, column: Column, name_width: 
         ),
         Column::Peers => match transfer.peers {
             0 => (dash(), theme.dim),
-            peers => (format!("{}/{peers}", transfer.connections), theme.dim),
+            peers => (connected(transfer.connections, peers), theme.dim),
         },
-        Column::Ratio => (
-            transfer
-                .ratio
-                .map_or_else(dash, |ratio| format!("{ratio:.2}")),
-            theme.dim,
-        ),
+        Column::Ratio => (transfer.ratio.map_or_else(dash, ratio), theme.dim),
         Column::Category => (
-            fit(transfer.category.as_deref().unwrap_or("–"), 10),
+            fit(
+                transfer.category.as_deref().unwrap_or("–"),
+                columns::width(column).into(),
+            ),
             theme.dim,
         ),
         Column::Tags => {
@@ -201,7 +224,7 @@ fn cell<'a>(theme: &Theme, transfer: &TransferInfo, column: Column, name_width: 
             } else {
                 tags.join(", ")
             };
-            (fit(&text, 12), theme.dim)
+            (fit(&text, columns::width(column).into()), theme.dim)
         }
         Column::Added => (format::date(transfer.added), theme.dim),
     };
@@ -273,5 +296,25 @@ pub(super) fn fix_hint(fix: Fix) -> &'static str {
         Fix::Retry => "Press space to try again.",
         Fix::ShareAgain => "Press space to share it again.",
         Fix::ForceStart => "Press F to start it now.",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_fit_the_peers_column() {
+        assert_eq!(connected(7, 12), "7/12");
+        assert_eq!(connected(100, 1000), "100/1k");
+        assert_eq!(connected(1500, 25_000), "1k/25k");
+        assert_eq!(connected(1000, 2_500_000), "1k");
+    }
+
+    #[test]
+    fn ratios_fit_their_column() {
+        assert_eq!(ratio(2.4), "2.40");
+        assert_eq!(ratio(999.99), "999.99");
+        assert_eq!(ratio(1000.0), "999+");
     }
 }

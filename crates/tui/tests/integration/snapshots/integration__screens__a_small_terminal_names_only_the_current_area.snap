@@ -1,0 +1,14 @@
+---
+source: crates/tui/tests/integration/screens.rs
+expression: "draw(&app, 40, 10).backend()"
+---
+"  1   Share   3   ↓9.8M  ↑1.6M  [green] "
+"────────────────────────────────────────"
+"                                        "
+" Press a to fill in the form, then enter"
+"▌ field-rec… Sharing      812M tempest:…"
+"                                        "
+"────────────────────────────────────────"
+" Link  tempest:0c4e2f7a9b1d3c5e7f90a2b… "
+"────────────────────────────────────────"
+" j/k move  a share a path  ? help       "

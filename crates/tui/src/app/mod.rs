@@ -36,6 +36,7 @@ use crate::input::Input;
 use crate::model::Model;
 use crate::prefs;
 use crate::theme::Theme;
+use tempest_api::model::Connection;
 use tempest_api::notices::{self, Seen};
 
 /// The app's areas (D-136), in navigation order. Transfers is home.
@@ -485,7 +486,10 @@ impl App {
 
     /// Called once a second. Returns the fetches that keep the open view up to date.
     pub fn tick(&mut self) -> Vec<Request> {
-        self.model.sample();
+        // Rates known before the stream broke are no measure of now.
+        if self.model.connection == Connection::Live {
+            self.model.sample();
+        }
         if let Some(notice) = &mut self.notice {
             notice.ticks_left = notice.ticks_left.saturating_sub(1);
             if notice.ticks_left == 0 {
@@ -495,9 +499,10 @@ impl App {
         self.settings_age = self.settings_age.saturating_add(1);
         let rows = self.area == Area::Settings;
         let stale = rows && self.settings_age >= SETTINGS_TICKS;
-        let settings = (stale || !self.prefs_loaded)
-            .then(|| self.load_settings())
-            .flatten();
+        // Until the first answer, ask at once, then again every few seconds after a failure.
+        let unloaded = !self.prefs_loaded
+            && (self.settings_error.is_none() || self.settings_age >= SETTINGS_TICKS);
+        let settings = (stale || unloaded).then(|| self.load_settings()).flatten();
         self.fetch().into_iter().chain(settings).collect()
     }
 
@@ -516,7 +521,10 @@ impl App {
     fn take_settings(&mut self, view: SettingsView) {
         let ui = &view.settings.ui;
         if !self.prefs_loaded {
-            self.theme = prefs::theme(ui);
+            // A theme changed before the settings arrived stays.
+            if self.ui_pending == 0 {
+                self.theme = prefs::theme(ui);
+            }
             self.prefs_loaded = true;
         }
         if self.ui_pending == 0 {
@@ -633,8 +641,6 @@ impl App {
                 if let Err(error) = &result {
                     self.settings_error = Some(request.failure(error));
                     self.settings_age = 0;
-                    // Without the engine's answer, keep the defaults rather than ask forever.
-                    self.prefs_loaded = true;
                 }
             }
             Request::ChangeSettings { changes, .. }

@@ -358,13 +358,14 @@ fn draw_palette(frame: &mut Frame, app: &App, area: Rect, query: &Input, selecte
         );
         return;
     }
-    // Scroll so the highlighted match shows.
-    let first = selected.saturating_sub(rows - 1);
+    // Scroll so the highlighted match shows in the rows the popup has.
+    let shown = usize::from(list.height).clamp(1, rows);
+    let first = selected.saturating_sub(shown - 1);
     let lines: Vec<Line> = matches
         .iter()
         .enumerate()
         .skip(first)
-        .take(rows)
+        .take(shown)
         .map(|(index, command)| palette_row(app, *command, index == selected, list.width))
         .collect();
     frame.render_widget(Paragraph::new(lines), list);

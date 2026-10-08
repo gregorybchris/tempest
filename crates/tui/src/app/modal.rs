@@ -454,6 +454,9 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => scroll.saturating_sub(1),
             KeyCode::PageDown | KeyCode::Char(' ') => scroll + 10,
             KeyCode::PageUp => scroll.saturating_sub(10),
+            KeyCode::Home => 0,
+            KeyCode::End => limit,
+            KeyCode::Left | KeyCode::Right => scroll,
             _ => return Outcome::Close,
         };
         Outcome::Open(Modal::Help {
@@ -463,7 +466,12 @@ impl App {
 
     fn value_key(&mut self, mut edit: ValueEdit, key: KeyEvent) -> Outcome {
         if !is(key, KeyCode::Enter) {
+            let before = edit.input.text();
             edit.input.key(key);
+            // An error is about the text it refused, so editing clears it.
+            if edit.input.text() != before {
+                edit.error = None;
+            }
             return Outcome::Open(Modal::Value(Box::new(edit)));
         }
         match self.value_request(&edit.target, &edit.input.text()) {
@@ -881,11 +889,15 @@ fn text_key(
     kind: TextKind,
     target: Target,
     mut input: Input,
-    error: Option<String>,
+    mut error: Option<String>,
     key: KeyEvent,
 ) -> Outcome {
     if !is(key, KeyCode::Enter) {
+        let before = input.text();
         input.key(key);
+        if input.text() != before {
+            error = None;
+        }
         return Outcome::Open(Modal::Text {
             kind,
             target,

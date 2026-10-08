@@ -2238,9 +2238,9 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `classic`: the classic BitTorrent client as a baseline: one-chunk requests, a fixed pipeline of 5, classic endgame, and the same upload strategy once complete.
 - `cooperative`: serve everyone (Cooperative upload) and keep sharing.
 - `background`: polite sharing: 20 connections, 2 uploads at once, 2 reciprocity slots, and a shorter idle timeout for lingering.
-
-D-224 removes the lingering from both: profiles no longer change when a download stops sharing, which the `sharing.*` settings alone decide.
 - `streaming`: the streaming-window chunk selection.
+
+D-224 removes the lingering from `cooperative` and `background`: profiles no longer change when a download stops sharing, which the `sharing.*` settings alone decide.
 
 **Rationale:** The suggested names cover beginners' choices and the simulator's baselines. `streaming` is added because it is the one user-facing reason to change chunk selection.
 
@@ -3579,6 +3579,8 @@ D-224 removes the lingering from both: profiles no longer change when a download
 
 This revises D-063 and D-155.
 
+**Follow-up (owner, 2026-10-08):** superseed by default only while two or more peers want a bundle that starts as its only copy, so a 1:1 send uploads normally. To be confirmed in simulation, as above.
+
 **Simulation:** paired runs, 3 seeds each, of [`superseed-crowd`](../crates/sim/scenarios/experiments/superseed-crowd.yaml) and [`superseed-direct`](../crates/sim/scenarios/experiments/superseed-direct.yaml); "one range" is the behavior as built before this decision, "window" the default cap. Times are means of the seeds' medians.
 
 | Scenario | Round-robin | Superseeding, one range | Superseeding, window |
@@ -3612,7 +3614,7 @@ A core swarm test of 8 MiB over 40 Mbps and a 200 ms round trip took 3.2 s with 
 - The farewell list holds up to 50 peers, connected ones first, then other known peers, and is exempt from the once-a-minute limit. A peer that is leaving finishes its control stream and waits, within a bound, for the acknowledgement before it closes, since QUIC drops unsent data on a close. A finished control stream is the start of a Goodbye.
 - A download that is already complete when the engine restarts starts its session as complete, so only the ratio and time apply to it.
 
-This revises D-065, D-151, D-156 and D-184.
+This revises D-065, D-151, D-156 and D-184. The owner confirmed the last four points after implementation, including the farewell list's overhead: about 920 KB to 1.18 MB of control traffic per run in the `routers` baseline.
 
 **Rationale:** Two ratio settings with different defaults contradict conceptual clarity. The farewell list fixes stranding with one message.
 

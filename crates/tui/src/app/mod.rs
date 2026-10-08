@@ -251,6 +251,8 @@ impl App {
             let visible = self.visible();
             let index = was.unwrap_or(0).min(visible.len().saturating_sub(1));
             self.selected = visible.get(index).map(|transfer| transfer.id);
+            // Another transfer's detail starts at its top.
+            self.scroll = 0;
         }
     }
 

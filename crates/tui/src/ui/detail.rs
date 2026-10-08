@@ -211,9 +211,10 @@ fn per_second(rate: u64) -> String {
     }
 }
 
-/// The rows from `scroll` that fit `height`.
+/// The rows from `scroll` that fit `height`. Scrolled past the end, the last rows still fill
+/// the height rather than leaving one row on screen.
 fn window<T>(rows: &[T], scroll: usize, height: usize) -> &[T] {
-    let start = scroll.min(rows.len().saturating_sub(1));
+    let start = scroll.min(rows.len().saturating_sub(height.max(1)));
     &rows[start..rows.len().min(start + height)]
 }
 
@@ -412,8 +413,10 @@ mod tests {
     fn windows_stay_within_the_rows() {
         let rows = [1, 2, 3, 4, 5];
         assert_eq!(window(&rows, 0, 2), [1, 2]);
-        assert_eq!(window(&rows, 4, 2), [5]);
-        assert_eq!(window(&rows, 9, 2), [5]);
+        assert_eq!(window(&rows, 3, 2), [4, 5]);
+        assert_eq!(window(&rows, 4, 2), [4, 5]);
+        assert_eq!(window(&rows, 9, 2), [4, 5]);
+        assert_eq!(window(&rows, 9, 0), [] as [i32; 0]);
         assert!(window::<u8>(&[], 3, 2).is_empty());
     }
 }

@@ -140,10 +140,15 @@ impl Destination {
                         move || {
                             std::fs::create_dir_all(&parent)
                                 .map_err(|source| (parent.clone(), source))?;
-                            match file.symlink_metadata() {
-                                Ok(_) => Err((file, std::io::ErrorKind::AlreadyExists.into())),
-                                Err(_) => Ok(()),
-                            }
+                            // Created here, atomically, so a file that appears by the same name
+                            // in the meantime is never taken for this download's and overwritten.
+                            // Nothing is followed: an existing symlink fails too.
+                            std::fs::OpenOptions::new()
+                                .write(true)
+                                .create_new(true)
+                                .open(&file)
+                                .map(drop)
+                                .map_err(|source| (file, source))
                         }
                     };
                     return match tokio::task::spawn_blocking(check).await {

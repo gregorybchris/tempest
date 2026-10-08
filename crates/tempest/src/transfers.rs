@@ -1,13 +1,11 @@
 //! `tempest list`, `start`, `stop` and `remove`: transfers in the engine, through the daemon's
 //! API or an engine opened here on its state.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
 use tempest_engine::{Status, TransferInfo};
 
 use crate::engine::{EngineArgs, Target, short_id};
-use crate::progress::{bytes, duration};
+use tempest_api::units::{bytes, duration, percent};
 
 /// What to say when no daemon runs the transfers.
 const NO_DAEMON: &str =
@@ -149,13 +147,12 @@ fn table(transfers: &[TransferInfo]) -> String {
                 short_id(&t.id),
                 truncate(&t.name, 40),
                 t.status.name().to_owned(),
-                format!("{:.0}%", (t.progress * 100.0).floor()),
+                percent(t.progress),
                 t.size.map_or("-".to_owned(), bytes),
                 rate(t.download_rate),
                 rate(t.upload_rate),
                 t.connections.to_string(),
-                t.eta
-                    .map_or("-".to_owned(), |secs| duration(Duration::from_secs(secs))),
+                t.eta.map_or("-".to_owned(), duration),
                 t.ratio
                     .map_or("-".to_owned(), |ratio| format!("{ratio:.2}")),
             ]

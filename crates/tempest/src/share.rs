@@ -14,7 +14,10 @@ use tempest_protocol::{BundleId, Link, Manifest};
 
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
-use crate::progress::{StatusLine, bytes, peers};
+use tempest_api::units::bytes;
+use tempest_api::words::peers;
+
+use crate::progress::StatusLine;
 use crate::publish::{ListingArgs, print_listing};
 
 #[derive(Debug, clap::Args)]

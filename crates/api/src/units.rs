@@ -1,5 +1,5 @@
-//! Byte counts and speed limits as clients show them and read them back: compact, in
-//! thousands, so `2.5M` typed means what `2.5M` shown means.
+//! Byte counts, durations and speed limits as the terminal clients show them and read them
+//! back: compact, in thousands, so `2.5M` typed means what `2.5M` shown means.
 
 /// A byte count in at most four characters plus a unit letter: `812M`, `4.2G`, `37K`, `900B`.
 pub fn bytes(n: u64) -> String {
@@ -18,6 +18,27 @@ pub fn bytes(n: u64) -> String {
     } else {
         format!("{value:.0}{unit_letter}")
     }
+}
+
+/// A duration in at most two units, so columns stay narrow: `45s`, `3m`, `1h05m`, `2d3h`.
+pub fn duration(seconds: u64) -> String {
+    let (days, hours, minutes) = (seconds / 86_400, seconds / 3600 % 24, seconds / 60 % 60);
+    if days > 0 {
+        format!("{days}d{hours}h")
+    } else if hours > 0 {
+        format!("{hours}h{minutes:02}m")
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+/// A share from 0 to 1 as a whole percentage, never rounding up to 100% before it is complete.
+pub fn percent(share: f64) -> String {
+    let share = if share.is_nan() { 0.0 } else { share.clamp(0.0, 1.0) };
+    let percent = (share * 100.0).floor();
+    format!("{percent:.0}%")
 }
 
 /// A speed limit as settings show it: `2.0M/s`, or `none`.
@@ -92,6 +113,22 @@ mod tests {
     }
 
     #[test]
+    fn durations_use_two_units_at_most() {
+        assert_eq!(duration(45), "45s");
+        assert_eq!(duration(180), "3m");
+        assert_eq!(duration(3900), "1h05m");
+        assert_eq!(duration(2 * 86_400 + 3 * 3600 + 59), "2d3h");
+    }
+
+    #[test]
+    fn percentages_reach_100_only_when_complete() {
+        assert_eq!(percent(0.999), "99%");
+        assert_eq!(percent(1.0), "100%");
+        assert_eq!(percent(-1.0), "0%");
+        assert_eq!(percent(f64::NAN), "0%");
+    }
+
+    #[test]
     fn limits_are_typed_with_units() {
         assert_eq!(parse_limit(""), Ok(None));
         assert_eq!(parse_limit(" None "), Ok(None));
@@ -122,6 +159,11 @@ mod tests {
             let shown = bytes(rate);
             let read = parse_limit(&shown).unwrap().unwrap();
             prop_assert_eq!(bytes(read), shown);
+        }
+
+        #[test]
+        fn durations_fit_six_characters_below_a_hundred_days(s in 0u64..8_640_000) {
+            prop_assert!(duration(s).len() <= 6, "{}", duration(s));
         }
 
         #[test]

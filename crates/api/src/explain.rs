@@ -80,17 +80,12 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
 /// "7 of 12 peers, 2 through relays": the connections, out of the peers known, and how many
 /// are relayed.
 pub fn connected(transfer: &TransferInfo) -> String {
-    let mut text = if transfer.peers > transfer.connections {
+    if transfer.peers > transfer.connections {
         format!("{} of {} peers", transfer.connections, transfer.peers)
+            + &words::through_relays(transfer.relayed)
     } else {
-        words::count(transfer.connections, "peer")
-    };
-    match transfer.relayed {
-        0 => {}
-        1 => text.push_str(", 1 through a relay"),
-        n => text.push_str(&format!(", {n} through relays")),
+        words::peers(transfer.connections, transfer.relayed)
     }
-    text
 }
 
 #[cfg(test)]

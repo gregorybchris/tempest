@@ -19,7 +19,10 @@ use tokio::time::Instant;
 
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs};
-use crate::progress::{StatusLine, bytes, duration, peers};
+use tempest_api::units::{bytes, percent};
+use tempest_api::words::peers;
+
+use crate::progress::{StatusLine, duration};
 
 #[derive(Debug, clap::Args)]
 pub struct GetArgs {
@@ -214,11 +217,11 @@ async fn follow(
             bail!("the download was stopped");
         }
         line.show(&format!(
-            "{}  {} of {}  {:.0}%  {}",
+            "{}  {} of {}  {}  {}",
             transfer.name,
             bytes(transfer.downloaded.min(transfer.size.unwrap_or(u64::MAX))),
             transfer.size.map_or("?".to_owned(), bytes),
-            (transfer.progress * 100.0).floor(),
+            percent(transfer.progress),
             peers(transfer.connections, transfer.relayed),
         ));
         tokio::select! {
@@ -397,15 +400,16 @@ fn progress(status: &Status) -> String {
         return "connecting…".to_owned();
     };
     let total = manifest.total_size();
-    let percent = match status.chunks {
-        0 => 100,
-        chunks => u64::from(status.have) * 100 / u64::from(chunks),
+    let done = match status.chunks {
+        0 => 1.0,
+        chunks => f64::from(status.have) / f64::from(chunks),
     };
     format!(
-        "{}  {} of {}  {percent}%  {}",
+        "{}  {} of {}  {}  {}",
         manifest.name(),
         bytes(status.downloaded.min(total)),
         bytes(total),
+        percent(done),
         peers(status.connections, status.relayed),
     )
 }

@@ -1,6 +1,6 @@
 //! Numbers as the TUI shows them: compact, so columns stay narrow.
 
-pub use tempest_api::units::{bytes, limit, limit_input, parse_limit};
+pub use tempest_api::units::{bytes, duration, limit, limit_input, parse_limit, percent};
 pub use tempest_api::words::{count, duration as duration_words};
 
 /// A rate in bytes per second, or a dash for none.
@@ -9,26 +9,6 @@ pub fn rate(bytes_per_second: u64) -> String {
         0 => "–".to_owned(),
         rate => bytes(rate),
     }
-}
-
-/// A duration in at most two units: `45s`, `3m`, `1h05m`, `2d3h`.
-pub fn duration(seconds: u64) -> String {
-    let (days, hours, minutes) = (seconds / 86_400, seconds / 3600 % 24, seconds / 60 % 60);
-    if days > 0 {
-        format!("{days}d{hours}h")
-    } else if hours > 0 {
-        format!("{hours}h{minutes:02}m")
-    } else if minutes > 0 {
-        format!("{minutes}m")
-    } else {
-        format!("{seconds}s")
-    }
-}
-
-/// A share from 0 to 1 as a whole percentage, never rounding up to 100% before it is complete.
-pub fn percent(share: f64) -> String {
-    let percent = (share.clamp(0.0, 1.0) * 100.0).floor();
-    format!("{percent:.0}%")
 }
 
 /// A whole number with commas between thousands: `256,348`.
@@ -78,22 +58,12 @@ pub fn date(millis: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
-
     use super::*;
 
     #[test]
     fn rates_are_bytes_or_a_dash() {
         assert_eq!(rate(0), "–");
         assert_eq!(rate(9_800_000), "9.8M");
-    }
-
-    #[test]
-    fn durations_use_two_units_at_most() {
-        assert_eq!(duration(45), "45s");
-        assert_eq!(duration(180), "3m");
-        assert_eq!(duration(3900), "1h05m");
-        assert_eq!(duration(2 * 86_400 + 3 * 3600 + 59), "2d3h");
     }
 
     #[test]
@@ -114,24 +84,10 @@ mod tests {
     }
 
     #[test]
-    fn percentages_reach_100_only_when_complete() {
-        assert_eq!(percent(0.999), "99%");
-        assert_eq!(percent(1.0), "100%");
-        assert_eq!(percent(-1.0), "0%");
-    }
-
-    #[test]
     fn dates_are_utc_days() {
         assert_eq!(date(0), "1970-01-01");
         assert_eq!(date(1_791_331_200_000), "2026-10-07");
         assert_eq!(date(951_782_400_000), "2000-02-29");
         assert_eq!(date(-1), "1969-12-31");
-    }
-
-    proptest! {
-        #[test]
-        fn durations_fit_six_characters_below_a_hundred_days(s in 0u64..8_640_000) {
-            prop_assert!(duration(s).len() <= 6, "{}", duration(s));
-        }
     }
 }

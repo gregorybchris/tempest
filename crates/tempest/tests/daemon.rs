@@ -420,3 +420,57 @@ fn share_options_for_one_transfer_do_not_run_it_standalone() {
 
     daemon.interrupt();
 }
+
+#[test]
+#[cfg(unix)]
+fn stopping_an_engine_that_runs_for_a_ui_leaves_its_shares_stopped() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("notes.txt");
+    fs::write(&source, b"some notes").unwrap();
+    let a = root.path().join("a");
+
+    // With no terminal to ask, quitting `tempest web` stops its transfers (D-228).
+    let mut web = tempest(&a)
+        .args([
+            "web",
+            "--no-open",
+            "--set",
+            "api.port=0",
+            "--set",
+            "peers.port=0",
+        ])
+        .args([
+            "--set",
+            r#"peers.bind=["127.0.0.1"]"#,
+            "--set",
+            "lan.enabled=false",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let log = lines(web.stderr.take().unwrap());
+    let started = Instant::now();
+    loop {
+        let line = log
+            .recv_timeout(LIMIT.saturating_sub(started.elapsed()))
+            .expect("the engine starts");
+        if line.starts_with("running") {
+            break;
+        }
+    }
+    let shared = run(tempest(&a).arg("share").arg(&source));
+    let id = field(&shared, "bundle");
+    wait_for_state(&a, &id, "sharing");
+    run(Command::new("kill").args(["-INT", &web.id().to_string()]));
+    assert!(web.wait().unwrap().success());
+
+    // A new engine on the data directory must not resume it.
+    let daemon = Daemon::start(&a, &[]);
+    std::thread::sleep(Duration::from_secs(1));
+    let listed = transfers(&a);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["status"]["state"], "stopped");
+    daemon.interrupt();
+}

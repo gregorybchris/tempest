@@ -100,8 +100,13 @@ pub async fn run(
                 let active = (stopping.list().await.iter())
                     .filter(|t| t.status.is_active())
                     .count();
-                if active > 0 && handoff::ask(active).await == Choice::HandOff {
-                    handing_over.store(active, std::sync::atomic::Ordering::Relaxed);
+                if active > 0 {
+                    match handoff::ask(active).await {
+                        Choice::HandOff => {
+                            handing_over.store(active, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Choice::Stop => handoff::stop_active(&stopping).await,
+                    }
                 }
             }
             eprintln!("stopping");

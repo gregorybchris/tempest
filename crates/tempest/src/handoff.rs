@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use tempest_engine::EngineConfig;
+use tempest_engine::{Engine, EngineConfig};
 use tokio::time::Instant;
 
 use crate::engine::{EngineArgs, Target};
@@ -109,6 +109,16 @@ pub enum Choice {
     HandOff,
     /// Stop with the engine.
     Stop,
+}
+
+/// Stops every active transfer, as `tempest stop` does, so none is wanted when an engine opens
+/// on the data directory again.
+pub async fn stop_active(engine: &Engine) {
+    for transfer in engine.list().await {
+        if transfer.status.is_active() {
+            let _ = engine.stop(transfer.id).await;
+        }
+    }
 }
 
 /// What an answer typed at the question means: handing over is the default, and anything

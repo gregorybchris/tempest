@@ -75,6 +75,10 @@ pub fn tui(args: TuiArgs) -> Result<()> {
                 .iter()
                 .filter(|t| t.status.is_active())
                 .count(),
+            Ok(Exit::Stop) => {
+                crate::handoff::stop_active(&engine).await;
+                0
+            }
             _ => 0,
         };
         eprintln!("stopping the engine");

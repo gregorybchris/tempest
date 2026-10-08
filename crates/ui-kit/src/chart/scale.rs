@@ -109,7 +109,7 @@ pub fn nice_ticks(min: f64, max: f64, target: usize) -> Vec<f64> {
     let first = (min / step).floor();
     let last = (max / step - 1e-9).ceil();
     (0..=(last - first) as i64)
-        .map(|i| clean((first + i as f64) * step))
+        .map(|i| clean((first + i as f64) * step, step))
         .collect()
 }
 
@@ -147,21 +147,29 @@ fn nice_step(raw: f64) -> f64 {
         .unwrap_or(10.0 * magnitude)
 }
 
-/// Rounds away binary noise such as 0.30000000000000004.
-fn clean(value: f64) -> f64 {
-    let rounded = (value * 1e9).round() / 1e9;
+/// Rounds away binary noise such as 0.30000000000000004, to a few digits finer than `step`.
+fn clean(value: f64, step: f64) -> f64 {
+    let digits = (3.0 - step.log10().floor()).clamp(0.0, 300.0) as i32;
+    let scale = 10f64.powi(digits);
+    let rounded = (value * scale).round() / scale;
     if rounded == 0.0 { 0.0 } else { rounded }
 }
 
 /// Ticks for a span of time in milliseconds, `window`, at round steps aligned so that one lands
 /// on `now`, labeled by how long before `now` they are: `-4m`, `-30s`, `now`.
 pub fn ago_ticks(window: (f64, f64), now: f64) -> Vec<(f64, String)> {
-    const STEPS: [f64; 9] = [1e3, 5e3, 10e3, 15e3, 30e3, 60e3, 120e3, 300e3, 600e3];
+    const STEPS: [f64; 13] = [
+        1e3, 5e3, 10e3, 15e3, 30e3, 60e3, 120e3, 300e3, 600e3, 1_800e3, 3_600e3, 7_200e3, 21_600e3,
+    ];
+    if !(window.0.is_finite() && window.1.is_finite() && now.is_finite()) {
+        return Vec::new();
+    }
     let span = (window.1 - window.0).max(1.0);
+    // Past the largest step, a whole number of them keeps the ticks to about seven.
     let step = STEPS
         .into_iter()
         .find(|step| span / step <= 7.0)
-        .unwrap_or(1_800e3);
+        .unwrap_or_else(|| (span / 7.0 / 21_600e3).ceil() * 21_600e3);
     let mut t = now - ((now - window.0) / step).floor() * step;
     let mut ticks = Vec::new();
     while t <= window.1 + 1e-6 {
@@ -173,23 +181,41 @@ pub fn ago_ticks(window: (f64, f64), now: f64) -> Vec<(f64, String)> {
     ticks
 }
 
-/// SVG path data joining `points` with straight lines.
+/// SVG path data joining `points` with straight lines. A point that isn't finite, such as a
+/// missing sample, breaks the line rather than the whole path, and a point alone on its
+/// stretch draws as a dot.
 pub fn line_path(points: &[(f64, f64)]) -> String {
     let mut d = String::with_capacity(points.len() * 14);
-    for (i, (x, y)) in points.iter().enumerate() {
-        let command = if i == 0 { 'M' } else { 'L' };
+    let finite = |&(x, y): &(f64, f64)| x.is_finite() && y.is_finite();
+    for (i, point) in points.iter().enumerate() {
+        if !finite(point) {
+            continue;
+        }
+        let (x, y) = point;
+        let joined = i > 0 && finite(&points[i - 1]);
+        let command = if joined { 'L' } else { 'M' };
         // Writing to a String can't fail.
         let _ = write!(d, "{command}{x:.1} {y:.1}");
+        let alone = !joined && points.get(i + 1).is_none_or(|next| !finite(next));
+        if alone {
+            // A zero-length stroke with round caps.
+            d.push_str("h0");
+        }
     }
     d
 }
 
 /// SVG path data for the area between `points` and the horizontal line at `baseline`.
 pub fn area_path(points: &[(f64, f64)], baseline: f64) -> String {
+    let points: Vec<_> = points
+        .iter()
+        .copied()
+        .filter(|(x, y)| x.is_finite() && y.is_finite())
+        .collect();
     match (points.first(), points.last()) {
         (Some(first), Some(last)) if points.len() > 1 => format!(
             "{}L{:.1} {baseline:.1}L{:.1} {baseline:.1}Z",
-            line_path(points),
+            line_path(&points),
             last.0,
             first.0
         ),
@@ -266,7 +292,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gaps_break_lines_and_lone_points_show() {
+        let nan = f64::NAN;
+        assert_eq!(line_path(&[(0.0, 1.0), (1.0, 2.0)]), "M0.0 1.0L1.0 2.0");
+        assert_eq!(
+            line_path(&[(0.0, 1.0), (1.0, nan), (2.0, 3.0), (3.0, 4.0)]),
+            "M0.0 1.0h0M2.0 3.0L3.0 4.0"
+        );
+        assert_eq!(line_path(&[(5.0, 5.0)]), "M5.0 5.0h0");
+        assert_eq!(area_path(&[(0.0, 1.0), (1.0, nan)], 9.0), "");
+    }
+
+    #[test]
+    fn time_ticks_stay_few_and_finite() {
+        assert!(ago_ticks((0.0, f64::INFINITY), 0.0).is_empty());
+        let day = 86_400e3;
+        let ticks = ago_ticks((-day, 0.0), 0.0);
+        assert!((2..=8).contains(&ticks.len()), "{}", ticks.len());
+        let week = ago_ticks((-7.0 * day, 0.0), 0.0);
+        assert!((2..=8).contains(&week.len()), "{}", week.len());
+    }
+
     proptest! {
+        #[test]
+        fn tiny_spans_get_distinct_ticks(min in -1.0f64..1.0, span in 1e-12f64..1e-3) {
+            let ticks = nice_ticks(min, min + span, 4);
+            prop_assert!(ticks.len() >= 2);
+            prop_assert!(ticks.windows(2).all(|w| w[1] > w[0]), "{:?}", ticks);
+        }
+
         #[test]
         fn ticks_cover_the_span(min in -1e6f64..1e6, span in 1e-3f64..1e9, target in 1usize..10) {
             let max = min + span;

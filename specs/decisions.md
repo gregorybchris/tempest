@@ -3325,3 +3325,23 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `tempest share --publish <tracker>` with `--title`, `--description`, `--category`, `--tag` and `--invite` publishes through the daemon, or standalone with the share's own key. `tempest catalog publish` publishes a transfer already added, and `tempest catalog sign-in <tracker> --code` signs a browser in.
 
 **Rationale:** The key stays with the engine, so the catalog account is always the key that announces and serves the bundle. A set of trackers survives restarts and config changes, and a plain list in the config keeps the existing `trackers` format unchanged.
+
+---
+
+## D-209: Catalog search, facets and ranking
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** D-130 chooses Tantivy for catalog search, with typo tolerance and category and tag facets, and ranks by live swarm health, votes and downloads over time. It leaves open where the index lives, how typos and ranking work, how downloads are counted and what the query looks like.
+
+**Options:** **Index:** on disk beside the SQLite file; in memory, rebuilt from SQLite at startup (chosen). **Typos:** Tantivy's query parser with fuzzy fields; a query built per word (chosen). **Ranking with live counts:** store swarm counts in the index; rank the matches in Rust with counts read at query time (chosen). **Downloads:** every `completed` announce; once per peer as it becomes complete (chosen); per IP. **Query string:** serde's URL encoding; a parser in `catalog-api`, as `sim-api`'s (chosen), since tags repeat.
+
+**Decision:**
+
+- The tracker keeps a Tantivy index of listed bundles in memory: title, description, tags, content name and category name as text, category and tags as facets. It is built from the store when the catalog opens and updated whenever a listing is listed, edited or withdrawn.
+- Every word of the search must match a field, exactly or within an edit distance of 0 (up to 3 letters), 1 (up to 6) or 2; the last word also matches as a prefix. Exact matches score by BM25 above fuzzy ones; titles weigh most, then tags and content names, then category names and descriptions. Words are lowercased and folded to ASCII.
+- `GET /catalog/v1/listings` takes `q`, `category`, `tag` (repeated), `sort`, `offset` and `limit`, parsed by `catalog-api`'s `ListingQuery`. Its page carries facet counts: categories as if no category were picked, tags among the matches.
+- Sorts: `relevance` (default), `newest`, `seeders` (complete peers, then all), `votes` (up less down) and `trending`. Relevance is the text score times e^(0.2 × popularity), where popularity adds the logarithms of swarm health (complete peers plus a quarter per incomplete one), net votes (signed) and trending; without text, popularity alone orders. Trending sums the last 30 days' downloads, halving every 3 days. Ties go to the newer listing.
+- Catalog store migration 2 counts downloads per bundle and day. A `completed` announce counts if the peer wasn't already a live complete peer, and only for bundles with a listing. Listings show their total downloads.
+
+**Rationale:** Rebuilding is cheap at catalog sizes and keeps the index from drifting from SQLite after a crash, so SQLite stays the one source of truth. Per-word queries give typo tolerance with exact matches still ranking first, and prefix matching makes search-as-you-type work. Swarm counts change with every announce, so they are read live rather than indexed. Logarithms keep one huge swarm or vote count from burying better text matches. Counting a peer's transition to complete stops repeated announces from inflating downloads, though new peer IDs still can; per-IP or per-account limits are still open.

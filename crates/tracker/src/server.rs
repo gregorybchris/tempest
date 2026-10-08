@@ -15,7 +15,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use tempest_catalog_api::listing::Listing;
 use tempest_protocol::BundleId;
-use tempest_protocol::tracker::{API_PREFIX, AnnounceRequest, ErrorCode, listing_message};
+use tempest_protocol::tracker::{
+    API_PREFIX, AnnounceEvent, AnnounceRequest, BundleStats, ErrorCode, listing_message,
+};
 use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
@@ -157,6 +159,14 @@ impl Tracker {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// A bundle's swarm counts now.
+    ///
+    /// The catalog's routes call this while holding the catalog's lock: the catalog's lock is
+    /// always taken before the swarms', never while holding them.
+    pub(crate) fn swarm_stats(&self, bundle: &BundleId) -> BundleStats {
+        self.lock().stats(Instant::now(), bundle)
+    }
+
     /// Fills in the listings' swarm counts.
     pub(crate) fn add_swarms(&self, listings: &mut [Listing]) {
         let now = Instant::now();
@@ -232,23 +242,33 @@ async fn announce(
         return refuse(Refusal::new(ErrorCode::InvalidRequest, message));
     }
     let observed = tracker.observed_ip(peer, &headers);
-    let result = tracker.lock().announce(Instant::now(), &request, observed);
-    match result {
-        Ok(response) => {
-            if listing.is_some() {
-                let now = catalog::unix_now();
-                let listed = tracker
-                    .catalog()
-                    .request_listing(now, &request.bundle, &request.peer);
-                // The announce itself succeeded; the listing can be asked for again next time.
-                if let Err(error) = listed {
-                    eprintln!("cannot list {}: {error}", request.bundle);
-                }
-            }
-            json(StatusCode::OK, &response)
+    let (result, downloaded) = {
+        let mut swarms = tracker.lock();
+        // A download counts once per peer, when it completes, not when it says so again.
+        let downloaded = request.event == AnnounceEvent::Completed
+            && !swarms.is_complete(Instant::now(), &request.bundle, &request.peer);
+        let result = swarms.announce(Instant::now(), &request, observed);
+        (result, downloaded)
+    };
+    let response = match result {
+        Ok(response) => response,
+        Err(refusal) => return refuse(refusal),
+    };
+    if tracker.catalog.is_some() && (listing.is_some() || downloaded) {
+        let now = catalog::unix_now();
+        let mut catalog = tracker.catalog();
+        // The announce itself succeeded; the catalog's work is retried by later announces or
+        // lost, as a download count is, and neither is worth refusing it for.
+        if listing.is_some()
+            && let Err(error) = catalog.request_listing(now, &request.bundle, &request.peer)
+        {
+            eprintln!("cannot list {}: {error}", request.bundle);
         }
-        Err(refusal) => refuse(refusal),
+        if downloaded && let Err(error) = catalog.record_download(now, &request.bundle) {
+            eprintln!("cannot count a download of {}: {error}", request.bundle);
+        }
     }
+    json(StatusCode::OK, &response)
 }
 
 async fn stats(State(tracker): State<Tracker>, Path(bundle): Path<String>) -> Response {

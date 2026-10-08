@@ -8,14 +8,15 @@
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::{BytesRejection, QueryRejection};
-use axum::extract::{DefaultBodyLimit, Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::routing::{delete, get, post, put};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tempest_catalog_api::account::{AccountEdit, Poll, PollResponse, SignIn, normalize_authority};
-use tempest_catalog_api::listing::{ListingEdit, ListingQuery, NewComment, VoteRequest};
+use tempest_catalog_api::listing::{ListingEdit, NewComment, VoteRequest};
+use tempest_catalog_api::query::{DEFAULT_LIMIT, ListingQuery};
 use tempest_catalog_api::{PREFIX, SESSION_COOKIE};
 use tempest_protocol::tracker::ErrorCode;
 use tempest_protocol::{BundleId, PeerId};
@@ -227,7 +228,7 @@ struct PageQuery {
 }
 
 fn default_limit() -> u32 {
-    ListingQuery::default().limit
+    DEFAULT_LIMIT
 }
 
 fn query<T>(query: Result<Query<T>, QueryRejection>) -> Result<T, Refusal> {
@@ -255,15 +256,18 @@ async fn my_listings(
 async fn listings(
     State(tracker): State<Tracker>,
     headers: HeaderMap,
-    listing_query: Result<Query<ListingQuery>, QueryRejection>,
+    RawQuery(raw): RawQuery,
 ) -> Response {
     answer((|| {
-        let listing_query = query(listing_query)?;
+        let listing_query = ListingQuery::parse(raw.as_deref().unwrap_or(""))
+            .map_err(|error| Refusal::new(ErrorCode::InvalidRequest, error.to_string()))?;
         let viewer = viewer(&tracker, &headers);
-        let mut page = tracker
-            .catalog()
-            .listings(&listing_query, viewer.as_ref())?;
-        tracker.add_swarms(&mut page.listings);
+        let page =
+            tracker
+                .catalog()
+                .listings(now(), &listing_query, viewer.as_ref(), |bundle| {
+                    tracker.swarm_stats(bundle)
+                })?;
         ok(&page)
     })())
 }

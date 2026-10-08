@@ -4,9 +4,10 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 use tempest_catalog_api::account::{AccountEdit, Poll, SignIn, sign_in_message};
 use tempest_catalog_api::codes;
 use tempest_catalog_api::listing::{
-    Content, ListingEdit, ListingQuery, ListingStatus, NewComment, Vote,
+    Content, ListingEdit, ListingPage, ListingStatus, NewComment, Vote,
 };
-use tempest_protocol::tracker::{Signature, listing_message};
+use tempest_catalog_api::query::{ListingQuery, Sort};
+use tempest_protocol::tracker::{BundleStats, Signature, listing_message};
 use tempest_protocol::{BundleId, PeerId};
 
 use super::{Catalog, CatalogConfig, verify};
@@ -60,6 +61,13 @@ fn sign_in(catalog: &mut Catalog, key: &Key, now: u64) -> String {
         invite: None,
     };
     catalog.sign_in(now, AUTHORITY, &request).unwrap().token
+}
+
+/// The listings matching `query`, when every swarm is empty.
+fn browse(catalog: &Catalog, query: &ListingQuery) -> ListingPage {
+    catalog
+        .listings(0, query, None, |_| BundleStats::default())
+        .unwrap()
 }
 
 /// A listed bundle published by `key`.
@@ -221,13 +229,7 @@ fn listings_show_once_their_content_is_known() {
     assert!(catalog.listing(&id, Some(&bob.id())).is_err());
     let mine = catalog.listing(&id, Some(&alice.id())).unwrap();
     assert_eq!(mine.status, ListingStatus::Pending);
-    assert_eq!(
-        catalog
-            .listings(&ListingQuery::default(), None)
-            .unwrap()
-            .total,
-        0
-    );
+    assert_eq!(browse(&catalog, &ListingQuery::default()).total, 0);
 
     // Another key's request doesn't take it over.
     catalog.request_listing(11, &id, &bob.id()).unwrap();
@@ -349,11 +351,12 @@ fn browsing_pages_newest_first_and_filters_by_category() {
             .unwrap();
     }
     let query = ListingQuery {
+        sort: Sort::Newest,
         offset: 1,
         limit: 2,
         ..ListingQuery::default()
     };
-    let page = catalog.listings(&query, None).unwrap();
+    let page = browse(&catalog, &query);
     assert_eq!(page.total, 5);
     let order: Vec<_> = page.listings.iter().map(|l| l.bundle).collect();
     assert_eq!(order, [bundle(4), bundle(3)]);
@@ -362,7 +365,7 @@ fn browsing_pages_newest_first_and_filters_by_category() {
         category: Some("models".into()),
         ..ListingQuery::default()
     };
-    let page = catalog.listings(&models, None).unwrap();
+    let page = browse(&catalog, &models);
     assert_eq!(page.total, 2);
     assert!(
         page.listings
@@ -465,4 +468,93 @@ fn the_catalog_survives_a_restart() {
     let catalog = Catalog::open(&path, CatalogConfig::default()).unwrap();
     assert_eq!(catalog.authenticate(1, &token).unwrap(), alice.id());
     assert_eq!(catalog.listing(&bundle(1), None).unwrap().title, "bundle 1");
+}
+
+#[test]
+fn reopening_rebuilds_the_search_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("catalog.sqlite");
+    let alice = Key::new(1);
+    {
+        let mut catalog = Catalog::open(&path, CatalogConfig::default()).unwrap();
+        let id = publish(&mut catalog, &alice, 1, 0);
+        let edit = ListingEdit {
+            title: Some("Orbital imagery".into()),
+            category: Some(Some("datasets".into())),
+            ..ListingEdit::default()
+        };
+        catalog.edit_listing(1, &id, &alice.id(), &edit).unwrap();
+        publish(&mut catalog, &alice, 2, 0);
+        catalog.withdraw(2, &bundle(2), &alice.id()).unwrap();
+        // Pending listings aren't searchable either.
+        catalog.request_listing(3, &bundle(3), &alice.id()).unwrap();
+    }
+    let catalog = Catalog::open(&path, CatalogConfig::default()).unwrap();
+    let search = |q: &str| {
+        let query = ListingQuery {
+            q: q.into(),
+            ..ListingQuery::default()
+        };
+        let page = browse(&catalog, &query);
+        page.listings.iter().map(|l| l.bundle).collect::<Vec<_>>()
+    };
+    assert_eq!(search("orbitl"), [bundle(1)]);
+    // The category's name is searchable as well as its slug's facet.
+    assert_eq!(search("Datasets"), [bundle(1)]);
+    assert_eq!(search(""), [bundle(1)]);
+}
+
+#[test]
+fn downloads_count_by_day_and_trend() {
+    const DAY: u64 = 24 * 60 * 60;
+    let mut catalog = catalog(false);
+    let alice = Key::new(1);
+    let (old, new) = (
+        publish(&mut catalog, &alice, 1, 0),
+        publish(&mut catalog, &alice, 2, 0),
+    );
+    let today = 100 * DAY;
+    for _ in 0..4 {
+        catalog.record_download(today - 10 * DAY, &old).unwrap();
+    }
+    catalog.record_download(today, &new).unwrap();
+    catalog.record_download(today + 5, &new).unwrap();
+    // A bundle nobody listed isn't counted, and isn't an error.
+    catalog.record_download(today, &bundle(9)).unwrap();
+
+    let query = ListingQuery {
+        sort: Sort::Trending,
+        ..ListingQuery::default()
+    };
+    let page = catalog
+        .listings(today, &query, None, |_| BundleStats::default())
+        .unwrap();
+    let order: Vec<_> = page
+        .listings
+        .iter()
+        .map(|l| (l.bundle, l.downloads))
+        .collect();
+    // Four downloads ten days ago weigh less than two today.
+    assert_eq!(order, [(new, 2), (old, 4)]);
+}
+
+#[test]
+fn seeders_sort_uses_the_live_swarms() {
+    let mut catalog = catalog(false);
+    let alice = Key::new(1);
+    for n in 1..=3 {
+        publish(&mut catalog, &alice, n, u64::from(n));
+    }
+    let query = ListingQuery {
+        sort: Sort::Seeders,
+        ..ListingQuery::default()
+    };
+    let swarm = |id: &BundleId| BundleStats {
+        complete: u64::from(id.as_bytes()[0] == 1),
+        incomplete: u64::from(id.as_bytes()[0]),
+    };
+    let page = catalog.listings(0, &query, None, swarm).unwrap();
+    let order: Vec<_> = page.listings.iter().map(|l| l.bundle).collect();
+    assert_eq!(order, [bundle(1), bundle(3), bundle(2)]);
+    assert_eq!(page.listings[1].swarm.incomplete, 3);
 }

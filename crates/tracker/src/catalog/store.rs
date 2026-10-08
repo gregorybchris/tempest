@@ -1,10 +1,11 @@
-//! The catalog's saved state, in SQLite: accounts, sessions, invites, listings, votes and
-//! comments.
+//! The catalog's saved state, in SQLite: accounts, sessions, invites, listings, votes,
+//! comments, and downloads by day.
 //!
 //! The store only reads and writes; [`super::Catalog`] decides what is allowed. The schema is
 //! created and upgraded by numbered migrations, tracked in SQLite's `user_version`, as the
 //! engine's is. Times are seconds since the Unix epoch.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -15,7 +16,8 @@ use tempest_protocol::tracker::BundleStats;
 use tempest_protocol::{BundleId, Hash, PeerId};
 
 /// The migrations, in order. Migration `i` takes the schema from version `i` to `i + 1`.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
 CREATE TABLE accounts (
     key BLOB PRIMARY KEY NOT NULL,
     name TEXT,
@@ -68,7 +70,17 @@ CREATE TABLE comments (
     created INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX comments_by_listing ON comments (bundle, created);
-"];
+",
+    "
+CREATE TABLE downloads (
+    bundle BLOB NOT NULL REFERENCES listings (bundle) ON DELETE CASCADE,
+    day INTEGER NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (bundle, day)
+) STRICT;
+CREATE INDEX downloads_by_day ON downloads (day);
+",
+];
 
 /// Why the catalog's database failed.
 #[derive(Debug, thiserror::Error)]
@@ -87,6 +99,9 @@ pub enum StoreError {
     /// A row holds something this build can't read.
     #[error("catalog database: {0}")]
     Corrupt(String),
+    /// The search index, which mirrors the database, failed.
+    #[error("catalog search index: {0}")]
+    Search(#[from] tantivy::TantivyError),
 }
 
 /// A listing's own fields, as a publisher sets them.
@@ -100,6 +115,19 @@ pub struct ListingFields {
     pub category: Option<String>,
     /// The tags, normalized.
     pub tags: Vec<String>,
+}
+
+/// What the search index holds of a listed bundle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed {
+    /// The bundle.
+    pub bundle: BundleId,
+    /// The publisher's fields.
+    pub fields: ListingFields,
+    /// The content's name.
+    pub content_name: String,
+    /// When the listing was first asked for.
+    pub created: u64,
 }
 
 /// The catalog's database.
@@ -147,7 +175,8 @@ const LISTING_COLUMNS: &str = "
     (SELECT count(*) FROM votes v WHERE v.bundle = l.bundle AND v.value = 1),
     (SELECT count(*) FROM votes v WHERE v.bundle = l.bundle AND v.value = -1),
     (SELECT v.value FROM votes v WHERE v.bundle = l.bundle AND v.key = ?1),
-    (SELECT count(*) FROM comments c WHERE c.bundle = l.bundle)";
+    (SELECT count(*) FROM comments c WHERE c.bundle = l.bundle),
+    (SELECT coalesce(sum(d.count), 0) FROM downloads d WHERE d.bundle = l.bundle)";
 
 impl Store {
     /// Opens the database at `path`, creating it if needed, and brings its schema up to date.
@@ -493,24 +522,6 @@ impl Store {
         Ok((listings, to_u64(total)))
     }
 
-    /// Listed bundles, newest first, only those in `category` if it is given.
-    pub fn listed(
-        &self,
-        viewer: Option<&PeerId>,
-        category: Option<&str>,
-        offset: u64,
-        limit: u32,
-    ) -> Result<(Vec<Listing>, u64), StoreError> {
-        self.listing_page(
-            viewer,
-            "l.status = 'listed' AND (?2 IS NULL OR l.category = ?2)",
-            &[&category],
-            "l.created DESC, l.bundle",
-            offset,
-            limit,
-        )
-    }
-
     /// Every listing `publisher` asked for, whatever its status, most recently changed first.
     pub fn published_by(
         &self,
@@ -569,8 +580,127 @@ impl Store {
             },
             my_vote,
             comments: to_u64(row.get(15)?),
+            downloads: to_u64(row.get(16)?),
             swarm: BundleStats::default(),
         })
+    }
+
+    // Search and ranking.
+
+    /// What the search index holds of `bundle`, if it is listed.
+    pub fn indexed(&self, bundle: &BundleId) -> Result<Option<Indexed>, StoreError> {
+        Ok(self
+            .indexed_where("AND bundle = ?1", &[&bundle.as_bytes().as_slice()])?
+            .pop())
+    }
+
+    /// What the search index holds of every listed bundle.
+    pub fn all_indexed(&self) -> Result<Vec<Indexed>, StoreError> {
+        self.indexed_where("", &[])
+    }
+
+    fn indexed_where(
+        &self,
+        filter: &str,
+        filter_params: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<Indexed>, StoreError> {
+        let sql = format!(
+            "SELECT bundle, title, description, category, content_name, created FROM listings
+             WHERE status = 'listed' {filter}"
+        );
+        let mut statement = self.conn.prepare_cached(&sql)?;
+        let rows = statement.query_map(filter_params, |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        })?;
+        let mut indexed = Vec::new();
+        for row in rows {
+            let (bundle, title, description, category, content_name, created) = row?;
+            let bundle = hash_of(bundle)?;
+            indexed.push(Indexed {
+                bundle,
+                fields: ListingFields {
+                    title,
+                    description,
+                    category,
+                    tags: self.tags(&bundle)?,
+                },
+                content_name: content_name.unwrap_or_default(),
+                created: to_u64(created),
+            });
+        }
+        Ok(indexed)
+    }
+
+    /// Counts a download of `bundle` on `day` (days since the Unix epoch), if it has a listing.
+    pub fn record_download(&self, bundle: &BundleId, day: u64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO downloads (bundle, day, count)
+             SELECT ?1, ?2, 1 WHERE EXISTS (SELECT 1 FROM listings WHERE bundle = ?1)
+             ON CONFLICT (bundle, day) DO UPDATE SET count = count + 1",
+            params![bundle.as_bytes(), to_i64(day)],
+        )?;
+        Ok(())
+    }
+
+    /// Every listed bundle's downloads on each day from `since` on, by bundle.
+    pub fn downloads_since(
+        &self,
+        since: u64,
+    ) -> Result<HashMap<BundleId, Vec<(u64, u64)>>, StoreError> {
+        let mut statement = self.conn.prepare_cached(
+            "SELECT d.bundle, d.day, d.count FROM downloads d
+             JOIN listings l ON l.bundle = d.bundle
+             WHERE d.day >= ?1 AND l.status = 'listed'",
+        )?;
+        let rows = statement.query_map([to_i64(since)], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        let mut downloads: HashMap<BundleId, Vec<(u64, u64)>> = HashMap::new();
+        for row in rows {
+            let (bundle, day, count) = row?;
+            downloads
+                .entry(hash_of(bundle)?)
+                .or_default()
+                .push((to_u64(day), to_u64(count)));
+        }
+        Ok(downloads)
+    }
+
+    /// Every listed bundle's votes, for those that have any.
+    pub fn vote_counts(&self) -> Result<HashMap<BundleId, VoteCounts>, StoreError> {
+        let mut statement = self.conn.prepare_cached(
+            "SELECT v.bundle, sum(v.value = 1), sum(v.value = -1) FROM votes v
+             JOIN listings l ON l.bundle = v.bundle
+             WHERE l.status = 'listed' GROUP BY v.bundle",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        let mut votes = HashMap::new();
+        for row in rows {
+            let (bundle, up, down) = row?;
+            let counts = VoteCounts {
+                up: to_u64(up),
+                down: to_u64(down),
+            };
+            votes.insert(hash_of(bundle)?, counts);
+        }
+        Ok(votes)
     }
 
     // Votes and comments.

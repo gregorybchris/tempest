@@ -507,3 +507,219 @@ async fn browsing_filters_and_pages() {
     .await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
 }
+
+/// Lists bundle `n` for `key`, whose session is `auth`, with the fields in `edit`.
+async fn list(tracker: &Tracker, key: &Key, auth: &str, n: u8, edit: Value) {
+    let router = tracker.router();
+    let id = bundle(n);
+    announce_listed(&router, key, &id).await;
+    let content = Content {
+        name: format!("content-{n}"),
+        size: 1,
+        files: 1,
+    };
+    let catalog = tracker.catalog_handle().unwrap();
+    catalog.lock().unwrap().set_content(&id, &content).unwrap();
+    let path = format!("/catalog/v1/listings/{id}");
+    let edited = call(
+        &router,
+        Method::PUT,
+        &path,
+        &[("authorization", auth)],
+        edit,
+    )
+    .await;
+    assert_eq!(edited.status, StatusCode::OK, "{}", edited.body);
+}
+
+/// The bundles of a search's listings, by their first byte, and the whole page.
+async fn search(router: &Router, query: &str) -> (Vec<u8>, Value) {
+    let path = format!("/catalog/v1/listings?{query}");
+    let page = call(router, Method::GET, &path, &[], Value::Null).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    let found = page.body["listings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|listing| {
+            let id: BundleId = serde_json::from_value(listing["bundle"].clone()).unwrap();
+            id.as_bytes()[0]
+        })
+        .collect();
+    (found, page.body)
+}
+
+/// Three listings for searching.
+async fn weather_and_models() -> (Tracker, Router) {
+    let tracker = tracker();
+    let router = tracker.router();
+    let alice = Key::new(1);
+    let auth = sign_in(&router, &alice).await;
+    let listings = [
+        json!({
+            "title": "Global weather archive",
+            "description": "Hourly readings from ten thousand stations.",
+            "category": "datasets",
+            "tags": ["climate", "weather"],
+        }),
+        json!({
+            "title": "Station notes",
+            "description": "Notes about maintaining a weather station.",
+            "category": "documents",
+            "tags": ["climate"],
+        }),
+        json!({
+            "title": "Llama weights",
+            "description": "A small language model.",
+            "category": "models",
+            "tags": ["machine-learning"],
+        }),
+    ];
+    for (n, edit) in (1..).zip(listings) {
+        list(&tracker, &alice, &auth, n, edit).await;
+    }
+    (tracker, router)
+}
+
+#[tokio::test]
+async fn searching_forgives_typos_and_ranks_titles_first() {
+    let (_tracker, router) = weather_and_models().await;
+    assert_eq!(search(&router, "q=weather").await.0, [1, 2]);
+    assert_eq!(search(&router, "q=wether").await.0, [1, 2]);
+    assert_eq!(search(&router, "q=weathr+archve").await.0, [1]);
+    // The last word matches as a prefix, so results follow typing.
+    assert_eq!(search(&router, "q=lla").await.0, [3]);
+    assert_eq!(search(&router, "q=machine%20learning").await.0, [3]);
+    assert_eq!(search(&router, "q=content-2").await.0, [2]);
+    let (found, page) = search(&router, "q=zebra").await;
+    assert!(found.is_empty());
+    assert_eq!(page["total"], 0);
+}
+
+#[tokio::test]
+async fn searching_counts_facets_and_filters_by_tag() {
+    let (_tracker, router) = weather_and_models().await;
+    let (found, page) = search(&router, "tag=climate").await;
+    assert_eq!(found.len(), 2);
+    assert_eq!(
+        page["facets"],
+        json!({
+            "categories": [
+                { "value": "datasets", "count": 1 },
+                { "value": "documents", "count": 1 },
+            ],
+            "tags": [
+                { "value": "climate", "count": 2 },
+                { "value": "weather", "count": 1 },
+            ],
+        })
+    );
+    // A category narrows the matches but not the category counts.
+    let (found, page) = search(&router, "tag=Climate&category=datasets").await;
+    assert_eq!(found, [1]);
+    assert_eq!(page["facets"]["categories"].as_array().unwrap().len(), 2);
+    assert_eq!(page["facets"]["tags"].as_array().unwrap().len(), 2);
+    let (found, _) = search(&router, "q=station&category=documents").await;
+    assert_eq!(found, [2]);
+
+    let bad = call(
+        &router,
+        Method::GET,
+        "/catalog/v1/listings?tag=c%2B%2B",
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    assert!(bad.body["message"].as_str().unwrap().starts_with("tag:"));
+}
+
+#[tokio::test]
+async fn search_follows_edits_and_withdrawals() {
+    let tracker = tracker();
+    let router = tracker.router();
+    let alice = Key::new(1);
+    let auth = sign_in(&router, &alice).await;
+    list(
+        &tracker,
+        &alice,
+        &auth,
+        1,
+        json!({ "title": "Tide tables" }),
+    )
+    .await;
+    assert_eq!(search(&router, "q=tide").await.0, [1]);
+
+    let path = format!("/catalog/v1/listings/{}", bundle(1));
+    let headers = [("authorization", auth.as_str())];
+    let edit = json!({ "title": "Sea levels" });
+    call(&router, Method::PUT, &path, &headers, edit).await;
+    assert!(search(&router, "q=tide").await.0.is_empty());
+    assert_eq!(search(&router, "q=sea").await.0, [1]);
+
+    call(&router, Method::DELETE, &path, &headers, Value::Null).await;
+    assert!(search(&router, "q=sea").await.0.is_empty());
+    call(&router, Method::PUT, &path, &headers, json!({})).await;
+    assert_eq!(search(&router, "q=sea").await.0, [1]);
+}
+
+/// Announces `bundle` as `key`, with `event` and `complete`.
+async fn announce(router: &Router, key: &Key, bundle: &BundleId, event: &str, complete: bool) {
+    let mut body = announce_body(key, bundle, None);
+    body["event"] = json!(event);
+    body["complete"] = json!(complete);
+    let answer = call(router, Method::POST, "/tempest/v1/announce", &[], body).await;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+}
+
+#[tokio::test]
+async fn sorts_rank_by_swarm_votes_and_downloads() {
+    let (_tracker, router) = weather_and_models().await;
+    let (b1, b2, b3) = (bundle(1), bundle(2), bundle(3));
+    // Every bundle has its publisher as a complete peer. Completing peers count as downloads,
+    // once each; peers that start complete add seeders only.
+    announce(&router, &Key::new(20), &b1, "completed", true).await;
+    for n in [21, 22] {
+        announce(&router, &Key::new(n), &b2, "started", false).await;
+        announce(&router, &Key::new(n), &b2, "completed", true).await;
+        announce(&router, &Key::new(n), &b2, "completed", true).await;
+    }
+    for n in [30, 31, 32] {
+        announce(&router, &Key::new(n), &b3, "started", true).await;
+    }
+    let (bob, carol) = (Key::new(2), Key::new(3));
+    let (bob_auth, carol_auth) = (sign_in(&router, &bob).await, sign_in(&router, &carol).await);
+    for (auth, id, vote) in [
+        (&bob_auth, &b1, "up"),
+        (&carol_auth, &b1, "up"),
+        (&bob_auth, &b3, "down"),
+    ] {
+        let path = format!("/catalog/v1/listings/{id}/vote");
+        let headers = [("authorization", auth.as_str())];
+        let voted = call(
+            &router,
+            Method::PUT,
+            &path,
+            &headers,
+            json!({ "vote": vote }),
+        )
+        .await;
+        assert_eq!(voted.status, StatusCode::OK, "{}", voted.body);
+    }
+
+    let (seeders, page) = search(&router, "sort=seeders").await;
+    assert_eq!(seeders, [3, 2, 1]);
+    assert_eq!(page["listings"][0]["swarm"]["complete"], 4);
+    let (trending, page) = search(&router, "sort=trending").await;
+    assert_eq!(trending, [2, 1, 3]);
+    assert_eq!(page["listings"][0]["downloads"], 2);
+    assert_eq!(page["listings"][2]["downloads"], 0);
+    assert_eq!(search(&router, "sort=votes").await.0, [1, 2, 3]);
+    // Relevance without text is popularity: health, net votes and trending together.
+    assert_eq!(search(&router, "").await.0, [1, 2, 3]);
+    assert_eq!(search(&router, "sort=votes&q=climate").await.0, [1, 2]);
+    assert_eq!(search(&router, "sort=seeders&q=climate").await.0, [2, 1]);
+    let (paged, page) = search(&router, "sort=seeders&offset=1&limit=1").await;
+    assert_eq!(paged, [2]);
+    assert_eq!(page["total"], 3);
+}

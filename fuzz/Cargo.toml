@@ -158,3 +158,10 @@ path = "fuzz_targets/catalog_json.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "catalog_query"
+path = "fuzz_targets/catalog_query.rs"
+test = false
+doc = false
+bench = false

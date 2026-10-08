@@ -7,6 +7,7 @@
 //!
 //! - [`account`]: signing in with a Tempest key (D-128), and accounts.
 //! - [`listing`]: listings, votes and comments.
+//! - [`query`]: searching, filtering and sorting listings.
 //! - [`text`]: the rules for the text people write: titles, descriptions, tags, comments and
 //!   names.
 //!
@@ -15,6 +16,7 @@
 
 pub mod account;
 pub mod listing;
+pub mod query;
 pub mod text;
 
 use serde::{Deserialize, Serialize};

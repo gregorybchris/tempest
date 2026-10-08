@@ -294,6 +294,14 @@ impl Swarms {
         }
     }
 
+    /// Whether `peer` is a live, complete peer of `bundle`'s swarm at `now`.
+    pub fn is_complete(&self, now: Instant, bundle: &BundleId, peer: &PeerId) -> bool {
+        self.swarms
+            .get(bundle)
+            .and_then(|swarm| swarm.peers.get(peer))
+            .is_some_and(|listing| listing.complete && listing.expires > now)
+    }
+
     /// A bundle's live peers at `now`, each with whether it is complete.
     pub fn peers(&self, now: Instant, bundle: &BundleId) -> Vec<(PeerEntry, bool)> {
         let Some(swarm) = self.swarms.get(bundle) else {

@@ -43,7 +43,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `tui` | Terminal UI | `api`, `engine` (its API client) |
 | `sim-web` | Simulation results UI | `ui-kit`, `sim-api` |
 | `catalog-api` | The tracker catalog API's types and text rules, shared by the tracker, the client and the catalog UI (D-206) | `protocol` |
-| `tracker` | Tracker server: peer-list service, catalog, fetching listed bundles' manifests (D-207) | `protocol`, `catalog-api`, `net`, `ui-kit` |
+| `tracker` | Tracker server: peer-list service, catalog with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `protocol`, `catalog-api`, `net`, `ui-kit` |
 | `relay` | Relay library (the binary is `tempest relay`) | `protocol`, `net` (D-185) |
 | `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI, web UI and the results UI; embeds the web UIs' built files (D-201) | most of the above |
 
@@ -62,6 +62,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | Client config | YAML, with profiles + overrides | D-005, D-081 |
 | Engine API | HTTP + JSON, server-sent events with resumable IDs | D-080 |
 | Tracker API | HTTPS + JSON | D-043 |
+| Tracker catalog | SQLite store, Tantivy search index in memory | D-206, D-130, D-209 |
 | Simulation results | DuckDB | D-075 |
 | Web UIs | Leptos 0.8 (client-side, with server rendering and islands where useful) | D-117 |
 

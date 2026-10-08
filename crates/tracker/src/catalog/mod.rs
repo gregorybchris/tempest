@@ -1,14 +1,17 @@
 //! The catalog: bundles their sharers chose to list, and the accounts that list, vote and
 //! comment on them (D-025, D-128, D-129).
 //!
-//! [`Catalog`] holds the rules. It saves its state in a [`Store`] and keeps sign-in challenges in
-//! memory, since they last minutes. Callers pass the time, in seconds since the Unix epoch, so the
-//! rules can be tested without a clock. [`routes`] serves it over HTTP.
+//! [`Catalog`] holds the rules. It saves its state in a [`Store`], mirrors listed bundles in a
+//! [`SearchIndex`] and keeps sign-in challenges in memory, since they last minutes. Callers pass
+//! the time, in seconds since the Unix epoch, so the rules can be tested without a clock.
+//! [`rank`] orders search results, and [`routes`] serves the catalog over HTTP.
 //!
 //! Operators run a catalog by choice; a tracker serves only the peer-list service without one.
 //! What a catalog lists is its operator's responsibility (D-031).
 
+pub mod rank;
 pub(crate) mod routes;
+pub mod search;
 pub mod store;
 
 use std::collections::HashMap;
@@ -22,16 +25,20 @@ use tempest_catalog_api::account::{
     normalize_code, sign_in_message,
 };
 use tempest_catalog_api::listing::{
-    Comment, Content, Listing, ListingEdit, ListingPage, ListingQuery, ListingStatus, MAX_PAGE,
-    NewComment, Vote,
+    Comment, Content, Listing, ListingEdit, ListingPage, ListingStatus, MAX_PAGE, NewComment, Vote,
 };
+use tempest_catalog_api::query::ListingQuery;
 use tempest_catalog_api::{CatalogInfo, Category, codes, default_categories, text};
-use tempest_protocol::tracker::{ErrorCode, Signature};
+use tempest_protocol::tracker::{BundleStats, ErrorCode, Signature};
 use tempest_protocol::{BundleId, Hash, PeerId};
 
+pub use search::SearchIndex;
 pub use store::{Store, StoreError};
 
 use crate::swarms::Refusal;
+
+/// The length of a day, in seconds: downloads are counted by day.
+const DAY: u64 = 24 * 60 * 60;
 
 /// How long a sign-in code can be signed and its session collected.
 const CHALLENGE_LIFETIME: u64 = 10 * 60;
@@ -75,6 +82,7 @@ struct Pending {
 #[derive(Debug)]
 pub struct Catalog {
     store: Store,
+    search: SearchIndex,
     config: CatalogConfig,
     challenges: HashMap<String, Pending>,
 }
@@ -106,6 +114,13 @@ fn random<const N: usize>() -> Result<[u8; N], Refusal> {
         )
     })?;
     Ok(bytes)
+}
+
+/// The name of the category whose slug is `slug`.
+fn category_name<'a>(categories: &'a [Category], slug: &Option<String>) -> Option<&'a str> {
+    let slug = slug.as_deref()?;
+    let category = categories.iter().find(|c| c.slug == slug)?;
+    Some(&category.name)
 }
 
 /// A refusal with one of the catalog's codes.
@@ -141,20 +156,42 @@ impl From<StoreError> for Refusal {
 impl Catalog {
     /// The catalog saved at `path`, created if there is none.
     pub fn open(path: &Path, config: CatalogConfig) -> Result<Self, StoreError> {
-        Ok(Self::new(Store::open(path)?, config))
+        Self::new(Store::open(path)?, config)
     }
 
     /// A catalog kept in memory, for tests.
     pub fn in_memory(config: CatalogConfig) -> Result<Self, StoreError> {
-        Ok(Self::new(Store::in_memory()?, config))
+        Self::new(Store::in_memory()?, config)
     }
 
-    fn new(store: Store, config: CatalogConfig) -> Self {
-        Self {
+    /// The catalog of `store`, with its search index built from it.
+    fn new(store: Store, config: CatalogConfig) -> Result<Self, StoreError> {
+        let mut catalog = Self {
             store,
+            search: SearchIndex::new()?,
             config,
             challenges: HashMap::new(),
+        };
+        let listed = catalog.store.all_indexed()?;
+        let categories = &catalog.config.categories;
+        catalog.search.rebuild(
+            listed
+                .iter()
+                .map(|listing| (listing, category_name(categories, &listing.fields.category))),
+        )?;
+        Ok(catalog)
+    }
+
+    /// Brings the search index up to date with `bundle`'s listing: there if listed, else not.
+    fn reindex(&mut self, bundle: &BundleId) -> Result<(), StoreError> {
+        match self.store.indexed(bundle)? {
+            Some(listing) => {
+                let name = category_name(&self.config.categories, &listing.fields.category);
+                self.search.put(&listing, name)?;
+            }
+            None => self.search.remove(bundle)?,
         }
+        Ok(())
     }
 
     /// What the catalog is like.
@@ -382,6 +419,7 @@ impl Catalog {
         fields.category = edit.category.clone().unwrap_or(fields.category);
         fields.tags = tags.unwrap_or(fields.tags);
         self.store.set_listing_fields(bundle, &fields, now)?;
+        self.reindex(bundle)?;
         self.listing(bundle, Some(key))
     }
 
@@ -392,15 +430,24 @@ impl Catalog {
             Some((owner, _)) if owner != *key => {
                 Err(forbidden("only the listing's publisher can withdraw it"))
             }
-            Some(_) => Ok(self
-                .store
-                .set_status(bundle, ListingStatus::Withdrawn, now)?),
+            Some(_) => {
+                self.store
+                    .set_status(bundle, ListingStatus::Withdrawn, now)?;
+                Ok(self.reindex(bundle)?)
+            }
         }
     }
 
     /// Records what `bundle` holds, from its manifest, which lists it if it was pending.
     pub fn set_content(&mut self, bundle: &BundleId, content: &Content) -> Result<(), StoreError> {
-        self.store.set_content(bundle, content)
+        self.store.set_content(bundle, content)?;
+        self.reindex(bundle)
+    }
+
+    /// Counts a download of `bundle` at `now`, if it has a listing: a peer announced that it
+    /// completed the bundle.
+    pub fn record_download(&mut self, now: u64, bundle: &BundleId) -> Result<(), StoreError> {
+        self.store.record_download(bundle, now / DAY)
     }
 
     /// The bundles whose listings wait for their manifests, with their publishers, oldest
@@ -431,17 +478,60 @@ impl Catalog {
         }
     }
 
-    /// A page of listed bundles, newest first.
+    /// A page of the listed bundles that match `query`, as `viewer` sees them, with how the
+    /// matches spread over categories and tags. `swarm` gives a bundle's swarm now, for ranking
+    /// and to show.
     pub fn listings(
         &self,
+        now: u64,
         query: &ListingQuery,
         viewer: Option<&PeerId>,
+        swarm: impl Fn(&BundleId) -> BundleStats,
     ) -> Result<ListingPage, Refusal> {
-        let limit = query.limit.min(MAX_PAGE);
-        let (listings, total) =
-            self.store
-                .listed(viewer, query.category.as_deref(), query.offset, limit)?;
-        Ok(ListingPage { listings, total })
+        let found = self
+            .search
+            .search(&query.q, query.category.as_deref(), &query.tags)
+            .map_err(StoreError::from)?;
+        let today = now / DAY;
+        let mut votes = self.store.vote_counts()?;
+        let mut downloads = self
+            .store
+            .downloads_since(today.saturating_sub(rank::TRENDING_DAYS))?;
+        let mut ranked: Vec<rank::Ranked> = found
+            .matches
+            .into_iter()
+            .map(|found| rank::Ranked {
+                bundle: found.bundle,
+                text_score: found.score,
+                signals: rank::Signals {
+                    created: found.created,
+                    swarm: swarm(&found.bundle),
+                    votes: votes.remove(&found.bundle).unwrap_or_default(),
+                    trending: rank::trending(
+                        downloads.remove(&found.bundle).unwrap_or_default(),
+                        today,
+                    ),
+                },
+            })
+            .collect();
+        rank::sort(&mut ranked, query.sort);
+
+        let total = ranked.len() as u64;
+        let start = usize::try_from(query.offset).unwrap_or(usize::MAX);
+        let limit = query.limit.min(MAX_PAGE) as usize;
+        let mut listings = Vec::new();
+        for ranked in ranked.iter().skip(start).take(limit) {
+            // The store and the index change together under the catalog's lock.
+            if let Some(mut listing) = self.store.listing(&ranked.bundle, viewer)? {
+                listing.swarm = ranked.signals.swarm;
+                listings.push(listing);
+            }
+        }
+        Ok(ListingPage {
+            listings,
+            total,
+            facets: found.facets,
+        })
     }
 
     /// A page of the listings `key` asked for, whatever their status.
@@ -452,7 +542,11 @@ impl Catalog {
         limit: u32,
     ) -> Result<ListingPage, Refusal> {
         let (listings, total) = self.store.published_by(key, offset, limit.min(MAX_PAGE))?;
-        Ok(ListingPage { listings, total })
+        Ok(ListingPage {
+            listings,
+            total,
+            facets: Default::default(),
+        })
     }
 
     // Votes and comments.

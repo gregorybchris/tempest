@@ -165,6 +165,18 @@ fn a_published_share_appears_in_the_catalog() {
     assert_eq!(status, 200);
     assert_eq!(page["total"], 1);
     assert_eq!(page["listings"][0]["bundle"], bundle.as_str());
+
+    // Searching finds it despite a typo, and counts its category and tags.
+    let (status, page) = get(&url, "/catalog/v1/listings?q=rainfal+csv&tag=weather");
+    assert_eq!(status, 200, "{page}");
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["listings"][0]["bundle"], bundle.as_str());
+    assert_eq!(
+        page["facets"]["categories"],
+        serde_json::json!([{ "value": "datasets", "count": 1 }])
+    );
+    let (_, page) = get(&url, "/catalog/v1/listings?q=snowfall");
+    assert_eq!(page["total"], 0);
 }
 
 #[test]

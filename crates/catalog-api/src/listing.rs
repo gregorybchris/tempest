@@ -71,6 +71,9 @@ pub struct Listing {
     pub my_vote: Vote,
     /// The number of comments.
     pub comments: u64,
+    /// How many times the tracker saw a peer complete the bundle since its listing was asked for.
+    #[serde(default)]
+    pub downloads: u64,
     /// The swarm as the tracker sees it now.
     pub swarm: BundleStats,
 }
@@ -138,46 +141,45 @@ where
     T::deserialize(d).map(Some)
 }
 
-/// A page of listings: the answer to `GET /catalog/v1/listings` and
-/// `GET /catalog/v1/me/listings`.
+/// A page of listings: the answer to `GET /catalog/v1/listings`, whose query string is a
+/// [`ListingQuery`](crate::query::ListingQuery), and `GET /catalog/v1/me/listings`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListingPage {
     /// The listings on this page.
     pub listings: Vec<Listing>,
     /// How many match, on every page.
     pub total: u64,
+    /// How many matches each category and tag has; empty for `me/listings`.
+    #[serde(default)]
+    pub facets: Facets,
+}
+
+/// How a search's matches spread over categories and tags, for narrowing it.
+///
+/// Category counts ignore the query's category, so they show where else the search would find
+/// listings; tag counts count only the matches, so picking a tag narrows the search to its count.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Facets {
+    /// Categories with matches, the most first.
+    pub categories: Vec<FacetCount>,
+    /// The tags with the most matches, at most [`MAX_TAG_FACETS`], the most first.
+    pub tags: Vec<FacetCount>,
+}
+
+/// The most tags [`Facets`] counts.
+pub const MAX_TAG_FACETS: usize = 30;
+
+/// A category's or tag's number of matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FacetCount {
+    /// The category's slug or the tag.
+    pub value: String,
+    /// How many matches have it.
+    pub count: u64,
 }
 
 /// The most listings on one page.
 pub const MAX_PAGE: u32 = 100;
-
-/// The query string of `GET /catalog/v1/listings`: the newest listed bundles first.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ListingQuery {
-    /// Only listings in this category.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    /// How many matches to skip.
-    #[serde(default)]
-    pub offset: u64,
-    /// How many to return, at most [`MAX_PAGE`].
-    #[serde(default = "default_limit")]
-    pub limit: u32,
-}
-
-impl Default for ListingQuery {
-    fn default() -> Self {
-        Self {
-            category: None,
-            offset: 0,
-            limit: default_limit(),
-        }
-    }
-}
-
-fn default_limit() -> u32 {
-    25
-}
 
 /// A comment on a listing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,12 +218,6 @@ mod tests {
             serde_json::to_value(&edit).unwrap(),
             json!({ "category": "models" })
         );
-    }
-
-    #[test]
-    fn queries_default_to_the_first_page() {
-        let query: ListingQuery = serde_json::from_value(json!({})).unwrap();
-        assert_eq!(query, ListingQuery::default());
     }
 
     #[test]

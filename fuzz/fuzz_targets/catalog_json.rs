@@ -8,7 +8,7 @@ use libfuzzer_sys::fuzz_target;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tempest_catalog_api::account::{AccountEdit, Poll, SignIn, normalize_code};
-use tempest_catalog_api::listing::{ListingEdit, ListingQuery, NewComment, VoteRequest};
+use tempest_catalog_api::listing::{ListingEdit, NewComment, VoteRequest};
 use tempest_catalog_api::text;
 
 fn check<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(json: &[u8]) {
@@ -23,7 +23,6 @@ fuzz_target!(|json: &[u8]| {
     check::<Poll>(json);
     check::<AccountEdit>(json);
     check::<ListingEdit>(json);
-    check::<ListingQuery>(json);
     check::<VoteRequest>(json);
     check::<NewComment>(json);
 

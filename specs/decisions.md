@@ -1823,7 +1823,7 @@ The full field list is in `protocol/trackers.md`.
 
 ## D-121: License
 
-**Date:** 2026-10-06 · **Status:** Decided
+**Date:** 2026-10-06 · **Status:** Superseded by D-213
 
 **Decision:** `MIT OR Apache-2.0`, the Rust ecosystem's standard dual license.
 
@@ -3400,3 +3400,17 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `cargo build --profile dist -p tempest` was built on the host and the binary runs.
 
 **Rationale:** Only a native runner compiles the C dependencies and runs the platform code, and it fails before a tag does.
+
+---
+
+## D-213: MIT license only (supersedes D-121)
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Decision:**
+
+- Tempest is licensed under MIT only, in a single `LICENSE` file.
+- The Apache-2.0 half of the earlier dual license is dropped.
+- `deny.toml` still allows Apache-2.0 and the other listed licenses for dependencies.
+
+**Rationale:** One license is simpler than two.

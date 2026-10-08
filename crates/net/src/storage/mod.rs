@@ -22,9 +22,7 @@ use std::time::Duration;
 
 use tempest_core::ChunkSet;
 use tempest_protocol::message::Data;
-use tempest_protocol::tree::{
-    InvalidRequest, TreeNode, VerifyError, data_len, leaf_hashes, verify_data,
-};
+use tempest_protocol::tree::{InvalidRequest, TreeNode, VerifyError, data_len, verify_data_leaves};
 use tempest_protocol::wire::{Decode, Encode};
 use tempest_protocol::{BundleId, ChunkLayout, ChunkRange, Hash, Manifest, RangeList};
 use tokio::sync::{mpsc, oneshot};
@@ -631,7 +629,9 @@ impl Task {
                         self.start_sync();
                     }
                 }
-                if !self.finished && self.have.is_full() {
+                // Only the first write to complete the bundle waits for the final sync; a
+                // duplicate of the last chunk finishing alongside it adds nothing.
+                if !self.finished && self.have.is_full() && self.completing.is_none() {
                     self.completing = Some(reply);
                 } else {
                     let _ = reply.send(Ok(Written { complete: false }));
@@ -757,7 +757,7 @@ fn verify_and_write(
     store: bool,
 ) -> Result<Learned, StorageError> {
     let info = &file.info;
-    verify_data(
+    let leaves = verify_data_leaves(
         info.size,
         &info.root,
         position,
@@ -773,7 +773,7 @@ fn verify_and_write(
         })?;
     }
     Ok(Learned {
-        leaves: leaf_hashes(&data.chunks),
+        leaves,
         proof: data.proof,
     })
 }

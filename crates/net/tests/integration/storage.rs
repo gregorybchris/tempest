@@ -546,6 +546,30 @@ async fn syncs_are_batched() {
 }
 
 #[tokio::test]
+async fn duplicate_final_writes_are_both_answered() {
+    let source = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let manifest = make_bundle(source.path(), &[("f", contents(2 * CHUNK_SIZE, 0))], vec![]);
+    let shared = Storage::open_shared(source.path(), manifest.clone(), StorageConfig::default())
+        .await
+        .unwrap();
+    let (download, _) = Storage::create_download(dest.path(), manifest, StorageConfig::default())
+        .await
+        .unwrap();
+    transfer(&shared, &download, &[(0, 1)]).await;
+    // Two copies of the last chunk, as in endgame, finishing within one flush.
+    let data = shared.read(1, 1).await.unwrap();
+    let (first, second, flushed) = tokio::join!(
+        download.write(1, 1, data.clone()),
+        download.write(1, 1, data),
+        download.flush(),
+    );
+    flushed.unwrap();
+    let completes = [first.unwrap().complete, second.unwrap().complete];
+    assert_eq!(completes.iter().filter(|&&complete| complete).count(), 1);
+}
+
+#[tokio::test]
 async fn syncs_happen_after_the_interval() {
     let source = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();

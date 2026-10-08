@@ -323,6 +323,19 @@ pub fn verify_data(
     proof: &[Hash],
     chunks: &[u8],
 ) -> Result<(), VerifyError> {
+    verify_data_leaves(size, root, position, count, proof, chunks).map(drop)
+}
+
+/// Like [`verify_data`], but on success also returns the chunks' leaf hashes, so a caller that
+/// keeps them needn't hash the chunks a second time.
+pub fn verify_data_leaves(
+    size: u64,
+    root: &Hash,
+    position: u32,
+    count: u32,
+    proof: &[Hash],
+    chunks: &[u8],
+) -> Result<Vec<Hash>, VerifyError> {
     let chunk_count = chunk_count(size);
     let node = TreeNode::for_range(chunk_count, position, count)?;
 
@@ -347,7 +360,7 @@ pub fn verify_data(
     //    padding leaves, so the node is the subtree over the real leaves, padded on the right up
     //    to the node's level.
     let leaves = leaf_hashes(chunks);
-    let subtree = ChunkTree::from_leaves(leaves);
+    let subtree = ChunkTree::from_leaves(leaves.clone());
     let mut running = subtree.root();
     for level in subtree.height()..node.level {
         running = node_hash(&running, &padding_hash(level));
@@ -366,7 +379,7 @@ pub fn verify_data(
 
     // 5. The result must be the file's root.
     if running == *root {
-        Ok(())
+        Ok(leaves)
     } else {
         Err(VerifyError::RootMismatch)
     }

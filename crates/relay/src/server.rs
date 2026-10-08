@@ -33,6 +33,8 @@ const SWEEP_EVERY: Duration = Duration::from_secs(30);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 /// The most addresses a registered peer may hold forwarding permissions for.
 const MAX_PERMISSIONS: usize = 4096;
+/// The most of them that may share one IP address or IPv6 /64.
+const MAX_PERMISSIONS_PER_SOURCE: usize = 64;
 /// Larger than any UDP payload, so no datagram is cut short.
 const MAX_UDP_PAYLOAD: usize = 65_535;
 
@@ -294,7 +296,7 @@ impl<'a> Forwarder<'a> {
         Self {
             conn,
             socket,
-            permissions: Permissions::new(MAX_PERMISSIONS),
+            permissions: Permissions::new(MAX_PERMISSIONS, MAX_PERMISSIONS_PER_SOURCE),
             inbound: TokenBucket::new(rate_limit, now),
             outbound: TokenBucket::new(rate_limit, now),
         }

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tempest_core::EventKind;
+use tempest_core::config::LingerSettings;
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Destination, Endpoint, EndpointConfig, Identity, Node,
     NodeConfig, Storage, StorageConfig, TrackerClient,
@@ -50,7 +51,7 @@ async fn start_tracker() -> (String, oneshot::Sender<()>) {
 /// before the third peer, which has no tracker, learns of the seeder from it.
 fn start_node() -> Node {
     let mut config = NodeConfig::default();
-    config.session.lingering.keep_sharing = true;
+    config.session.lingering = LingerSettings::KEEP_SHARING;
     let endpoint_config = EndpointConfig {
         max_open_requests: config.session.upload.max_open_requests,
         ..EndpointConfig::localhost()

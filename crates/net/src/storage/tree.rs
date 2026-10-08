@@ -151,7 +151,13 @@ impl FileTree {
                 }
             }
         }
-        Some(tree)
+        // Each node must connect to the root: with every sibling on its path known, each of its
+        // ancestors was computed from it and checked above. A node without that path could be
+        // anything.
+        nodes
+            .iter()
+            .all(|&(node, _)| tree.proof(node).is_some())
+            .then_some(tree)
     }
 
     /// The leaf hash of chunk `position`, if known.
@@ -231,6 +237,9 @@ mod tests {
         assert_eq!(FileTree::from_known(4, reference.root(), &outside), None);
         let above = [(TreeNode { level: 7, index: 0 }, leaves[0])];
         assert_eq!(FileTree::from_known(4, reference.root(), &above), None);
+        // A leaf whose sibling isn't known can't be checked against the root, whatever it is.
+        let orphan = [(TreeNode { level: 0, index: 0 }, leaf_hash(b"other"))];
+        assert_eq!(FileTree::from_known(4, reference.root(), &orphan), None);
     }
 
     proptest! {

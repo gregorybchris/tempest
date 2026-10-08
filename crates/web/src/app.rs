@@ -95,6 +95,7 @@ fn Shell() -> impl IntoView {
     follow(store);
     look(config, ui);
     tell(store, ui, controls);
+    close_with_transfer(store, ui);
 
     let area = move || match ui.area.get() {
         Area::Transfers => view! { <Transfers /> }.into_any(),
@@ -247,6 +248,19 @@ fn look(config: Config, ui: Ui) {
         ];
         for (key, value) in changes.into_iter().flatten() {
             config.change_quietly(key, value);
+        }
+    });
+}
+
+/// Closes a dialog about a transfer once the engine no longer has it, as when another client
+/// removed it. Left open, a dialog with nothing to show would still take the keys.
+fn close_with_transfer(store: Store, ui: Ui) {
+    Effect::new(move |_| {
+        let Some(id) = ui.dialog.with(|d| d.as_ref().and_then(Dialog::transfer)) else {
+            return;
+        };
+        if store.loaded.get() && store.model.with(|m| m.transfer(&id).is_none()) {
+            ui.dialog.set(None);
         }
     });
 }

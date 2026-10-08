@@ -19,6 +19,6 @@ fuzz_target!(|input: (u16, &[u8])| {
     pieces.extend(decoder.feed(&bytes[cut..]).unwrap());
     assert_eq!(pieces, whole);
     for event in &whole {
-        let _ = ApiEvent::decode(event);
+        let _ = ApiEvent::decode(&event.name, &event.data);
     }
 });

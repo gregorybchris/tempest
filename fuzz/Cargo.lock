@@ -1324,6 +1324,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
 name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1987,6 +1993,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rustls"
 version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2616,6 +2635,7 @@ dependencies = [
  "quinn",
  "reqwest",
  "ring",
+ "rustix",
  "rustls",
  "rustls-platform-verifier 0.6.2",
  "serde",
@@ -2667,6 +2687,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "getrandom 0.3.4",
+ "hyper",
+ "hyper-util",
  "rand 0.9.5",
  "rand_chacha",
  "ring",
@@ -2679,6 +2701,7 @@ dependencies = [
  "tempest-tracker-api",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
 ]
 
 [[package]]

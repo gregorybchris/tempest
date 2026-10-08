@@ -50,8 +50,14 @@ async fn start_tracker() -> (String, oneshot::Sender<()>) {
 /// on. It keeps sharing after it completes: a downloader that lingers only briefly could leave
 /// before the third peer, which has no tracker, learns of the seeder from it.
 fn start_node() -> Node {
+    start_node_with(|_| {})
+}
+
+/// Like [`start_node`], with `configure` applied to the node's config.
+fn start_node_with(configure: impl FnOnce(&mut NodeConfig)) -> Node {
     let mut config = NodeConfig::default();
     config.session.lingering = LingerSettings::KEEP_SHARING;
+    configure(&mut config);
     let endpoint_config = EndpointConfig {
         max_open_requests: config.session.upload.max_open_requests,
         ..EndpointConfig::localhost()
@@ -248,6 +254,85 @@ async fn a_refusing_tracker_is_reported() {
         // The tracker never heard `started`, so stopping sends nothing and returns at once.
         announcer.stop().await;
         node.shutdown().await;
+    })
+    .await;
+}
+
+/// A downloader that knows only another downloader, which leaves soon after finishing, finds
+/// the seeder through the farewell Peers over real QUIC (D-224). Peer exchange is otherwise
+/// off for a day, so nothing else would tell it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_leaving_peer_tells_a_stranded_one_about_the_seeder() {
+    within(async {
+        let source = tempfile::tempdir().unwrap();
+        let manifest = make_bundle(source.path());
+        let bundle = manifest.bundle_id();
+        let targets: Vec<_> = (0..2).map(|_| tempfile::tempdir().unwrap()).collect();
+        let slow = |config: &mut NodeConfig| {
+            config.session.connections.peer_exchange_interval = Duration::from_secs(86_400);
+        };
+
+        let seeder = start_node_with(slow);
+        let storage =
+            Storage::open_shared(source.path(), manifest.clone(), StorageConfig::default())
+                .await
+                .unwrap();
+        let seeding = seeder.share(storage).await.unwrap();
+        let seeder_record = PeerRecord {
+            peer_id: seeder.endpoint().peer_id(),
+            addresses: addresses(seeder.endpoint()),
+            relay: None,
+        };
+
+        let leaver = start_node_with(|config| {
+            slow(config);
+            config.session.lingering = LingerSettings {
+                ratio: Some(0.001),
+                ..LingerSettings::KEEP_SHARING
+            };
+        });
+        let leaver_handle = leaver
+            .download(
+                bundle,
+                Destination::NewFolderIn(targets[0].path().to_owned()),
+                vec![seeder_record],
+            )
+            .await
+            .unwrap();
+        let leaver_record = PeerRecord {
+            peer_id: leaver.endpoint().peer_id(),
+            addresses: addresses(leaver.endpoint()),
+            relay: None,
+        };
+
+        let stranded = start_node_with(slow);
+        let mut stranded_handle = stranded
+            .download(
+                bundle,
+                Destination::NewFolderIn(targets[1].path().to_owned()),
+                vec![leaver_record],
+            )
+            .await
+            .unwrap();
+        opened_with(&mut stranded_handle.events, leaver.endpoint().peer_id()).await;
+
+        wait_complete(&mut stranded_handle).await;
+        assert_downloaded(source.path(), targets[1].path(), &manifest);
+        let summary = leaver_handle.finished().await.unwrap();
+        assert!(summary.complete);
+        let mut met_seeder = false;
+        while let Ok(event) = stranded_handle.events.try_recv() {
+            met_seeder |= matches!(event.kind, EventKind::Opened { peer, .. }
+                if peer == seeder.endpoint().peer_id());
+        }
+        assert!(
+            met_seeder,
+            "the stranded peer never opened a connection with the seeder"
+        );
+        drop(seeding);
+        for node in [&seeder, &leaver, &stranded] {
+            node.shutdown().await;
+        }
     })
     .await;
 }

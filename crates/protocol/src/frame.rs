@@ -11,7 +11,7 @@
 //! Framing is shared by peer connections and relay connections, which number their message types
 //! separately. So the functions here take the limit for each type code from the caller.
 
-use crate::wire::DecodeError;
+use crate::wire::{DecodeError, Writer};
 
 /// The length of a frame's header: the `u32` length and the `u8` type.
 pub const HEADER_LEN: usize = 5;
@@ -64,11 +64,28 @@ pub fn split_frame(
 ///
 /// If `body` is 4 GiB or longer, which no message allows.
 pub fn encode_frame(message_type: u8, body: &[u8]) -> Vec<u8> {
-    let length = u32::try_from(body.len() + 1).expect("frame longer than u32::MAX");
-    let mut frame = Vec::with_capacity(HEADER_LEN + body.len());
-    frame.extend_from_slice(&length.to_be_bytes());
-    frame.push(message_type);
-    frame.extend_from_slice(body);
+    encode_frame_with(message_type, body.len(), |w| w.raw(body))
+}
+
+/// Encodes a frame whose body `write_body` writes in place, so the body is never copied.
+/// `body_len` is the expected body length, used only to size the buffer.
+///
+/// # Panics
+///
+/// If the body is 4 GiB or longer, which no message allows.
+pub fn encode_frame_with(
+    message_type: u8,
+    body_len: usize,
+    write_body: impl FnOnce(&mut Writer),
+) -> Vec<u8> {
+    let mut w = Writer::with_capacity(HEADER_LEN + body_len);
+    // The length is filled in once the body is written.
+    w.u32(0);
+    w.u8(message_type);
+    write_body(&mut w);
+    let mut frame = w.into_bytes();
+    let length = u32::try_from(frame.len() - 4).expect("frame longer than u32::MAX");
+    frame[..4].copy_from_slice(&length.to_be_bytes());
     frame
 }
 

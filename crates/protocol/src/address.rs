@@ -100,6 +100,9 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
+    /// An IPv4 address: family, four octets and the port.
+    const MIN_LEN: usize = 7;
+
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let ip = match r.u8()? {
             FAMILY_IPV4 => {

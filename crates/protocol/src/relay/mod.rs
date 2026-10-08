@@ -15,7 +15,7 @@ pub use identity::{DEFAULT_RELAY_PORT, ParseRelayIdentityError, RelayHost, Relay
 use crate::address::Address;
 use crate::frame::{self, Frame};
 use crate::message::{MAX_REASON_MESSAGE_LEN, MessageError, check_len};
-use crate::wire::{Decode, DecodeError, Encode, Reader, Writer};
+use crate::wire::{Decode, DecodeError, Encode, Reader};
 
 /// The ALPN identifier of a relay connection.
 pub const RELAY_ALPN: &[u8] = b"tempest-relay/1";
@@ -158,19 +158,17 @@ impl RelayMessage {
 
     /// Encodes the message as a frame, ready to send on the control stream.
     pub fn encode_frame(&self) -> Vec<u8> {
-        let mut w = Writer::new();
-        match self {
+        frame::encode_frame_with(self.message_type().code(), 64, |w| match self {
             Self::Register => {}
             Self::Registered(m) => {
-                m.relay_address.encode(&mut w);
-                m.observed_address.encode(&mut w);
+                m.relay_address.encode(w);
+                m.observed_address.encode(w);
             }
             Self::RelayReject(m) => {
                 w.u16(m.reason.code());
                 w.string(&m.message);
             }
-        }
-        frame::encode_frame(self.message_type().code(), &w.into_bytes())
+        })
     }
 
     /// Decodes a frame's message, rejecting anything that is a protocol violation: an unknown

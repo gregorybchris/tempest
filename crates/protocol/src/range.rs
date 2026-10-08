@@ -36,6 +36,8 @@ impl Encode for ChunkRange {
 }
 
 impl Decode for ChunkRange {
+    const MIN_LEN: usize = 8;
+
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             start: r.u32()?,

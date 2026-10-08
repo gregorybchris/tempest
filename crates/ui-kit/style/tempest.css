@@ -1307,6 +1307,12 @@ th[aria-sort] .sort {
   animation: fade-in 0.12s ease-out;
 }
 
+/* They take focus when they open, which is no reason to outline them. */
+.drawer:focus,
+.dialog:focus {
+  outline: none;
+}
+
 .drawer {
   position: fixed;
   top: 0;

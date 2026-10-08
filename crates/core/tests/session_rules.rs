@@ -12,15 +12,15 @@ use tempest_core::event::ServeReason;
 use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
 use tempest_core::upload::{ServeDecision, UploadContext, UploadStrategy};
 use tempest_core::{
-    Action, Config, ConnId, EventKind, Inbound, LocalPeer, Reply, RequestId, Response, Rng,
-    Session, StreamId, Time,
+    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_PEER_ADDRESSES, Reply, RequestId,
+    Response, Rng, Session, StreamId, Time,
 };
 use tempest_protocol::message::{
-    Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, Reject,
-    RejectReason, Request, Serving, Want,
+    Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, PeerRecord, Peers,
+    Reject, RejectReason, Request, Serving, Want,
 };
 use tempest_protocol::tree::VerifyError;
-use tempest_protocol::{BundleId, ChunkRange, Hash, Message, PeerId, RangeList};
+use tempest_protocol::{Address, BundleId, ChunkRange, Hash, Message, PeerId, RangeList};
 
 const CHUNK: usize = 16 * 1024;
 const C: ConnId = ConnId(7);
@@ -645,6 +645,109 @@ fn known_peers_are_capped() {
     let records = (10..30).map(|n| common::record(peer_id(n)));
     session.add_peers(Time::ZERO, records);
     assert_eq!(session.known_peer_count(), 3);
+}
+
+#[test]
+fn records_for_a_known_peer_are_merged() {
+    let bundle_id = content().manifest().bundle_id();
+    let mut session = Session::new(Config::default(), local(5), bundle_id, 0).unwrap();
+    let addr = |n: u16| Address::from(std::net::SocketAddr::from(([192, 0, 2, 1], n)));
+    let peer = peer_id(10);
+    let record = |addresses: Vec<Address>, relay: Option<Address>| PeerRecord {
+        peer_id: peer,
+        addresses,
+        relay,
+    };
+    let dialed = |session: &mut Session| -> Vec<PeerRecord> {
+        session
+            .poll_actions()
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Dial(record) => Some(record),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut now = Time::ZERO;
+    // Redials the peer and returns the record it dialed.
+    let redial = |session: &mut Session, now: &mut Time| -> PeerRecord {
+        session.handle_dial_failed(*now, peer);
+        *now = session.next_timer().unwrap();
+        session.handle_timer(*now);
+        let mut records = dialed(session);
+        assert_eq!(records.len(), 1);
+        records.pop().unwrap()
+    };
+
+    // From a tracker, with a relay.
+    session.add_peers(now, [record(vec![addr(1), addr(2)], Some(addr(9)))]);
+    assert_eq!(
+        dialed(&mut session),
+        [record(vec![addr(1), addr(2)], Some(addr(9)))]
+    );
+
+    // From the LAN, with one address and no relay: both are added to what is known.
+    session.add_peers(now, [record(vec![addr(3), addr(1)], None)]);
+    assert_eq!(
+        redial(&mut session, &mut now),
+        record(vec![addr(3), addr(1), addr(2)], Some(addr(9)))
+    );
+
+    // From peer exchange, listing the relay address among the direct ones: it is dropped.
+    session.add_peers(now, [record(vec![addr(9), addr(4)], Some(addr(9)))]);
+    assert_eq!(
+        redial(&mut session, &mut now),
+        record(vec![addr(4), addr(3), addr(1), addr(2)], Some(addr(9)))
+    );
+
+    // A new relay replaces the old one, and a known address equal to it is dropped.
+    session.add_peers(now, [record(Vec::new(), Some(addr(3)))]);
+    assert_eq!(
+        redial(&mut session, &mut now),
+        record(vec![addr(4), addr(1), addr(2)], Some(addr(3)))
+    );
+
+    // The newest addresses are kept, up to the bound.
+    let many: Vec<Address> = (100..130).map(addr).collect();
+    session.add_peers(now, [record(many.clone(), None)]);
+    let merged = redial(&mut session, &mut now);
+    assert_eq!(merged.addresses, many[..MAX_PEER_ADDRESSES]);
+    assert_eq!(merged.relay, Some(addr(3)));
+}
+
+#[test]
+fn a_new_peer_record_never_holds_its_relay_address_as_a_direct_one() {
+    let bundle_id = content().manifest().bundle_id();
+    let mut session = Session::new(Config::default(), local(5), bundle_id, 0).unwrap();
+    let addr = |n: u16| Address::from(std::net::SocketAddr::from(([192, 0, 2, 1], n)));
+    let peers = Peers {
+        peers: vec![PeerRecord {
+            peer_id: peer_id(10),
+            addresses: vec![addr(9), addr(1), addr(1)],
+            relay: Some(addr(9)),
+        }],
+    };
+    connect(&mut session, C, peer_id(11), Direction::Accepted);
+    control(&mut session, C, Message::Hello(hello(bundle_id)));
+    control(&mut session, C, Message::Have(Have::default()));
+    session.poll_actions();
+    control(&mut session, C, Message::Peers(peers));
+    let dialed: Vec<PeerRecord> = session
+        .poll_actions()
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Dial(record) => Some(record),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        dialed,
+        [PeerRecord {
+            peer_id: peer_id(10),
+            addresses: vec![addr(1)],
+            relay: Some(addr(9)),
+        }]
+    );
 }
 
 #[test]

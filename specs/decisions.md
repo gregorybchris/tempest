@@ -3426,3 +3426,19 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 **Decision:** The simulator, its results UI and its DuckDB dependency move out of `tempest` into a separate binary. The `tempest` binary keeps the client, the engine, the UIs, the tracker and the relay. This refines D-079.
 
 **Rationale:** The everyday client gets smaller and builds faster. Simulation is a development and research tool.
+
+---
+
+## D-215: Merging peer records
+
+**Date:** 2026-10-07 · **Status:** Provisional
+
+**Context:** A session replaced a known peer's record with any newer one, so a LAN record (one address, no relay) erased addresses and the relay learned from a tracker or peer exchange. `protocol/messages.md` also says a PeerRecord's addresses never hold a relay address, which nothing checked on receipt.
+
+**Decision:**
+
+- A record for a known peer is merged: its addresses first, then the known ones it lacks, without duplicates. Its relay replaces the known one; with none, the known relay is kept.
+- A session keeps a bounded number of addresses per known peer (`MAX_PEER_ADDRESSES` in `tempest-core`), dropping the oldest. The protocol sets no bound on a record's addresses.
+- An address equal to the record's relay address is dropped rather than the record rejected. It is the only relay address a receiver can recognize, and the rest of the record is still useful.
+
+**Rationale:** Sources each know part of a peer's addresses, and none is more authoritative. Newest first means dials try fresh addresses before stale ones.

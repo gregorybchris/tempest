@@ -120,6 +120,34 @@ pub struct Session {
     events: Vec<Event>,
 }
 
+/// The most addresses kept for one known peer. Merging records from several sources keeps the
+/// newest.
+pub const MAX_PEER_ADDRESSES: usize = 16;
+
+/// `record` without duplicate addresses, addresses equal to its relay address, or more than
+/// [`MAX_PEER_ADDRESSES`] addresses.
+fn tidy_record(mut record: PeerRecord) -> PeerRecord {
+    let mut seen = BTreeSet::new();
+    let relay = record.relay;
+    record
+        .addresses
+        .retain(|&address| Some(address) != relay && seen.insert(address));
+    record.addresses.truncate(MAX_PEER_ADDRESSES);
+    record
+}
+
+/// Merges a newer record for a known peer into the `known` one (see [`Session::add_peers`]).
+fn merge_records(known: &PeerRecord, newer: PeerRecord) -> PeerRecord {
+    let relay = newer.relay.or(known.relay);
+    let mut addresses = newer.addresses;
+    addresses.extend(known.addresses.iter().copied());
+    tidy_record(PeerRecord {
+        peer_id: newer.peer_id,
+        addresses,
+        relay,
+    })
+}
+
 #[derive(Debug, Clone)]
 struct KnownPeer {
     record: PeerRecord,
@@ -428,6 +456,11 @@ impl Session {
 
     /// Adds peers this session may dial, such as from a tracker, a link or peer exchange.
     ///
+    /// A record for a peer already known is merged into what is known: its addresses come first,
+    /// followed by the known ones it lacks, up to [`MAX_PEER_ADDRESSES`], and a known relay
+    /// address is kept unless the record gives one. Addresses equal to the record's relay address
+    /// are dropped, since a record's addresses never hold a relay address.
+    ///
     /// Once `connections.max_known_peers` are known, each new peer replaces a random known one
     /// that isn't connected or being dialed.
     pub fn add_peers(&mut self, now: Time, peers: impl IntoIterator<Item = PeerRecord>) {
@@ -435,8 +468,9 @@ impl Session {
             if record.peer_id == self.local.peer_id || self.banned.contains(&record.peer_id) {
                 continue;
             }
+            let record = tidy_record(record);
             if let Some(known) = self.known.get_mut(&record.peer_id) {
-                known.record = record;
+                known.record = merge_records(&known.record, record);
                 continue;
             }
             if self.known.len() >= self.config.connections.max_known_peers as usize

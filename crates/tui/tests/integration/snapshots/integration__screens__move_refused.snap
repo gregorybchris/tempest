@@ -1,0 +1,16 @@
+---
+source: crates/tui/tests/integration/screens.rs
+expression: "draw(&app, 80, 12).backend()"
+---
+"  Transfers   Share   Settings                            ↓9.8M  ↑1.6M  [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+"  Name               Size Progress            ↓     ↑    ETA Status        Peers"
+"▌ ensemble-2026.tar  4.2G ████████░░  81%  9.8M  1.2M     3m Downloading    7/12"
+"  field-re╔ Move ensemble-2026.tar ══════════════════════════════════╗       3/3"
+"  corpus-v║ media                                                    ║       0/4"
+"  debian-1║                                                          ║         –"
+"──────────║ Enter an absolute path.                                  ║──────────"
+" Downloadi╚══════════════════════════════════════════════════════════╝t.        "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" enter save  esc cancel                                                         "

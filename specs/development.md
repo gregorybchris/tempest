@@ -21,6 +21,15 @@ The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development b
 - **Avoid release builds** unless a test needs one or you're measuring performance.
 - **Don't run `cargo clean` mid-task.** It forces a full rebuild, which takes minutes. Prune stale artifacts instead (see below).
 
+## Tests
+
+Each crate's integration tests are one test binary, `tests/integration/main.rs`, with a module per topic (D-235). Cargo links every file directly in `tests/` into its own executable, which costs link time and disk; this links once. Shared helpers are a sibling `common` module.
+
+- **Names.** Tests read as `module::test` under the target `integration`. Select a topic with `cargo nextest run -p <crate> -E 'test(/^topic::/)'` or `cargo test -p <crate> --test integration topic::`.
+- **Snapshots.** insta names a snapshot after the module path, so the terminal UI's are `integration__screens__<name>.snap`.
+- **One process.** Plain `cargo test` runs a binary's tests on threads of one process, while nextest runs each test in its own. Tests must not change the process's environment or working directory, or share a fixed port or file; use temporary directories and port 0.
+- **Browser tests** (`#[ignore]`, D-218) run with `--ignored` and a module filter, as CI's web job does. The gallery's wasm-bindgen tests are one binary too, configured once in its `main.rs`.
+
 ## Disk
 
 The `target/` directory is a build cache, and cargo never deletes stale artifacts from it. A full build of the workspace is about 4 GB, but during a day of agent work it grew past 30 GB, from:
@@ -28,7 +37,7 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 - incremental caches;
 - separate builds for tests, release, WebAssembly and fuzzing.
 
-- **Prune regularly.** Each file in a crate's `tests/` links into its own large executable, so stale test binaries add up quickly. Delete artifacts that haven't been used for a few hours, either with `cargo sweep --time <hours>` or by removing old files from `target/debug/deps`. Do this when no build is running.
+- **Prune regularly.** Stale test binaries add up quickly: each links the crate and all its dependencies. Delete artifacts that haven't been used for a few hours, either with `cargo sweep --time <hours>` or by removing old files from `target/debug/deps`. Do this when no build is running.
 
 ## Parallel work
 

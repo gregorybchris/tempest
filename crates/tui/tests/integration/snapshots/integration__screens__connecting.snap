@@ -1,0 +1,14 @@
+---
+source: crates/tui/tests/integration/screens.rs
+expression: "draw(&connecting, 80, 10).backend()"
+---
+"  Transfers   Share   Settings     connecting…  embedded  ↓–     ↑–     [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+"  Name               Size Progress            ↓     ↑    ETA Status        Peers"
+"                            Connecting to the engine…                           "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+"                                                                                "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" / filter  a add  : command  s sort  1-3 areas  v views  T theme  ? help        "

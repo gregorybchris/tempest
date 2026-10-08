@@ -97,7 +97,7 @@ A varied key is either a setting for every peer, as above, or a field of one cla
 
 ## Quality checks
 
-- **Validation milestone (D-078):** reproduce the classic results of Bharambe et al. and Legout et al. before trusting new conclusions. The scenarios are in [`crates/sim/scenarios/validation/`](../crates/sim/scenarios/validation/), and `crates/sim/tests/validation.rs` checks each result with the statistics above; the outcome is under [Validation](#validation).
+- **Validation milestone (D-078):** reproduce the classic results of Bharambe et al. and Legout et al. before trusting new conclusions. The scenarios are in [`crates/sim/scenarios/validation/`](../crates/sim/scenarios/validation/), and `crates/sim/tests/integration/validation.rs` checks each result with the statistics above; the outcome is under [Validation](#validation).
 - **Regression scenarios (D-077):** a small set of fast golden scenarios, one per model feature, in [`crates/sim/scenarios/golden/`](../crates/sim/scenarios/golden/), each checked against its saved baseline. A quick check of a few seeds runs with every change; `tempest-sim baseline --long` runs every saved seed and compares seed by seed, and `--update` rewrites the baselines after a deliberate change (D-163, D-171).
 - **Determinism check:** same seed, same event log. CI runs the 1,000-peer swarm, an example of the router model and every golden scenario twice in separate processes and compares the digests of their logs (D-163).
 

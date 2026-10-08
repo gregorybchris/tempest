@@ -79,13 +79,13 @@ jobs:
       - name: Build the tracker website
         working-directory: crates/tracker-web
         run: trunk build --release --cargo-profile web
-      - run: cargo test -p tempest --test web
-      - run: cargo test -p tempest-sim-cli --test sim_web --features bundled-duckdb
+      - run: cargo test -p tempest --test integration -- web::
+      - run: cargo test -p tempest-sim-cli --test integration --features bundled-duckdb -- sim_web::
       # The tracker website in headless Chrome: search, filters and sign-in.
       - name: Tracker website browser test
         env:
           CHROMEDRIVER: ${{ env.CHROMEWEBDRIVER }}/chromedriver
-        run: cargo test -p tempest --test tracker_web -- --ignored --nocapture
+        run: cargo test -p tempest --test integration -- tracker_web:: --ignored --nocapture
       # The 1,536-cell live view benchmark (specs/interfaces.md), in headless Chrome.
       - name: Live view benchmark
         env:

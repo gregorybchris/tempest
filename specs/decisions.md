@@ -3793,3 +3793,23 @@ This revises D-175, D-182 and D-189.
 - `catalog-api` became `tracker-api`, `catalog-web` became `tracker-web`, and `tempest-net`'s `catalog` module became `publish`. The website's header reads "Tracker" and the host.
 
 **Rationale:** People meet a tracker, not a catalog. One name for the service keeps every interface describing the same thing, and "catalog" stays useful for operators, who run a database file.
+
+---
+
+## D-235: One integration-test binary per crate
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Each file in a crate's `tests/` was its own test target, so a crate with eight files linked eight executables, each with the crate and its dependencies. Builds spent much of their time linking and `target/` grew with the stale copies. The owner found development slow because so much gets built.
+
+**Options:** keep a file per target, which gives one filterable binary per topic; merge each crate's files into one target (chosen).
+
+**Decision:** Each crate with several integration test files has a single target, `tests/integration/main.rs`, with a module per former file and the shared helpers as a sibling `common` module. The target name is `integration` in every crate. The simulator's, the engine's and the other crates' former file names remain as module names, so tests are `integration module::test`. This reverses the earlier default of one target per file. The UI kit's single test file and the dev-profile settings are unchanged.
+
+**Consequences:**
+
+- The terminal UI's insta snapshots are named after the module path and were renamed to `integration__screens__*`.
+- Plain `cargo test` runs a binary's tests in one process on threads, so tests must not rely on a process of their own (`specs/development.md`). None did: no test sets environment variables, changes directories, or binds a fixed port.
+- CI selects browser and web tests with a module filter on `--test integration`.
+
+**Rationale:** Linking once per crate saves link time and disk. Test names stay readable and filterable by module, and nextest still isolates each test in its own process.

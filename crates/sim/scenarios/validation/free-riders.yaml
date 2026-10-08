@@ -1,5 +1,5 @@
 # Choking serves peers that upload, so free riders download more slowly than under a
-# cooperative strategy (Legout et al.). See crates/sim/tests/validation.rs.
+# cooperative strategy (Legout et al.). See crates/sim/tests/integration/validation.rs.
 name: free-riders
 description: Fast and home peers and free riders fetch a release that arrives in a flash crowd.
 duration: 30m

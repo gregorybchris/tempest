@@ -1,0 +1,20 @@
+---
+source: crates/tui/tests/integration/screens.rs
+expression: "draw(&app, 80, 16).backend()"
+---
+"  Transfers   Share   Settings                            ↓9.8M  ↑1.6M  [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+" Changes to peers apply when the engine restarts.                               "
+" Speed limits                                                                   "
+" The alternative limits apply now, in place of these.                           "
+"▌  Download                          2.0M/s •                                   "
+"   Uploa╔ The download limit ══════════════════════════════════════════╗        "
+"        ║ fast                                                         ║        "
+" Alterna║                                                              ║        "
+" These r║ "fast" is not a speed such as 500K or 2.5M                   ║        "
+"────────╚══════════════════════════════════════════════════════════════╝────────"
+" The most every transfer together receives per second.                          "
+"                                                                                "
+" • Changed here, over the config file. x gives it the file's value again.       "
+"────────────────────────────────────────────────────────────────────────────────"
+" enter save  esc cancel                                                         "

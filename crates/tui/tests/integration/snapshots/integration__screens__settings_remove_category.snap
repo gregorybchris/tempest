@@ -1,0 +1,20 @@
+---
+source: crates/tui/tests/integration/screens.rs
+expression: "draw(&app, 80, 16).backend()"
+---
+"  Transfers   Share   Settings                            ↓9.8M  ↑1.6M  [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+" Changes to peers apply when the engine restarts.                               "
+"   At the limit                      stop it                                    "
+"                                                                                "
+" Network                                                                        "
+" On by default so direct sends work behind home routers. Move to a row to read  "
+" what it shares.                                                                "
+"   Port mapping                      [ ●] on                                    "
+"▌  Relays from trackers              [ ●] on                                    "
+"────────────────────────────────────────────────────────────────────────────────"
+" Takes a relay a tracker recommends, which lends you an address behind a router;"
+" that relay sees who talks to whom.                                             "
+" • marks settings changed here, over the config file.                           "
+"────────────────────────────────────────────────────────────────────────────────"
+" Relays from trackers already has the config file's value.                      "

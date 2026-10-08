@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use tempest_engine::SettingsView;
-use tempest_engine::config::SharingAction;
 use tempest_engine::schedule::{Schedule, TimeOfDay, Weekday};
 
 use super::modal::{FormKind, Modal, ValueEdit, ValueTarget};
@@ -19,7 +18,7 @@ use crate::prefs;
 
 use tempest_api::network;
 pub use tempest_api::settings::ValueKind;
-use tempest_api::settings::keys;
+use tempest_api::settings::{keys, text};
 
 /// What changing a row does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +93,11 @@ impl Row {
         }
     }
 
+    /// A row for the setting `field` names and explains.
+    fn field(field: text::Field, value: impl Into<String>, edit: Edit) -> Self {
+        Self::setting(field.label, field.key, value, edit, field.help)
+    }
+
     fn help(mut self, help: impl Into<String>) -> Self {
         self.help = help.into();
         self
@@ -112,7 +116,25 @@ pub struct Section {
 }
 
 /// What sharing does at its limit, as the setting's values.
-const ACTIONS: &[&str] = &["stop", "remove"];
+const ACTIONS: [&str; 2] = [text::ACTIONS[0].0, text::ACTIONS[1].0];
+
+impl Section {
+    fn new(section: text::Section, rows: Vec<Row>) -> Self {
+        Self {
+            title: section.title,
+            note: section.note.map(str::to_owned),
+            rows,
+        }
+    }
+
+    /// The section with `note` in place of its own when `when` holds.
+    fn note_if(mut self, when: bool, note: &str) -> Self {
+        if when {
+            self.note = Some(note.to_owned());
+        }
+        self
+    }
+}
 
 /// A schedule's days and times: "Mon–Fri 09:00–17:00".
 pub fn describe_schedule(schedule: &Schedule) -> String {
@@ -137,7 +159,7 @@ fn count(limit: Option<u32>) -> String {
     limit.map_or_else(|| "no limit".to_owned(), |n| n.to_string())
 }
 
-/// The Settings area's sections.
+/// The Settings area's sections, in the order of [`text::SECTIONS`].
 pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
     let settings = &view.settings;
     let limits = &settings.limits;
@@ -148,139 +170,89 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
         Value::String(text) => text.clone(),
         other => other.to_string(),
     };
+    let limit =
+        |field, limit| Row::field(field, format::limit(limit), Edit::Value(ValueKind::Limit));
     let mut sections = vec![
-        Section {
-            title: "Speed limits",
-            note: view
-                .alternative_limits_active
-                .then(|| "The alternative limits apply now, in place of these.".to_owned()),
-            rows: vec![
-                Row::setting(
-                    "Download",
-                    "limits.download",
-                    format::limit(limits.download),
-                    Edit::Value(ValueKind::Limit),
-                    "The most every transfer together receives per second.",
-                ),
-                Row::setting(
-                    "Upload",
-                    "limits.upload",
-                    format::limit(limits.upload),
-                    Edit::Value(ValueKind::Limit),
-                    "The most every transfer together sends per second.",
-                ),
+        Section::new(
+            text::SPEED,
+            vec![
+                limit(text::DOWNLOAD, limits.download),
+                limit(text::UPLOAD, limits.upload),
             ],
-        },
-        Section {
-            title: "Alternative limits",
-            note: Some("These replace the limits above while on, or while scheduled.".to_owned()),
-            rows: vec![
-                Row::setting(
-                    "Download",
-                    "limits.alternative.download",
-                    format::limit(alternative.download),
-                    Edit::Value(ValueKind::Limit),
-                    "The download limit while the alternative limits apply.",
-                ),
-                Row::setting(
-                    "Upload",
-                    "limits.alternative.upload",
-                    format::limit(alternative.upload),
-                    Edit::Value(ValueKind::Limit),
-                    "The upload limit while the alternative limits apply.",
-                ),
-                Row::setting(
-                    "Switched on",
-                    "limits.alternative.enabled",
+        ),
+        Section::new(
+            text::ALTERNATIVE,
+            vec![
+                Row::field(
+                    text::ALT_ENABLED,
                     switch(alternative.enabled),
                     Edit::Toggle(alternative.enabled),
-                    "On, they apply whatever the schedule says.",
                 ),
-                Row::setting(
-                    "Schedule",
-                    "limits.alternative.schedule",
+                limit(text::ALT_DOWNLOAD, alternative.download),
+                limit(text::ALT_UPLOAD, alternative.upload),
+                Row::field(
+                    text::ALT_SCHEDULE,
                     alternative
                         .schedule
                         .as_ref()
                         .map_or_else(|| "none".to_owned(), describe_schedule),
                     Edit::Schedule,
-                    "When they apply on their own, in the engine's local time.",
                 ),
             ],
-        },
-        Section {
-            title: "Queue",
-            note: None,
-            rows: vec![
-                Row::setting(
-                    "Active downloads",
-                    "queue.max_active_downloads",
+        )
+        .note_if(view.alternative_limits_active, text::ALTERNATIVE_ACTIVE),
+        Section::new(
+            text::QUEUE,
+            vec![
+                Row::field(
+                    text::MAX_DOWNLOADS,
                     count(settings.queue.max_active_downloads),
                     Edit::Value(ValueKind::Count),
-                    "How many downloads run at once; the rest wait as queued.",
                 ),
-                Row::setting(
-                    "Active uploads",
-                    "queue.max_active_uploads",
+                Row::field(
+                    text::MAX_UPLOADS,
                     count(settings.queue.max_active_uploads),
                     Edit::Value(ValueKind::Count),
-                    "How many complete transfers share at once; the rest wait as queued.",
                 ),
             ],
-        },
-        Section {
-            title: "Sharing limits",
-            note: Some(
-                "When a complete transfer stops sharing. L sets a transfer's own.".to_owned(),
-            ),
-            rows: vec![
-                Row::setting(
-                    "Ratio",
-                    "sharing.ratio",
+        ),
+        Section::new(
+            text::SHARING,
+            vec![
+                Row::field(
+                    text::RATIO,
                     shown(&sharing["ratio"]),
                     Edit::Value(ValueKind::Ratio),
-                    "Stop sharing once this many bytes are sent per byte received.",
                 ),
-                Row::setting(
-                    "Time",
-                    "sharing.time",
+                Row::field(
+                    text::TIME,
                     shown(&sharing["time"]),
                     Edit::Value(ValueKind::Duration),
-                    "Stop sharing after this long complete.",
                 ),
-                Row::setting(
-                    "Idle timeout",
-                    "sharing.idle_timeout",
+                Row::field(
+                    text::IDLE_TIMEOUT,
                     shown(&sharing["idle_timeout"]),
                     Edit::Value(ValueKind::Duration),
-                    "Stop sharing a finished download once no peer has wanted anything for this long.",
                 ),
-                Row::setting(
-                    "At the limit",
-                    "sharing.action",
-                    match settings.sharing.action {
-                        SharingAction::Stop => "stop it",
-                        SharingAction::Remove => "remove it, keeping its files",
-                    },
-                    Edit::Cycle(ACTIONS),
-                    "What happens to a transfer that reaches a limit.",
+                Row::field(
+                    text::ACTION,
+                    text::action(sharing["action"].as_str().unwrap_or_default()),
+                    Edit::Cycle(&ACTIONS),
                 ),
             ],
-        },
+        ),
     ];
 
     sections.push(network_section(settings));
     sections.extend(peer_finding_sections(view));
 
-    let mut categories = vec![Row::setting(
-        "Default folder",
-        "save_folder",
+    let mut categories = vec![Row::field(
+        text::SAVE_FOLDER,
         settings.save_folder.as_ref().map_or_else(
-            || "Downloads, in the home folder".to_owned(),
+            || text::DEFAULT_FOLDER.to_owned(),
             |folder| folder.display().to_string(),
         ),
         Edit::Value(ValueKind::Folder),
-        "Where downloads go unless their category or the add says otherwise.",
     )];
     match &app.categories {
         None => categories.push(Row::new("Loading…", "", Edit::None)),
@@ -290,18 +262,14 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
                 folder.display().to_string(),
                 Edit::Category(name.clone()),
             )
-            .help("Downloads added in this category go to its folder. x removes it.")
+            .help(format!("{} x removes it.", text::CATEGORY))
         })),
     }
     categories.push(
         Row::new("+ Add a category", "", Edit::NewCategory)
             .help("A name and the folder its downloads go to."),
     );
-    sections.push(Section {
-        title: "Categories",
-        note: None,
-        rows: categories,
-    });
+    sections.push(Section::new(text::CATEGORIES, categories));
 
     let mut tags: BTreeMap<&str, usize> = BTreeMap::new();
     for transfer in app.model.transfers() {
@@ -310,11 +278,7 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
         }
     }
     let tag_rows = match tags.is_empty() {
-        true => vec![Row::new(
-            "No tags yet. Press t on a transfer to tag it.",
-            "",
-            Edit::None,
-        )],
+        true => vec![Row::new(text::NO_TAGS, "", Edit::None)],
         false => tags
             .into_iter()
             .map(|(tag, count)| {
@@ -327,17 +291,12 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
             })
             .collect(),
     };
-    sections.push(Section {
-        title: "Tags",
-        note: None,
-        rows: tag_rows,
-    });
+    sections.push(Section::new(text::TAGS, tag_rows));
 
     let columns: Vec<&str> = app.columns.iter().map(|c| c.title()).collect();
-    sections.push(Section {
-        title: "Appearance",
-        note: None,
-        rows: vec![
+    sections.push(Section::new(
+        text::APPEARANCE,
+        vec![
             Row::setting(
                 "Theme",
                 prefs::THEME,
@@ -349,7 +308,7 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
                 "Columns",
                 prefs::COLUMNS,
                 if columns.is_empty() {
-                    "only name, progress and status".to_owned()
+                    text::NO_COLUMNS.to_owned()
                 } else {
                     columns.join(" ")
                 },
@@ -357,7 +316,7 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
                 "The transfers list's optional columns. | changes them from the list.",
             ),
         ],
-    });
+    ));
     sections
 }
 
@@ -368,27 +327,25 @@ fn network_section(settings: &tempest_engine::EngineConfig) -> Section {
         keys::LAN => settings.lan.enabled,
         _ => settings.relays.from_trackers,
     };
-    Section {
-        title: "Network",
-        note: Some(
-            "On by default so direct sends work behind home routers. Move to a row to read what \
-             it shares."
-                .to_owned(),
-        ),
-        rows: network::FEATURES
-            .iter()
-            .map(|feature| {
-                let on = on(feature.key);
-                Row::setting(
-                    feature.label,
-                    feature.key,
-                    switch(on),
-                    Edit::Toggle(on),
-                    feature.says,
-                )
-            })
-            .collect(),
-    }
+    let rows = network::FEATURES
+        .iter()
+        .map(|feature| {
+            let on = on(feature.key);
+            Row::setting(
+                feature.label,
+                feature.key,
+                switch(on),
+                Edit::Toggle(on),
+                feature.says,
+            )
+        })
+        .collect();
+    let mut section = Section::new(text::NETWORK, rows);
+    // The TUI shows only the help of the row under the cursor.
+    section.note = section
+        .note
+        .map(|note| format!("{note} Move to a row to read what it shares."));
+    section
 }
 
 /// The trackers every transfer announces to, and the relays, as sections of Settings.
@@ -412,27 +369,11 @@ fn peer_finding_sections(view: &SettingsView) -> [Section; 2] {
     }));
     relays.push(
         Row::new("+ Add a relay", "", Edit::NewRelay)
-            .help("A relay's key and address, as <key>@host:port."),
+            .help("A relay's key and address, as <key>@host[:port]."),
     );
     [
-        Section {
-            title: "Trackers",
-            note: Some(
-                "Every transfer announces to these so peers can find it, as well as to the \
-                 trackers its link names. A tracker can also list what you publish to it."
-                    .to_owned(),
-            ),
-            rows: trackers,
-        },
-        Section {
-            title: "Relays",
-            note: Some(
-                "The fastest becomes the home relay, which lends this peer an address when \
-                 others can't reach it directly."
-                    .to_owned(),
-            ),
-            rows: relays,
-        },
+        Section::new(text::TRACKERS, trackers),
+        Section::new(text::RELAYS, relays),
     ]
 }
 

@@ -15,6 +15,8 @@ use crate::schedule::Schedule;
 use crate::ui::UiSettings;
 use crate::units;
 
+pub mod text;
+
 /// `GET /v1/settings`, as far as clients show it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

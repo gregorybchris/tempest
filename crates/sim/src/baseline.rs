@@ -283,10 +283,8 @@ pub struct Check {
     pub improved: bool,
 }
 
-/// The mean of `values`, if every run has one.
-fn mean(values: &[Option<f64>]) -> Option<f64> {
-    let values: Option<Vec<f64>> = values.iter().copied().collect();
-    let values = values?;
+/// The mean of `values`, if there are any.
+fn mean(values: &[f64]) -> Option<f64> {
     (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
 }
 
@@ -334,10 +332,12 @@ fn check(
     // A metric that vanished on some seed is a regression; one that appeared, an improvement.
     let vanished = values.iter().any(|v| matches!(v, (Some(_), None)));
     let appeared = values.iter().any(|v| matches!(v, (None, Some(_))));
+    // The seeds where both have the metric are compared; the others count only as above.
+    let both: Vec<(f64, f64)> = values.iter().filter_map(|&(b, n)| b.zip(n)).collect();
     let (base, now, change, shift) = match method {
         Method::Mean => {
-            let base = mean(&values.iter().map(|v| v.0).collect::<Vec<_>>());
-            let now = mean(&values.iter().map(|v| v.1).collect::<Vec<_>>());
+            let base = mean(&both.iter().map(|p| p.0).collect::<Vec<_>>());
+            let now = mean(&both.iter().map(|p| p.1).collect::<Vec<_>>());
             // The shift the worse way, and the interval of it nearest and furthest from 0.
             let shift = base.zip(now).map(|(b, n)| {
                 let d = worse.sign() * (n - b);
@@ -346,7 +346,6 @@ fn check(
             (base, now, None, shift)
         }
         Method::Paired(bootstrap) => {
-            let both: Vec<(f64, f64)> = values.iter().filter_map(|&(b, n)| b.zip(n)).collect();
             let base = stats::median(&both.iter().map(|p| p.0).collect::<Vec<_>>());
             let now = stats::median(&both.iter().map(|p| p.1).collect::<Vec<_>>());
             let change = bootstrap.median(&both.iter().map(|(b, n)| n - b).collect::<Vec<_>>());
@@ -619,6 +618,19 @@ mod tests {
             let checks = baseline().compare(&current, method).unwrap();
             assert!(check(&checks, "completion p50 (s)").regressed);
         }
+    }
+
+    #[test]
+    fn a_seed_missing_a_metric_doesnt_hide_the_others() {
+        let values = [(None, Some(10.0)), (Some(10.0), Some(20.0))];
+        let result = super::check(
+            "metric",
+            &values,
+            Worse::Higher,
+            Tolerance::Relative(0.1),
+            Method::Mean,
+        );
+        assert!(result.regressed, "{result:?}");
     }
 
     #[test]

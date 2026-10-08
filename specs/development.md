@@ -7,6 +7,7 @@ How to work on Tempest efficiently, for people and coding agents. These guidelin
 The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development builds link the system DuckDB library instead of compiling DuckDB's C++ source, which took minutes on every cold build:
 
 - **macOS:** `brew install duckdb`. `.cargo/config.toml` points the build at Homebrew's copy.
+- **Hooks:** `git config core.hooksPath .githooks` enables the worktree hook (see Parallel work).
 - **Elsewhere:** install DuckDB's library and set `DUCKDB_LIB_DIR`, or build with `--features tempest-sim/bundled-duckdb` to compile it from source. CI and release builds use that feature. The `tempest` binary doesn't use DuckDB.
 
 ## Iterating
@@ -32,7 +33,8 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 ## Parallel work
 
 - Independent tasks (for example, two separate web UIs) can run in parallel, each in its own git worktree. That cuts wall-clock time considerably compared with running them one after another.
-- Parallel builds in one working tree contend for the same `target/` lock and the same disk. Separate worktrees each need their own `target/`, so check free disk space before starting several.
+- Parallel builds in one working tree contend for the same `target/` lock, so give each its own worktree rather than sharing a target directory.
+- A new worktree starts with copy-on-write clones of the main checkout's debug builds and web UI builds, made by the `post-checkout` hook in `.githooks/`. Dependencies are then already built, and only the workspace's own crates rebuild. Clones take no disk until they diverge, but each worktree's own rebuilds do, so check free space before starting several and delete a worktree's `target/` when it's done.
 
 ## Releasing locally
 

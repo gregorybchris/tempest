@@ -1,0 +1,25 @@
+#!/bin/sh
+# When `git worktree add` creates a worktree, give it copy-on-write clones of the main
+# checkout's debug builds and web UI builds, so its first build reuses them instead of
+# starting cold. Clones cost no disk until either copy changes (APFS). See
+# specs/development.md, Parallel work.
+
+# A new worktree's checkout starts from the null commit.
+[ "$1" = "0000000000000000000000000000000000000000" ] || exit 0
+main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+here=$(pwd -P)
+[ "$here" != "$main" ] || exit 0
+[ ! -e "$here/target" ] || exit 0
+
+clone() {
+  # cp -c clones on APFS; elsewhere it fails, and the worktree builds cold as before.
+  [ -e "$main/$1" ] || return 0
+  mkdir -p "$(dirname "$here/$1")"
+  cp -cR "$main/$1" "$here/$1" 2>/dev/null || rm -rf "$here/$1"
+}
+
+# Expand the list in the main checkout, where the folders exist.
+for dir in $(cd "$main" && echo target/debug target/wasm32-unknown-unknown/debug crates/*/dist); do
+  clone "$dir"
+done
+exit 0

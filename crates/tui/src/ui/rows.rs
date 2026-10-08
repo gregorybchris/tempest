@@ -1,4 +1,4 @@
-//! The Catalog and Settings areas: sections of rows, a label and a value each, with the
+//! The Settings area: sections of rows, a label and a value each, with the
 //! selected row's meaning below them.
 
 use ratatui::Frame;

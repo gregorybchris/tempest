@@ -1,4 +1,4 @@
-//! The Catalog and Settings areas: the engine's settings as sections of rows, and what `enter`,
+//! The Settings area: the engine's settings as sections of rows, and what `enter`,
 //! `a` and `x` do to the row under the cursor (D-196).
 
 use std::collections::BTreeMap;
@@ -270,6 +270,7 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
     ];
 
     sections.push(network_section(settings));
+    sections.extend(peer_finding_sections(view));
 
     let mut categories = vec![Row::setting(
         "Default folder",
@@ -390,8 +391,8 @@ fn network_section(settings: &tempest_engine::EngineConfig) -> Section {
     }
 }
 
-/// The Catalog area's sections.
-pub fn catalog_sections(view: &SettingsView) -> Vec<Section> {
+/// The trackers every transfer announces to, and the relays, as sections of Settings.
+fn peer_finding_sections(view: &SettingsView) -> [Section; 2] {
     let settings = &view.settings;
     let mut trackers: Vec<Row> = settings
         .trackers
@@ -413,11 +414,12 @@ pub fn catalog_sections(view: &SettingsView) -> Vec<Section> {
         Row::new("+ Add a relay", "", Edit::NewRelay)
             .help("A relay's key and address, as <key>@host:port."),
     );
-    vec![
+    [
         Section {
             title: "Trackers",
             note: Some(
-                "Every transfer announces to these, as well as to the trackers its link names."
+                "Every transfer announces to these so peers can find it, as well as to the \
+                 trackers its link names. A tracker can also list what you publish to it."
                     .to_owned(),
             ),
             rows: trackers,
@@ -430,15 +432,6 @@ pub fn catalog_sections(view: &SettingsView) -> Vec<Section> {
                     .to_owned(),
             ),
             rows: relays,
-        },
-        Section {
-            title: "Catalogs",
-            note: Some(
-                "Browsing and searching what trackers list arrives in a later release \
-                 (roadmap M9)."
-                    .to_owned(),
-            ),
-            rows: Vec::new(),
         },
     ]
 }
@@ -484,7 +477,6 @@ impl App {
             return Vec::new();
         };
         match self.area {
-            Area::Catalog => catalog_sections(view),
             Area::Settings => settings_sections(self, view),
             _ => Vec::new(),
         }
@@ -498,18 +490,11 @@ impl App {
     /// Where the cursor is among the area's rows.
     pub fn row_cursor(&self) -> usize {
         let count = self.rows().len();
-        let cursor = match self.area {
-            Area::Catalog => self.catalog_row,
-            _ => self.settings_row,
-        };
-        cursor.min(count.saturating_sub(1))
+        self.settings_row.min(count.saturating_sub(1))
     }
 
     fn set_row_cursor(&mut self, row: usize) {
-        match self.area {
-            Area::Catalog => self.catalog_row = row,
-            _ => self.settings_row = row,
-        }
+        self.settings_row = row;
     }
 
     /// Moves the cursor among the rows by `by`.
@@ -674,15 +659,14 @@ impl App {
         None
     }
 
-    /// `a`: adds to the area's lists. In Catalog it adds to the section under the cursor.
+    /// `a`: adds to the list under the cursor: trackers, relays or, anywhere else, categories.
     pub(super) fn add_entry(&mut self) -> Option<Request> {
         self.settings.as_ref()?;
-        let relays = self.area == Area::Catalog
-            && self
-                .current_row()
-                .is_some_and(|row| matches!(row.edit, Edit::Relay(_) | Edit::NewRelay));
-        let target = match self.area {
-            Area::Settings => {
+        let edit = self.current_row().map(|row| row.edit);
+        let target = match edit {
+            Some(Edit::Tracker(_) | Edit::NewTracker) => ValueTarget::Tracker(None),
+            Some(Edit::Relay(_) | Edit::NewRelay) => ValueTarget::Relay(None),
+            _ => {
                 let form = Form::new(vec![
                     Field::text("Name", "", "films, music…"),
                     Field::text("Folder", "", "/path/to/folder"),
@@ -690,8 +674,6 @@ impl App {
                 self.modal = Some(Modal::Form(Box::new((FormKind::NewCategory, form))));
                 return None;
             }
-            _ if relays => ValueTarget::Relay(None),
-            _ => ValueTarget::Tracker(None),
         };
         let (title, placeholder) = match target {
             ValueTarget::Relay(_) => ("+ Add a relay", "<key>@host:port"),

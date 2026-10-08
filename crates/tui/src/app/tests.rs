@@ -250,13 +250,13 @@ fn remove_asks_whether_to_keep_the_files() {
 }
 
 #[test]
-fn unpublish_confirms_the_catalog_or_picks_one_first() {
+fn unpublish_confirms_the_tracker_or_picks_one_first() {
     let mut app = three();
     let alpha = target(&app);
     press(&mut app, KeyCode::Char('U'));
     assert_eq!(app.modal, None);
     let notice = app.notice.take().unwrap().text;
-    assert_eq!(notice, "alpha isn't published on any catalog.");
+    assert_eq!(notice, "alpha isn't published to any tracker.");
 
     // Published on one: a confirmation, which esc dismisses.
     let mut published = app.selected_transfer().unwrap().clone();
@@ -290,7 +290,7 @@ fn unpublish_confirms_the_catalog_or_picks_one_first() {
     app.finished(&request, Ok(Reply::Done));
     assert_eq!(
         app.notice.unwrap().text,
-        "Withdrew alpha from https://two.example's catalog."
+        "Unpublished alpha from https://two.example."
     );
 }
 
@@ -517,8 +517,7 @@ fn the_palette_runs_what_matches() {
 fn areas_switch_by_number_or_bracket_and_wrap() {
     let mut app = app_with(vec![]);
     assert_eq!(press(&mut app, KeyCode::Char('3')), Some(Request::Settings));
-    assert_eq!(app.area, Area::Catalog);
-    press(&mut app, KeyCode::Char(']'));
+    assert_eq!(app.area, Area::Settings);
     press(&mut app, KeyCode::Char(']'));
     assert_eq!(app.area, Area::Transfers);
     // One fetch of the settings at a time.
@@ -566,7 +565,7 @@ fn help_lists_the_areas_sections() {
         titles(&app),
         ["Move", "Transfer", "Queue", "Detail", "Find", "App"]
     );
-    press(&mut app, KeyCode::Char('4'));
+    press(&mut app, KeyCode::Char('3'));
     assert_eq!(titles(&app), ["Move", "Change", "App"]);
     press(&mut app, KeyCode::Char('2'));
     assert_eq!(titles(&app), ["Move", "Transfer", "Share", "App"]);

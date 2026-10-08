@@ -1,4 +1,4 @@
-//! What the Catalog and Settings areas list (D-196): sections of rows, each a label, its value
+//! What the Settings area lists (D-196): sections of rows, each a label, its value
 //! and the control that changes it. This is plain data built from the engine's settings, so it
 //! is tested here; the components only draw it.
 //!
@@ -419,6 +419,7 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
     sections.push(tags);
 
     sections.push(network_section(info));
+    sections.extend(peer_finding_sections(info));
 
     let ui = &settings.ui;
     let on = |on: bool| if on { "on" } else { "off" };
@@ -485,9 +486,8 @@ fn network_section(info: &SettingsInfo) -> Section {
         .note("On by default so direct sends work behind home routers.")
 }
 
-/// The Catalog area's sections. What trackers list is browsed in a later release (roadmap
-/// M9); the area says so.
-pub fn catalog_sections(info: &SettingsInfo) -> Vec<Section> {
+/// The trackers every transfer announces to and the relays, as sections of Settings.
+fn peer_finding_sections(info: &SettingsInfo) -> Vec<Section> {
     let settings = &info.settings;
     let trackers = settings
         .trackers
@@ -495,7 +495,7 @@ pub fn catalog_sections(info: &SettingsInfo) -> Vec<Section> {
         .map(|url| {
             Row::new(
                 format!("tracker:{url}"),
-                url.clone(),
+                "Tracker",
                 Control::Tracker(url.clone()),
             )
             .help("Every transfer announces to it.")
@@ -505,7 +505,7 @@ pub fn catalog_sections(info: &SettingsInfo) -> Vec<Section> {
     relays.extend(settings.relays.known.iter().map(|relay| {
         Row::new(
             format!("relay:{relay}"),
-            relay.clone(),
+            "Relay",
             Control::Relay(relay.clone()),
         )
         .help("A relay to pick the home relay from.")
@@ -514,7 +514,8 @@ pub fn catalog_sections(info: &SettingsInfo) -> Vec<Section> {
         Section {
             adds: Some(Adds::Tracker),
             ..Section::new("trackers", "Trackers", trackers).note(
-                "Every transfer announces to these, as well as to the trackers its link names.",
+                "Every transfer announces to these so peers can find it, as well as to the \
+                 trackers its link names. A tracker can also list what you publish to it.",
             )
         },
         Section {
@@ -663,21 +664,18 @@ mod tests {
     }
 
     #[test]
-    fn catalog_lists_trackers_and_relays() {
-        let sections = catalog_sections(&info());
-        assert_eq!(sections.len(), 2);
+    fn settings_list_trackers_and_relays_after_the_network_defaults() {
+        let sections = settings_sections(&info(), &extras());
+        let at = |id| sections.iter().position(|s| s.id == id).unwrap();
+        assert_eq!(at("trackers"), at("network") + 1);
+        assert_eq!(at("relays"), at("trackers") + 1);
+        let trackers = &sections[at("trackers")];
         assert_eq!(
-            sections[0].rows[0].label,
-            "https://tracker.example.org/announce"
+            trackers.rows[0].control,
+            Control::Tracker("https://tracker.example.org/announce".to_owned())
         );
-        assert_eq!(sections[0].adds, Some(Adds::Tracker));
-        assert!(
-            sections
-                .iter()
-                .flat_map(|s| &s.rows)
-                .all(|r| r.id != keys::RELAYS_FROM_TRACKERS),
-            "its switch is in Settings"
-        );
+        assert_eq!(trackers.adds, Some(Adds::Tracker));
+        assert_eq!(sections[at("relays")].adds, Some(Adds::Relay));
     }
 
     #[test]
@@ -698,14 +696,10 @@ mod tests {
 
     #[test]
     fn row_ids_are_unique_in_each_area() {
-        for sections in [
-            settings_sections(&info(), &extras()),
-            catalog_sections(&info()),
-        ] {
-            let mut seen = HashSet::new();
-            for row in sections.iter().flat_map(|s| &s.rows) {
-                assert!(seen.insert(row.id.clone()), "{} twice", row.id);
-            }
+        let sections = settings_sections(&info(), &extras());
+        let mut seen = HashSet::new();
+        for row in sections.iter().flat_map(|s| &s.rows) {
+            assert!(seen.insert(row.id.clone()), "{} twice", row.id);
         }
     }
 

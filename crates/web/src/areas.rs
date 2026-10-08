@@ -1,4 +1,4 @@
-//! The Catalog and Settings areas: the sections [`crate::rows`] makes, each row with the
+//! The Settings area: the sections [`crate::rows`] makes, each row with the
 //! control that changes it in place (D-196). The keyboard's cursor moves through the rows;
 //! `enter` uses the row's control, `x` its remove or reset button, and `a` the add field of
 //! the cursor's section.
@@ -23,11 +23,9 @@ use crate::rows::{self, Adds, Control, Extras, Row, Section};
 use crate::state::{Area, Dialog, Ui};
 use crate::store::Store;
 
-/// The sections of the Catalog and Settings areas, for the areas and the keyboard.
+/// The sections of the Settings area, for the area and the keyboard.
 #[derive(Clone, Copy)]
 pub struct Sections {
-    /// The Catalog area's.
-    pub catalog: Memo<Vec<Section>>,
     /// The Settings area's.
     pub settings: Memo<Vec<Section>>,
 }
@@ -36,12 +34,6 @@ impl Sections {
     /// The sections as the engine's settings, categories, transfers and the page's columns
     /// make them.
     pub fn new(config: Config, store: Store, ui: Ui) -> Self {
-        let catalog = Memo::new(move |_| {
-            config
-                .info
-                .with(|info| info.as_ref().map(rows::catalog_sections))
-                .unwrap_or_default()
-        });
         let tags = Memo::new(move |_| store.model.with(|m| rows::tag_counts(m.transfers())));
         let settings = Memo::new(move |_| {
             let extras = Extras {
@@ -54,13 +46,12 @@ impl Sections {
                 .with(|info| info.as_ref().map(|i| rows::settings_sections(i, &extras)))
                 .unwrap_or_default()
         });
-        Self { catalog, settings }
+        Self { settings }
     }
 
     /// The sections of `area`, untracked.
     pub fn of(self, area: Area) -> Vec<Section> {
         match area {
-            Area::Catalog => self.catalog.get_untracked(),
             Area::Settings => self.settings.get_untracked(),
             _ => Vec::new(),
         }
@@ -127,32 +118,6 @@ fn dom_id(row: &str) -> String {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
     });
     format!("row-{hash:016x}")
-}
-
-/// The Catalog area: trackers, relays and, later, what trackers list.
-#[component]
-pub fn Catalog() -> impl IntoView {
-    let sections = expect_context::<Sections>().catalog;
-    let ui = expect_context::<Ui>();
-    view! {
-        <div class="area area--wide">
-            <Loading />
-            <SectionsView sections />
-            <Panel title="catalogs">
-                <div class="catalogs">
-                    <div class="search">
-                        <input class="input" type="search" disabled=true placeholder="search what trackers list…" aria-label="Search catalogs (later)" />
-                    </div>
-                    <Empty
-                        title="Browsing catalogs arrives in a later release"
-                        text="Trackers will list what their peers share, to search and add from here (roadmap M9). For now, add a download from its tempest: link."
-                    >
-                        <Button kind=ButtonKind::Primary on_click=move || ui.dialog.set(Some(Dialog::Add))>"+ Add a link"</Button>
-                    </Empty>
-                </div>
-            </Panel>
-        </div>
-    }
 }
 
 /// The Settings area.
@@ -482,7 +447,7 @@ fn AddField(adds: Adds) -> impl IntoView {
     let input = NodeRef::<Input>::new();
     let (label, placeholder) = match adds {
         Adds::Category => ("Add a category", "name, such as films"),
-        Adds::Tracker => ("Add a tracker", "https://tracker.example.org/announce"),
+        Adds::Tracker => ("Add a tracker", "https://tracker.example.org"),
         Adds::Relay => ("Add a relay", "<key>@host:port"),
     };
     let add = move || {

@@ -59,7 +59,6 @@ pub enum Command {
 
     Change,
     AddEntry,
-    AddCategory,
     RemoveEntry,
     NextSection,
     PreviousSection,
@@ -67,7 +66,6 @@ pub enum Command {
     Palette,
     GoTransfers,
     GoShare,
-    GoCatalog,
     GoSettings,
     NextArea,
     PreviousArea,
@@ -91,7 +89,7 @@ pub enum Section {
     Find,
     /// The Share area's form and shares.
     Share,
-    /// Changing what the Catalog and Settings areas list.
+    /// Changing what the Settings area lists.
     Change,
     /// Areas, theme, help: what works everywhere.
     App,
@@ -115,7 +113,7 @@ impl Section {
 
 impl Command {
     /// Every command, in the order help and the palette list them.
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 53] = [
         Self::Down,
         Self::Up,
         Self::First,
@@ -157,14 +155,12 @@ impl Command {
         Self::ShowShare,
         Self::Change,
         Self::AddEntry,
-        Self::AddCategory,
         Self::RemoveEntry,
         Self::NextSection,
         Self::PreviousSection,
         Self::Palette,
         Self::GoTransfers,
         Self::GoShare,
-        Self::GoCatalog,
         Self::GoSettings,
         Self::NextArea,
         Self::PreviousArea,
@@ -176,7 +172,7 @@ impl Command {
     /// Whether it works on `screen`.
     pub fn works_in(self, screen: Screen) -> bool {
         let deeper = matches!(screen, Screen::Detail | Screen::Chunks | Screen::Rates);
-        let rows = matches!(screen, Screen::Catalog | Screen::Settings);
+        let rows = screen == Screen::Settings;
         match self {
             Self::Detail => screen == Screen::List,
             Self::NextTab | Self::PreviousTab => screen == Screen::Detail,
@@ -184,8 +180,7 @@ impl Command {
             Self::Rates => matches!(screen, Screen::Detail | Screen::Chunks),
             Self::Back => deeper,
             Self::Copy => matches!(screen, Screen::List | Screen::Detail | Screen::Share),
-            Self::AddEntry => screen == Screen::Catalog,
-            Self::AddCategory => screen == Screen::Settings,
+            Self::AddEntry => screen == Screen::Settings,
             _ => match self.section() {
                 Section::Move => !matches!(screen, Screen::Chunks | Screen::Rates),
                 Section::Transfer | Section::Queue => {
@@ -246,15 +241,14 @@ impl Command {
             Self::NewShare => &[Char('a')],
             Self::ShowShare => &[Enter],
             Self::Change => &[Enter, Char(' ')],
-            Self::AddEntry | Self::AddCategory => &[Char('a')],
+            Self::AddEntry => &[Char('a')],
             Self::RemoveEntry => &[Char('x'), Delete],
             Self::NextSection => &[Tab],
             Self::PreviousSection => &[BackTab],
             Self::Palette => &[Char(':')],
             Self::GoTransfers => &[Char('1')],
             Self::GoShare => &[Char('2')],
-            Self::GoCatalog => &[Char('3')],
-            Self::GoSettings => &[Char('4')],
+            Self::GoSettings => &[Char('3')],
             Self::NextArea => &[Char(']')],
             Self::PreviousArea => &[Char('[')],
             Self::Theme => &[Char('T')],
@@ -284,7 +278,7 @@ impl Command {
             Self::Open => "Open its folder",
             Self::Copy => "Copy its link",
             Self::Limits => "Speed and sharing limits",
-            Self::Unpublish => "Withdraw from a catalog",
+            Self::Unpublish => "Unpublish from a tracker",
             Self::QueueUp => "Up the queue",
             Self::QueueDown => "Down the queue",
             Self::QueueTop => "Top of the queue",
@@ -306,15 +300,13 @@ impl Command {
             Self::NewShare => "Share a file or folder",
             Self::ShowShare => "Show it in Transfers",
             Self::Change => "Change",
-            Self::AddEntry => "Add a tracker or relay",
-            Self::AddCategory => "Add a category",
+            Self::AddEntry => "Add a tracker, relay or category",
             Self::RemoveEntry => "Remove, or reset to the file",
             Self::NextSection => "Next section",
             Self::PreviousSection => "Previous section",
             Self::Palette => "Commands",
             Self::GoTransfers => "Go to Transfers",
             Self::GoShare => "Go to Share",
-            Self::GoCatalog => "Go to Catalog",
             Self::GoSettings => "Go to Settings",
             Self::NextArea => "Next area",
             Self::PreviousArea => "Previous area",
@@ -335,7 +327,6 @@ impl Command {
             Self::ShowShare => ("enter", "show"),
             Self::Change => ("enter", "change"),
             Self::AddEntry => ("a", "add"),
-            Self::AddCategory => ("a", "add category"),
             Self::RemoveEntry => ("x", "remove/reset"),
             Self::NextSection => ("tab", "sections"),
             Self::Detail => ("enter", "detail"),
@@ -350,7 +341,7 @@ impl Command {
             Self::Sort => ("s", "sort"),
             Self::ClearFilters => ("esc", "clear filters"),
             Self::Palette => (":", "command"),
-            Self::GoTransfers => ("1-4", "areas"),
+            Self::GoTransfers => ("1-3", "areas"),
             Self::Theme => ("T", "theme"),
             Self::Quit => ("q", "quit"),
             Self::Help => ("?", "help"),
@@ -371,7 +362,7 @@ impl Command {
             Self::PageDown => pair("pgdn/pgup", "Page down/up"),
             Self::QueueUp => pair("K/J", "Up/down the queue"),
             Self::QueueTop => pair("</>", "Top/bottom of the queue"),
-            Self::GoTransfers => pair("1-4", "Go to an area"),
+            Self::GoTransfers => pair("1-3", "Go to an area"),
             Self::NextSection => pair("tab ⇧tab", "Next/previous section"),
             Self::NextArea => pair("]/[", "Next/previous area"),
             Self::Up
@@ -381,7 +372,6 @@ impl Command {
             | Self::QueueBottom
             | Self::PreviousTab
             | Self::GoShare
-            | Self::GoCatalog
             | Self::GoSettings
             | Self::PreviousArea
             | Self::PreviousSection => None,
@@ -426,7 +416,6 @@ impl Command {
             Self::NewShare | Self::ShowShare => Section::Share,
             Self::Change
             | Self::AddEntry
-            | Self::AddCategory
             | Self::RemoveEntry
             | Self::NextSection
             | Self::PreviousSection => Section::Change,
@@ -582,7 +571,7 @@ mod tests {
             Some(Command::NewShare)
         );
         assert_eq!(
-            Command::for_key(Screen::Catalog, key('a')),
+            Command::for_key(Screen::Settings, key('a')),
             Some(Command::AddEntry)
         );
         assert_eq!(
@@ -620,7 +609,7 @@ mod tests {
 
     #[test]
     fn the_palette_ranks_closer_matches_first() {
-        assert_eq!(palette_matches(Screen::List, "").len(), 35);
+        assert_eq!(palette_matches(Screen::List, "").len(), 34);
         assert_eq!(palette_matches(Screen::List, "rem")[0], Command::Remove);
         assert_eq!(palette_matches(Screen::List, "tags")[0], Command::Tags);
         assert_eq!(palette_matches(Screen::List, "queue")[0], Command::QueueUp);

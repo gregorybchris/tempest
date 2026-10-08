@@ -45,22 +45,19 @@ pub enum Area {
     Transfers,
     /// Creating a bundle and getting its link.
     Share,
-    /// Trackers and what they offer.
-    Catalog,
     /// Limits, queue, categories and theme.
     Settings,
 }
 
 impl Area {
     /// Every area, in navigation order.
-    pub const ALL: [Self; 4] = [Self::Transfers, Self::Share, Self::Catalog, Self::Settings];
+    pub const ALL: [Self; 3] = [Self::Transfers, Self::Share, Self::Settings];
 
     /// Its name in the navigation.
     pub fn title(self) -> &'static str {
         match self {
             Self::Transfers => "Transfers",
             Self::Share => "Share",
-            Self::Catalog => "Catalog",
             Self::Settings => "Settings",
         }
     }
@@ -135,21 +132,18 @@ pub enum Screen {
     Rates,
     /// The Share area.
     Share,
-    /// The Catalog area.
-    Catalog,
     /// The Settings area.
     Settings,
 }
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::List,
         Self::Detail,
         Self::Chunks,
         Self::Rates,
         Self::Share,
-        Self::Catalog,
         Self::Settings,
     ];
 }
@@ -198,7 +192,7 @@ const NOTICE_TICKS: u8 = 5;
 /// How far page up and down move.
 const PAGE: isize = 10;
 
-/// How many ticks (seconds) the Catalog and Settings areas wait between fetching the settings,
+/// How many ticks (seconds) the Settings area waits between fetching the settings,
 /// which have no events.
 const SETTINGS_TICKS: u8 = 5;
 
@@ -255,8 +249,6 @@ pub struct App {
     pub views: Vec<SavedView>,
     /// The Share area's state.
     pub share: ShareArea,
-    /// The cursor among the Catalog area's rows.
-    catalog_row: usize,
     /// The cursor among the Settings area's rows.
     settings_row: usize,
     /// A message about something that just happened.
@@ -297,7 +289,6 @@ impl App {
             columns: Column::DEFAULT.to_vec(),
             views: Vec::new(),
             share: ShareArea::default(),
-            catalog_row: 0,
             settings_row: 0,
             notice: None,
             seen: HashMap::new(),
@@ -330,7 +321,6 @@ impl App {
             (Area::Transfers, View::Chunks) => Screen::Chunks,
             (Area::Transfers, View::Rates) => Screen::Rates,
             (Area::Share, _) => Screen::Share,
-            (Area::Catalog, _) => Screen::Catalog,
             (Area::Settings, _) => Screen::Settings,
         }
     }
@@ -367,7 +357,7 @@ impl App {
         if self.screen() == Screen::Share && self.share.editing {
             return self.share_hints();
         }
-        const ORDER: [Command; 26] = [
+        const ORDER: [Command; 25] = [
             Command::ClearFilters,
             Command::Back,
             Command::Down,
@@ -379,7 +369,6 @@ impl App {
             Command::NewShare,
             Command::Change,
             Command::AddEntry,
-            Command::AddCategory,
             Command::RemoveEntry,
             Command::ShowShare,
             Command::Filter,
@@ -424,7 +413,7 @@ impl App {
     /// The current screen's name, as help titles it.
     pub fn screen_title(&self) -> &'static str {
         match self.screen() {
-            Screen::List | Screen::Share | Screen::Catalog | Screen::Settings => self.area.title(),
+            Screen::List | Screen::Share | Screen::Settings => self.area.title(),
             Screen::Detail => "Detail",
             Screen::Chunks => "Chunk map",
             Screen::Rates => "Rates",
@@ -504,7 +493,7 @@ impl App {
             }
         }
         self.settings_age = self.settings_age.saturating_add(1);
-        let rows = matches!(self.area, Area::Catalog | Area::Settings);
+        let rows = self.area == Area::Settings;
         let stale = rows && self.settings_age >= SETTINGS_TICKS;
         let settings = (stale || !self.prefs_loaded)
             .then(|| self.load_settings())
@@ -562,7 +551,7 @@ impl App {
         match area {
             Area::Transfers => None,
             Area::Share => Some(Request::Categories),
-            Area::Catalog | Area::Settings => self.load_settings(),
+            Area::Settings => self.load_settings(),
         }
     }
 
@@ -825,7 +814,7 @@ impl App {
                 });
             }
             Command::Change => return self.change_row(),
-            Command::AddEntry | Command::AddCategory => return self.add_entry(),
+            Command::AddEntry => return self.add_entry(),
             Command::RemoveEntry => return self.remove_row(),
             Command::NextSection => self.move_section(1),
             Command::PreviousSection => self.move_section(-1),
@@ -838,7 +827,6 @@ impl App {
             }
             Command::GoTransfers => return self.go(Area::Transfers),
             Command::GoShare => return self.go(Area::Share),
-            Command::GoCatalog => return self.go(Area::Catalog),
             Command::GoSettings => return self.go(Area::Settings),
             Command::NextArea => return self.go(self.area.step(1)),
             Command::PreviousArea => return self.go(self.area.step(-1)),
@@ -920,7 +908,7 @@ impl App {
                 let mut published = transfer.published.iter();
                 self.modal = match (published.next(), published.next()) {
                     (None, _) => {
-                        let text = format!("{} isn't published on any catalog.", target.name);
+                        let text = format!("{} isn't published to any tracker.", target.name);
                         self.notify(text, false);
                         None
                     }
@@ -963,7 +951,7 @@ impl App {
         match self.screen() {
             Screen::Detail => {}
             Screen::Share => return self.move_share(by),
-            Screen::Catalog | Screen::Settings => return self.move_row(by),
+            Screen::Settings => return self.move_row(by),
             _ => return self.move_cursor(by),
         }
         // Decisions count from the newest, at the bottom, so down goes toward it.

@@ -17,22 +17,19 @@ pub enum Area {
     Transfers,
     /// Making a bundle to share.
     Share,
-    /// Trackers and what they list.
-    Catalog,
-    /// Limits, queue, categories and the look.
+    /// Limits, queue, categories, trackers, relays and the look.
     Settings,
 }
 
 impl Area {
     /// Every area, in order.
-    pub const ALL: [Area; 4] = [Area::Transfers, Area::Share, Area::Catalog, Area::Settings];
+    pub const ALL: [Area; 3] = [Area::Transfers, Area::Share, Area::Settings];
 
     /// Its name in the navigation.
     pub fn title(self) -> &'static str {
         match self {
             Area::Transfers => "Transfers",
             Area::Share => "Share",
-            Area::Catalog => "Catalog",
             Area::Settings => "Settings",
         }
     }
@@ -147,7 +144,7 @@ pub struct Ui {
     pub typing: RwSignal<bool>,
     /// The share the keyboard acts on in the Share area.
     pub share: RwSignal<Option<BundleId>>,
-    /// The row the keyboard acts on in the Catalog and Settings areas, by its ID.
+    /// The row the keyboard acts on in the Settings area, by its ID.
     pub row: RwSignal<Option<String>>,
 }
 
@@ -226,7 +223,7 @@ fn scope(area: Area, open: Option<BundleId>, deeper: Option<Deeper>) -> Scope {
         (Area::Transfers, Some(_), None) => Scope::Detail,
         (Area::Transfers, Some(_), Some(_)) => Scope::Deeper,
         (Area::Share, ..) => Scope::Share,
-        (Area::Catalog | Area::Settings, ..) => Scope::Rows,
+        (Area::Settings, ..) => Scope::Rows,
     }
 }
 
@@ -259,7 +256,6 @@ mod tests {
         );
         // A detail left open behind another area doesn't take its keys.
         assert_eq!(scope(Area::Share, Some(id), None), Scope::Share);
-        assert_eq!(scope(Area::Catalog, None, None), Scope::Rows);
         assert_eq!(scope(Area::Settings, None, None), Scope::Rows);
     }
 }

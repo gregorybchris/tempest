@@ -1,4 +1,4 @@
-//! Keys in the Share, Catalog and Settings areas, and what the user keeps (D-195 to D-197).
+//! Keys in the Share and Settings areas, and what the user keeps (D-195 to D-197).
 
 use std::collections::BTreeMap;
 
@@ -24,7 +24,7 @@ fn change(key: &str, value: Value) -> BTreeMap<String, Value> {
 fn settings_area() -> App {
     let mut app = three();
     load(&mut app, settings(), &["films", "music"]);
-    press(&mut app, KeyCode::Char('4'));
+    press(&mut app, KeyCode::Char('3'));
     load(&mut app, settings(), &["films", "music"]);
     app
 }
@@ -194,7 +194,8 @@ fn trackers_and_relays_are_added_and_removed() {
     let mut app = three();
     press(&mut app, KeyCode::Char('3'));
     load(&mut app, view, &[]);
-    assert_eq!(app.screen(), Screen::Catalog);
+    assert_eq!(app.screen(), Screen::Settings);
+    go_to(&mut app, "https://a.example");
 
     press(&mut app, KeyCode::Char('a'));
     type_keys(&mut app, "ftp://b.example");

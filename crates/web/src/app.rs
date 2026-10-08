@@ -17,7 +17,7 @@ use tempest_ui_kit::theme::apply_look;
 use tempest_ui_kit::{Look, Theme};
 use wasm_bindgen::JsCast;
 
-use crate::areas::{Catalog, Sections, Settings};
+use crate::areas::{Sections, Settings};
 use crate::config::Config;
 use crate::controls::Controls;
 use crate::detail::Detail;
@@ -99,7 +99,6 @@ fn Shell() -> impl IntoView {
     let area = move || match ui.area.get() {
         Area::Transfers => view! { <Transfers /> }.into_any(),
         Area::Share => view! { <Share /> }.into_any(),
-        Area::Catalog => view! { <Catalog /> }.into_any(),
         Area::Settings => view! { <Settings /> }.into_any(),
     };
     let hints = Signal::derive(move || {
@@ -344,7 +343,7 @@ fn escape(ui: Ui, typing: bool, e: &web_sys::KeyboardEvent) -> bool {
     }
 }
 
-/// What the keys move through: the transfers, the rows of Catalog and Settings, the shares.
+/// What the keys move through: the transfers, the rows of Settings, the shares.
 #[derive(Clone, Copy)]
 struct Lists {
     order: Order,

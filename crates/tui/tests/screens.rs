@@ -291,32 +291,34 @@ fn the_share_area_lists_shares_with_their_links() {
 }
 
 #[test]
-fn the_catalog_area_lists_trackers_and_relays() {
-    let mut app = app();
-    press(&mut app, "3");
-    insta::assert_snapshot!("catalog_loading", draw(&app, 80, 12).backend());
-    with_settings(&mut app);
-    press(&mut app, "j");
-    insta::assert_snapshot!("catalog", draw(&app, 80, 24).backend());
-    press(&mut app, "a");
-    insta::assert_snapshot!("catalog_add_tracker", draw(&app, 80, 24).backend());
-}
-
-#[test]
 fn the_settings_area_groups_every_setting() {
     let mut app = app();
     with_settings(&mut app);
-    press(&mut app, "4");
+    press(&mut app, "3");
     insta::assert_snapshot!("settings", draw(&app, 80, 30).backend());
     press(&mut app, "G");
     insta::assert_snapshot!("settings_end", draw(&app, 80, 30).backend());
 }
 
 #[test]
+fn settings_lists_trackers_and_relays_after_the_network_settings() {
+    let mut app = app();
+    with_settings(&mut app);
+    press(&mut app, "3");
+    // Speed limits, alternative limits, queue, sharing limits, network, then trackers.
+    for _ in 0..5 {
+        press_code(&mut app, KeyCode::Tab);
+    }
+    insta::assert_snapshot!("settings_trackers", draw(&app, 80, 30).backend());
+    press(&mut app, "a");
+    insta::assert_snapshot!("settings_add_tracker", draw(&app, 80, 24).backend());
+}
+
+#[test]
 fn settings_editors() {
     let mut app = app();
     with_settings(&mut app);
-    press(&mut app, "4");
+    press(&mut app, "3");
     press_code(&mut app, KeyCode::Enter);
     insta::assert_snapshot!("settings_value", draw(&app, 80, 16).backend());
     app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));

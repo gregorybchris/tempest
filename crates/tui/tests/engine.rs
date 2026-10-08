@@ -275,7 +275,7 @@ async fn the_areas_share_change_settings_and_keep_the_theme() {
     assert!(app.selected_share().unwrap().link.starts_with("tempest:"));
 
     // A speed limit and a category from the Settings area.
-    press(&mut app, &client, &[KeyCode::Char('4'), KeyCode::Enter]).await;
+    press(&mut app, &client, &[KeyCode::Char('3'), KeyCode::Enter]).await;
     press(&mut app, &client, &chars("2M")).await;
     press(&mut app, &client, &[KeyCode::Enter]).await;
     let settings = client.settings().await.unwrap();

@@ -13,7 +13,7 @@ pub enum Scope {
     Deeper,
     /// The Share area.
     Share,
-    /// The rows of the Catalog or Settings area.
+    /// The rows of the Settings area.
     Rows,
     /// A text field, which takes every key but `esc`. Only hints and help use it.
     Typing,
@@ -406,13 +406,6 @@ pub const BINDINGS: &[Binding] = &[
         scopes: EVERYWHERE,
         command: Command::Area(2),
         hint: "",
-        help: "Catalog",
-    },
-    Binding {
-        keys: &["4"],
-        scopes: EVERYWHERE,
-        command: Command::Area(3),
-        hint: "",
         help: "Settings",
     },
     Binding {
@@ -478,7 +471,7 @@ pub fn hints(scope: Scope) -> Vec<(Vec<&'static str>, &'static str)> {
     if matches!(scope, Detail | Deeper) {
         hints.insert(0, (vec!["esc"], "back"));
     }
-    hints.push((vec!["1", "4"], "areas"));
+    hints.push((vec!["1", "3"], "areas"));
     hints
 }
 
@@ -549,7 +542,7 @@ mod tests {
         assert_eq!(list[0], (vec!["j", "k"], "move"));
         assert_eq!(list[1], (vec!["enter"], "detail"));
         assert!(list.contains(&(vec!["space"], "start/stop")));
-        assert_eq!(list.last(), Some(&(vec!["1", "4"], "areas")));
+        assert_eq!(list.last(), Some(&(vec!["1", "3"], "areas")));
         let detail = hints(Detail);
         assert_eq!(detail[0], (vec!["esc"], "back"));
         assert!(detail.contains(&(vec!["h", "l"], "tabs")));

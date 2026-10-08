@@ -2,7 +2,7 @@
 source: crates/tui/tests/screens.rs
 expression: "draw(&app, 80, 24).backend()"
 ---
-"  Transfers   Share   Catalog   Settings                  ↓9.8M  ↑1.6M  [green] "
+"  Transfers   Share   Settings                            ↓9.8M  ↑1.6M  [green] "
 "────────────────────────────────────────────────────────────────────────────────"
 "  Name      ╔ Commands ════════════════════════════════════════════╗       Peers"
 "▌ ensemble-2║: type to find a command                              ║ding    7/12"

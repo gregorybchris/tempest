@@ -1,6 +1,6 @@
 [package]
 name = "tempest-ui-gallery"
-description = "A living catalog of Tempest's design system, and the browser benchmark of its live views"
+description = "A living gallery of Tempest's design system, and the browser benchmark of its live views"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

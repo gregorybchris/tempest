@@ -1,4 +1,4 @@
-//! A living catalog of Tempest's design system: every component, chart and the chunk map, on
+//! A living gallery of Tempest's design system: every component, chart and the chunk map, on
 //! made-up live data, in any of the four themes.
 //!
 //! `trunk serve` in this directory serves it. `?theme=amber` picks the first theme and
@@ -26,7 +26,6 @@ fn main() {
 enum Area {
     Transfers,
     Share,
-    Catalog,
     Settings,
 }
 
@@ -106,7 +105,6 @@ fn App() -> impl IntoView {
                     items=vec![
                         (Area::Transfers, "Transfers"),
                         (Area::Share, "Share"),
-                        (Area::Catalog, "Catalog"),
                         (Area::Settings, "Settings"),
                     ]
                     current=area

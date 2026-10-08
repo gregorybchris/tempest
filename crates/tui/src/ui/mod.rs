@@ -3,7 +3,7 @@
 //! The screen follows the shared client layout (`specs/interfaces.md`): the areas and rates on
 //! top, the area's content, and a bar of the keys that work at the bottom. In Transfers, the
 //! content is the list with the selected transfer's state or detail below it, or one of its
-//! full-screen views (D-137). Share has its form, shares and link; Catalog and Settings have
+//! full-screen views (D-137). Share has its form, shares and link; Settings has
 //! sections of rows (D-196).
 
 mod chunks;
@@ -53,7 +53,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::Chunks => chunks::draw(frame, app, body),
         Screen::Rates => rates::draw(frame, app, body),
         Screen::Share => share::draw(frame, app, body),
-        Screen::Catalog | Screen::Settings => rows::draw(frame, app, body),
+        Screen::Settings => rows::draw(frame, app, body),
     }
     draw_footer(frame, app, footer);
     modal::draw(frame, app, area);

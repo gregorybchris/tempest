@@ -2,7 +2,7 @@
 source: crates/tui/tests/screens.rs
 expression: "draw(&app, 80, 16).backend()"
 ---
-"  Transfers   Share   Catalog   Settings                  ↓9.8M  ↑1.6M  [green] "
+"  Transfers   Share   Settings                            ↓9.8M  ↑1.6M  [green] "
 "────────────────────────────────────────────────────────────────────────────────"
 " Changes to peers apply when the engine restarts.                               "
 "                                                                                "

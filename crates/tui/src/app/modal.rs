@@ -225,7 +225,7 @@ pub enum PickKind {
     Sort,
     /// A saved view.
     View,
-    /// A catalog to withdraw a transfer from.
+    /// A tracker to unpublish a transfer from.
     Unpublish(Target),
 }
 
@@ -237,7 +237,7 @@ impl PickKind {
             Self::Status => "Show",
             Self::Sort => "Sort by",
             Self::View => "Views",
-            Self::Unpublish(_) => "Withdraw from",
+            Self::Unpublish(_) => "Unpublish from",
         }
     }
 }
@@ -911,14 +911,15 @@ fn text_key(
     }
 }
 
-/// Asks whether to withdraw `target`'s listing from `tracker`'s catalog.
+/// Asks whether to unpublish `target` from `tracker`.
 pub(super) fn confirm_unpublish(target: Target, tracker: String) -> Modal {
     Modal::Confirm {
-        title: "Withdraw".to_owned(),
-        text: format!("Withdraw {} from {tracker}'s catalog?", target.name),
-        detail: "The catalog stops listing it, and this peer stops asking it to. The transfer \
-                 keeps sharing."
-            .to_owned(),
+        title: "Unpublish".to_owned(),
+        text: format!("Unpublish {} from {tracker}?", target.name),
+        detail:
+            "The tracker stops listing it, and this peer stops asking it to. The transfer keeps \
+                 sharing."
+                .to_owned(),
         request: Box::new(Request::Transfer(target, Action::Unpublish(tracker))),
     }
 }

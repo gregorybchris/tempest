@@ -1,5 +1,5 @@
 //! The engine's settings and categories, which have no events: fetched when the engine
-//! answers, when Catalog or Settings opens, every few seconds while one shows, and after each
+//! answers, when Settings opens, every few seconds while one shows, and after each
 //! change (D-196). Every change goes through here and says how it went.
 
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ use crate::state::{Area, Ui};
 use crate::store::Store;
 use crate::stream::Link;
 
-/// How often the settings are fetched while Catalog or Settings shows.
+/// How often the settings are fetched while Settings shows.
 const REFRESH: Duration = Duration::from_secs(5);
 
 /// The engine's settings, as last known. It is `Copy`.
@@ -53,7 +53,7 @@ impl Config {
         });
         if let Ok(timer) = set_interval_with_handle(
             move || {
-                let showing = matches!(ui.area.get_untracked(), Area::Catalog | Area::Settings);
+                let showing = ui.area.get_untracked() == Area::Settings;
                 if showing && store.link.get_untracked() == Link::Live {
                     config.refresh();
                 }

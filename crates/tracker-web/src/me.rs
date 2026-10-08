@@ -177,14 +177,14 @@ fn MyRow(listing: Listing) -> impl IntoView {
     let (label, tone) = match listing.status {
         ListingStatus::Listed => ("listed", Tone::Up),
         ListingStatus::Pending => ("pending", Tone::Warn),
-        ListingStatus::Withdrawn => ("unpublished", Tone::Dim),
+        ListingStatus::Unpublished => ("unpublished", Tone::Dim),
     };
     let why = match listing.status {
         ListingStatus::Listed => "Shown to everyone",
         ListingStatus::Pending => {
             "Waiting for the tracker to fetch its manifest from a peer sharing it"
         }
-        ListingStatus::Withdrawn => "Only you see it; edit it to list it again",
+        ListingStatus::Unpublished => "Only you see it; edit it to list it again",
     };
     let title = match listing.title.is_empty() {
         true => "untitled".to_owned(),

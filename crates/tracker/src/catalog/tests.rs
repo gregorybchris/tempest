@@ -248,7 +248,7 @@ fn listings_show_once_their_content_is_known() {
 }
 
 #[test]
-fn publishers_edit_and_withdraw_their_listings() {
+fn publishers_edit_and_unpublish_their_listings() {
     let mut catalog = catalog(false);
     let (alice, bob) = (Key::new(1), Key::new(2));
     let id = publish(&mut catalog, &alice, 1, 0);
@@ -307,9 +307,12 @@ fn publishers_edit_and_withdraw_their_listings() {
         400
     );
 
-    // Withdrawn listings hide, and announces don't bring them back; an edit does.
-    assert_eq!(catalog.withdraw(8, &id, &bob.id()).unwrap_err().status, 403);
-    catalog.withdraw(8, &id, &alice.id()).unwrap();
+    // Unpublished listings hide, and announces don't bring them back; an edit does.
+    assert_eq!(
+        catalog.unpublish(8, &id, &bob.id()).unwrap_err().status,
+        403
+    );
+    catalog.unpublish(8, &id, &alice.id()).unwrap();
     assert!(catalog.listing(&id, None).is_err());
     catalog.request_listing(9, &id, &alice.id()).unwrap();
     assert!(catalog.listing(&id, None).is_err());
@@ -490,7 +493,7 @@ fn reopening_rebuilds_the_search_index() {
         };
         catalog.edit_listing(1, &id, &alice.id(), &edit).unwrap();
         publish(&mut catalog, &alice, 2, 0);
-        catalog.withdraw(2, &bundle(2), &alice.id()).unwrap();
+        catalog.unpublish(2, &bundle(2), &alice.id()).unwrap();
         // Pending listings aren't searchable either.
         catalog.request_listing(3, &bundle(3), &alice.id()).unwrap();
     }

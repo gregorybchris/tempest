@@ -442,7 +442,7 @@ async fn publishers_describe_listings_and_others_vote_and_comment() {
     let deleted = call(&router, Method::DELETE, &delete_path, &bob_h, Value::Null).await;
     assert_eq!(deleted.status, StatusCode::OK);
 
-    // Names, and withdrawing.
+    // Names, and unpublishing.
     let named = call(
         &router,
         Method::PUT,
@@ -454,8 +454,8 @@ async fn publishers_describe_listings_and_others_vote_and_comment() {
     assert_eq!(named.body["name"], "Alice");
     let shown = call(&router, Method::GET, &path, &[], Value::Null).await;
     assert_eq!(shown.body["publisher"]["name"], "Alice");
-    let withdrawn = call(&router, Method::DELETE, &path, &alice_h, Value::Null).await;
-    assert_eq!(withdrawn.status, StatusCode::OK);
+    let unpublished = call(&router, Method::DELETE, &path, &alice_h, Value::Null).await;
+    assert_eq!(unpublished.status, StatusCode::OK);
     let gone = call(&router, Method::GET, &path, &[], Value::Null).await;
     assert_eq!(gone.status, StatusCode::NOT_FOUND);
 }
@@ -636,7 +636,7 @@ async fn searching_counts_facets_and_filters_by_tag() {
 }
 
 #[tokio::test]
-async fn search_follows_edits_and_withdrawals() {
+async fn search_follows_edits_and_unpublishings() {
     let tracker = tracker();
     let router = tracker.router();
     let alice = Key::new(1);

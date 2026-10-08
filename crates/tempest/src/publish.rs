@@ -95,7 +95,7 @@ pub fn print_listing(tracker: &str, listing: &Listing) {
             "pending: listed once the tracker has fetched the manifest from the swarm"
         }
         ListingStatus::Listed => "listed",
-        ListingStatus::Withdrawn => "unpublished",
+        ListingStatus::Unpublished => "unpublished",
     };
     println!("tracker   {} ({status})", tracker.trim_end_matches('/'));
 }

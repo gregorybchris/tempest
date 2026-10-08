@@ -432,7 +432,7 @@ impl Catalog {
 
     /// Handles an announce's verified `listing` field: `key` asks for `bundle` to be listed.
     ///
-    /// The bundle's first publisher keeps it, and a withdrawn listing stays withdrawn. Where
+    /// The bundle's first publisher keeps it, and a unpublished listing stays unpublished. Where
     /// invites are required, only keys with accounts can list; elsewhere listing makes one.
     pub fn request_listing(
         &mut self,
@@ -460,7 +460,7 @@ impl Catalog {
         Ok(self.store.listing_owner(bundle)?.is_some())
     }
 
-    /// Lists `bundle` for `key`, or changes `key`'s listing of it. A withdrawn listing is listed
+    /// Lists `bundle` for `key`, or changes `key`'s listing of it. A unpublished listing is listed
     /// again.
     pub fn edit_listing(
         &mut self,
@@ -492,7 +492,7 @@ impl Catalog {
             Some((owner, _)) if owner != *key => {
                 return Err(forbidden("another key listed this bundle"));
             }
-            Some((_, ListingStatus::Withdrawn)) => self.store.relist(bundle, now)?,
+            Some((_, ListingStatus::Unpublished)) => self.store.relist(bundle, now)?,
             Some(_) => {}
         }
         let mut fields = self.store.listing_fields(bundle)?;
@@ -506,15 +506,15 @@ impl Catalog {
     }
 
     /// Takes `key`'s listing of `bundle` down.
-    pub fn withdraw(&mut self, now: u64, bundle: &BundleId, key: &PeerId) -> Result<(), Refusal> {
+    pub fn unpublish(&mut self, now: u64, bundle: &BundleId, key: &PeerId) -> Result<(), Refusal> {
         match self.store.listing_owner(bundle)? {
             None => Err(not_found("listing")),
             Some((owner, _)) if owner != *key => {
-                Err(forbidden("only the listing's publisher can withdraw it"))
+                Err(forbidden("only the listing's publisher can unpublish it"))
             }
             Some(_) => {
                 self.store
-                    .set_status(bundle, ListingStatus::Withdrawn, now)?;
+                    .set_status(bundle, ListingStatus::Unpublished, now)?;
                 Ok(self.reindex(bundle)?)
             }
         }

@@ -186,11 +186,12 @@ fn hash_of(bytes: Vec<u8>) -> Result<Hash, StoreError> {
     Ok(Hash::new(bytes))
 }
 
+/// Unpublished listings are stored as "withdrawn", the schema's name for them (migration 0).
 fn status_text(status: ListingStatus) -> &'static str {
     match status {
         ListingStatus::Pending => "pending",
         ListingStatus::Listed => "listed",
-        ListingStatus::Withdrawn => "withdrawn",
+        ListingStatus::Unpublished => "withdrawn",
     }
 }
 
@@ -198,7 +199,7 @@ fn parse_status(text: &str) -> Result<ListingStatus, StoreError> {
     match text {
         "pending" => Ok(ListingStatus::Pending),
         "listed" => Ok(ListingStatus::Listed),
-        "withdrawn" => Ok(ListingStatus::Withdrawn),
+        "withdrawn" => Ok(ListingStatus::Unpublished),
         other => Err(StoreError::Corrupt(format!("unknown status {other:?}"))),
     }
 }
@@ -451,7 +452,7 @@ impl Store {
         Ok(())
     }
 
-    /// Lists `bundle` again after it was withdrawn: pending until its content is known.
+    /// Lists `bundle` again after it was unpublished: pending until its content is known.
     pub fn relist(&self, bundle: &BundleId, now: u64) -> Result<(), StoreError> {
         self.conn.execute(
             "UPDATE listings

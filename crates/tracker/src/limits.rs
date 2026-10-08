@@ -24,7 +24,7 @@ pub enum Action {
     Browse,
     /// Asking, in an announce, for a bundle the catalog doesn't know yet to be listed.
     Publish,
-    /// Editing or withdrawing a listing, editing an account or deleting a comment.
+    /// Editing or unpublishing a listing, editing an account or deleting a comment.
     Edit,
     /// Voting on a listing.
     Vote,

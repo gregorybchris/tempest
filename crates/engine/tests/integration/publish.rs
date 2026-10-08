@@ -1,5 +1,5 @@
 //! Publishing shares to a tracker (D-129): by `Engine::publish`, by the config's
-//! `publish` trackers, and through the API, withdrawing them too; and signing in for a browser
+//! `publish` trackers, and through the API, unpublishing them too; and signing in for a browser
 //! with a code.
 
 use crate::common;
@@ -182,10 +182,10 @@ async fn the_engine_signs_in_a_browsers_code() {
     engine.shutdown().await;
 }
 
-/// Publishing and then unpublishing through the API withdraws the listing, and the engine
+/// Publishing and then unpublishing through the API unpublishes the listing, and the engine
 /// forgets the tracker, so later announces don't list it again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unpublishing_through_the_api_withdraws_the_listing() {
+async fn unpublishing_through_the_api_unpublishes_the_listing() {
     let tracker = start_tracker().await;
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::open(config(dir.path())).await.unwrap();
@@ -213,7 +213,7 @@ async fn unpublishing_through_the_api_withdraws_the_listing() {
         matches!(result, Err(TrackerError::Refused { status: 404, .. }))
     };
     assert!(gone(browse.listing(&tracker, None, &id).await));
-    // Past a few announce intervals, it stays withdrawn.
+    // Past a few announce intervals, it stays unpublished.
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert!(gone(browse.listing(&tracker, None, &id).await));
 

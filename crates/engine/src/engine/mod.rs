@@ -471,9 +471,9 @@ impl Engine {
             .sign_in(tracker, &self.identity, None)
             .await
             .map_err(failed)?;
-        let withdrawn = client.unpublish_listing(tracker, &session.token, &id).await;
+        let unpublished = client.unpublish_listing(tracker, &session.token, &id).await;
         let _ = client.sign_out(tracker, &session.token).await;
-        match withdrawn {
+        match unpublished {
             Ok(()) | Err(TrackerError::Refused { status: 404, .. }) => {}
             Err(error) => return Err(failed(error)),
         }

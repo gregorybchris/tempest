@@ -1,7 +1,7 @@
 //! The catalog's search index (D-130): listed bundles' text, in a Tantivy index kept in memory.
 //!
 //! The index mirrors the store and is rebuilt from it when the catalog opens; [`super::Catalog`]
-//! updates it whenever a listing is listed, changed or withdrawn. It finds the listings that
+//! updates it whenever a listing is listed, changed or unpublished. It finds the listings that
 //! match a search, scores how well, and counts the matches' categories and tags. Ranking by
 //! popularity is [`super::rank`]'s.
 //!

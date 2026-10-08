@@ -52,7 +52,7 @@ pub(crate) fn router(tracker: &Tracker) -> Router<Tracker> {
         .route(&route("listings"), get(listings))
         .route(
             &route("listings/{bundle}"),
-            get(listing).put(edit_listing).delete(withdraw),
+            get(listing).put(edit_listing).delete(unpublish),
         )
         .route(&route("listings/{bundle}/vote"), put(vote))
         .route(
@@ -353,7 +353,7 @@ async fn edit_listing(
     })())
 }
 
-async fn withdraw(
+async fn unpublish(
     State(tracker): State<Tracker>,
     headers: HeaderMap,
     Path(id): Path<String>,
@@ -361,7 +361,7 @@ async fn withdraw(
     answer((|| {
         let id = bundle(&id)?;
         let key = signed_in(&tracker, &headers)?;
-        tracker.catalog().withdraw(now(), &id, &key)?;
+        tracker.catalog().unpublish(now(), &id, &key)?;
         ok(&serde_json::json!({}))
     })())
 }

@@ -73,7 +73,7 @@ fn Form(listing: Listing) -> impl IntoView {
             })
         })
     };
-    let withdrawn = listing.status == ListingStatus::Withdrawn;
+    let unpublished = listing.status == ListingStatus::Unpublished;
 
     let save = move || {
         let edit = match form().edit() {
@@ -91,7 +91,7 @@ fn Form(listing: Listing) -> impl IntoView {
             let _ = saving.try_set(false);
             match answer {
                 Ok(saved) => {
-                    let said = match (withdrawn, saved.status) {
+                    let said = match (unpublished, saved.status) {
                         (true, _) => "Listed it again",
                         (_, ListingStatus::Pending) => {
                             "Saved; it shows once the tracker has its manifest"
@@ -159,7 +159,7 @@ fn Form(listing: Listing) -> impl IntoView {
             <header class="page__head">
                 <Crumbs steps here="edit" />
                 <h1 class="page__title glow">"Edit the listing"</h1>
-                {withdrawn.then(|| view! {
+                {unpublished.then(|| view! {
                     <p class="notice"><Badge tone=Tone::Warn label="unpublished".to_owned() />" Saving lists it again."</p>
                 })}
             </header>
@@ -207,11 +207,11 @@ fn Form(listing: Listing) -> impl IntoView {
                 </label>
                 <div class="edit__actions">
                     <button class="btn btn--primary" type="submit" disabled=move || saving.get()>
-                        {if withdrawn { "Save and list again" } else { "Save" }}
+                        {if unpublished { "Save and list again" } else { "Save" }}
                     </button>
                     <a class="btn btn--ghost" href=Route::Listing(bundle).hash()>"Cancel"</a>
                     <span class="appbar__spacer"></span>
-                    {(!withdrawn).then(|| view! {
+                    {(!unpublished).then(|| view! {
                         <Button kind=ButtonKind::Danger on_click=move || confirm.set(true)>"Unpublish"</Button>
                     })}
                 </div>

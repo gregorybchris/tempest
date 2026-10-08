@@ -26,9 +26,9 @@ pub enum ListingStatus {
     Pending,
     /// Shown to everyone.
     Listed,
-    /// Taken down by its publisher. Only the publisher sees it, and only an edit lists it again;
+    /// Unpublished by its publisher. Only the publisher sees it, and only an edit lists it again;
     /// announces don't.
-    Withdrawn,
+    Unpublished,
 }
 
 /// What a bundle holds, from its manifest.

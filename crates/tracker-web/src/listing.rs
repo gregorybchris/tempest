@@ -101,7 +101,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
             "Only you see this. It shows once the tracker has fetched its manifest from a peer \
              that shares it, so keep sharing it.",
         )),
-        ListingStatus::Withdrawn => Some((
+        ListingStatus::Unpublished => Some((
             "unpublished",
             "Only you see this. Edit it to list it again.",
         )),

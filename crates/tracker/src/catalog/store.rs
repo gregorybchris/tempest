@@ -92,6 +92,34 @@ CREATE TABLE reports (
     UNIQUE (bundle, reporter)
 ) STRICT;
 ",
+    // Unpublished listings were stored as 'withdrawn'. SQLite can't change a CHECK constraint,
+    // so the table is rebuilt; `migrate` turns foreign keys off around it.
+    "
+CREATE TABLE listings_new (
+    bundle BLOB PRIMARY KEY NOT NULL,
+    publisher BLOB NOT NULL REFERENCES accounts (key),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'listed', 'unpublished')),
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    category TEXT,
+    content_name TEXT,
+    content_size INTEGER,
+    content_files INTEGER,
+    created INTEGER NOT NULL,
+    updated INTEGER NOT NULL,
+    hidden INTEGER NOT NULL DEFAULT 0
+) STRICT;
+INSERT INTO listings_new (bundle, publisher, status, title, description, category,
+    content_name, content_size, content_files, created, updated, hidden)
+SELECT bundle, publisher, CASE status WHEN 'withdrawn' THEN 'unpublished' ELSE status END,
+    title, description, category, content_name, content_size, content_files, created, updated,
+    hidden
+FROM listings;
+DROP TABLE listings;
+ALTER TABLE listings_new RENAME TO listings;
+CREATE INDEX listings_by_publisher ON listings (publisher, updated);
+CREATE INDEX listings_by_status ON listings (status, created);
+",
 ];
 
 /// SQL over `listings l` that holds when the operator has taken the listing down: hidden, or
@@ -186,12 +214,11 @@ fn hash_of(bytes: Vec<u8>) -> Result<Hash, StoreError> {
     Ok(Hash::new(bytes))
 }
 
-/// Unpublished listings are stored as "withdrawn", the schema's name for them (migration 0).
 fn status_text(status: ListingStatus) -> &'static str {
     match status {
         ListingStatus::Pending => "pending",
         ListingStatus::Listed => "listed",
-        ListingStatus::Unpublished => "withdrawn",
+        ListingStatus::Unpublished => "unpublished",
     }
 }
 
@@ -199,7 +226,7 @@ fn parse_status(text: &str) -> Result<ListingStatus, StoreError> {
     match text {
         "pending" => Ok(ListingStatus::Pending),
         "listed" => Ok(ListingStatus::Listed),
-        "withdrawn" => Ok(ListingStatus::Unpublished),
+        "unpublished" => Ok(ListingStatus::Unpublished),
         other => Err(StoreError::Corrupt(format!("unknown status {other:?}"))),
     }
 }
@@ -237,7 +264,16 @@ impl Store {
         Ok(store)
     }
 
+    /// Brings the schema up to date. Foreign keys are off meanwhile, so a migration can rebuild
+    /// a table that others reference; SQLite ignores the setting inside a transaction.
     fn migrate(&mut self) -> Result<(), StoreError> {
+        self.conn.pragma_update(None, "foreign_keys", "OFF")?;
+        let migrated = self.run_migrations();
+        self.conn.pragma_update(None, "foreign_keys", "ON")?;
+        migrated
+    }
+
+    fn run_migrations(&mut self) -> Result<(), StoreError> {
         let known = MIGRATIONS.len() as u32;
         let tx = self.conn.transaction()?;
         let found: u32 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -248,6 +284,14 @@ impl Store {
             tx.execute_batch(migration)?;
         }
         tx.pragma_update(None, "user_version", known)?;
+        let broken: Option<String> = tx
+            .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
+            .optional()?;
+        if let Some(table) = broken {
+            return Err(StoreError::Corrupt(format!(
+                "a migration left a broken reference in {table}"
+            )));
+        }
         tx.commit()?;
         Ok(())
     }
@@ -952,5 +996,65 @@ impl Store {
         self.conn
             .execute("DELETE FROM comments WHERE id = ?1", [to_i64(id)])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A database from before migration 3 keeps its listings, and the rows that reference
+    /// them, when its unpublished listings are renamed.
+    #[test]
+    fn migrating_renames_withdrawn_listings_and_keeps_their_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for migration in &MIGRATIONS[..3] {
+            conn.execute_batch(migration).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        let (key, bundle) = ([1u8; 32].to_vec(), [2u8; 32].to_vec());
+        conn.execute(
+            "INSERT INTO accounts (key, joined) VALUES (?1, 0)",
+            params![key],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO listings (bundle, publisher, status, created, updated, hidden)
+             VALUES (?1, ?2, 'withdrawn', 0, 0, 1)",
+            params![bundle, key],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO votes (bundle, key, value, at) VALUES (?1, ?2, 1, 0)",
+            params![bundle, key],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO listing_tags (bundle, position, tag) VALUES (?1, 0, 'csv')",
+            params![bundle],
+        )
+        .unwrap();
+
+        let store = Store::init(conn).unwrap();
+        let (status, hidden): (String, i64) = store
+            .conn
+            .query_row("SELECT status, hidden FROM listings", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((status.as_str(), hidden), ("unpublished", 1));
+        let count = |table: &str| -> i64 {
+            store
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!((count("votes"), count("listing_tags")), (1, 1));
+        // Foreign keys are back on: a listing's rows still go with it.
+        store.conn.execute("DELETE FROM listings", []).unwrap();
+        assert_eq!((count("votes"), count("listing_tags")), (0, 0));
     }
 }

@@ -1,8 +1,0 @@
-[package]
-name = "proto-core"
-version = "0.1.0"
-edition = "2021"
-description = "Simulated Tempest client state, formatting and chart geometry shared by the M0 UI prototypes"
-
-[dependencies]
-serde = { version = "1", features = ["derive"] }

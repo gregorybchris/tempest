@@ -160,7 +160,7 @@ The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web
 
 ## Visualization ideas
 
-These come from the research, to try in the prototype:
+These come from the research, as ideas to try:
 
 - **Chunk map:** every chunk of a bundle as a cell (have, in flight, missing), shaded by rarity.
 - **Swarm availability strip:** how many peers have each chunk.

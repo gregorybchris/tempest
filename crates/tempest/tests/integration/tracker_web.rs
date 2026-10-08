@@ -9,12 +9,11 @@
 
 #![cfg(unix)]
 
-use crate::common;
+use crate::common::{self, Running};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -30,30 +29,6 @@ fn tempest() -> Command {
         .env_remove("TEMPEST_CONFIG")
         .env_remove("TEMPEST_DATA_DIR");
     command
-}
-
-/// A child process, killed when dropped.
-struct Running(Child);
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-/// The lines `stream` yields, read on another thread.
-/// It keeps reading once the receiver is gone, so the child never writes to a closed pipe,
-/// which would make its next `eprintln!` panic.
-fn lines(stream: impl Read + Send + 'static) -> mpsc::Receiver<String> {
-    let (lines, received) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stream).lines() {
-            let Ok(line) = line else { break };
-            let _ = lines.send(line);
-        }
-    });
-    received
 }
 
 /// A request over HTTP/1.1: the status and the body. The body is read by its length, since
@@ -113,23 +88,10 @@ fn http(address: &str, method: &str, path: &str, body: Option<&Value>) -> (u16, 
 
 /// Starts `tempest-tracker` with listings in `dir`, and returns it with its address.
 fn start_tracker(dir: &Path) -> (Running, String) {
-    let mut child = common::tracker()
-        .args(["--bind", "127.0.0.1", "--port", "0", "--catalog"])
-        .arg(dir.join("catalog.db"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let received = lines(child.stderr.take().unwrap());
-    let line = received
-        .recv_timeout(LIMIT)
-        .expect("the tracker printed nothing");
-    let address = line
-        .strip_prefix("tracker listening on http://")
-        .and_then(|rest| rest.split(';').next())
-        .unwrap_or_else(|| panic!("unexpected line: {line}"))
-        .to_owned();
-    (Running(child), address)
+    let catalog = dir.join("catalog.db");
+    let (tracker, url) = common::start_tracker(&["--catalog".as_ref(), catalog.as_os_str()]);
+    let address = url.strip_prefix("http://").expect("an http URL").to_owned();
+    (tracker, address)
 }
 
 /// Shares a folder named `name` with `identity`, publishing it to the tracker with `listing`.

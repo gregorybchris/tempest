@@ -47,14 +47,16 @@ pub fn start(dir: &Path) -> (Running, String) {
 
 /// Starts a tracker with the catalog `file`.
 pub fn start_on(file: &Path) -> (Running, String) {
-    let mut child = tracker()
-        .args(["--bind", "127.0.0.1", "--port", "0", "--catalog"])
-        .arg(file)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let received = lines(child.stderr.take().unwrap());
+    let mut child = Running(
+        tracker()
+            .args(["--bind", "127.0.0.1", "--port", "0", "--catalog"])
+            .arg(file)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let received = lines(child.0.stderr.take().unwrap());
     let line = received
         .recv_timeout(LIMIT)
         .expect("the tracker printed nothing");
@@ -63,7 +65,7 @@ pub fn start_on(file: &Path) -> (Running, String) {
         .and_then(|rest| rest.split(';').next())
         .unwrap_or_else(|| panic!("unexpected line: {line}"))
         .to_owned();
-    (Running(child), url)
+    (child, url)
 }
 
 /// `GET` of `path` on the tracker at `url`: the status and the JSON body.

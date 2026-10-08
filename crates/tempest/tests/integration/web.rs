@@ -4,10 +4,11 @@
 
 #![cfg(unix)]
 
+use crate::common::Running;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// How long a process may take to start or answer.
@@ -106,42 +107,34 @@ fn linked(html: &str) -> Vec<String> {
     paths
 }
 
-struct Running(Child);
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 #[test]
 fn tempest_web_serves_the_ui_beside_the_api() {
     let dir = tempfile::tempdir().unwrap();
-    let mut child = tempest(dir.path())
-        .args([
-            "web",
-            "--no-open",
-            "--set",
-            "api.port=0",
-            "--set",
-            "peers.port=0",
-        ])
-        .args([
-            "--set",
-            r#"peers.bind=["127.0.0.1"]"#,
-            "--set",
-            "lan.enabled=false",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut running = Running(
+        tempest(dir.path())
+            .args([
+                "web",
+                "--no-open",
+                "--set",
+                "api.port=0",
+                "--set",
+                "peers.port=0",
+            ])
+            .args([
+                "--set",
+                r#"peers.bind=["127.0.0.1"]"#,
+                "--set",
+                "lan.enabled=false",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
     let mut first = String::new();
-    BufReader::new(child.stdout.take().unwrap())
+    BufReader::new(running.0.stdout.take().unwrap())
         .read_line(&mut first)
         .unwrap();
-    let running = Running(child);
     let url = first.trim().to_owned();
     let address = url.strip_prefix("http://").expect("a local URL").to_owned();
 

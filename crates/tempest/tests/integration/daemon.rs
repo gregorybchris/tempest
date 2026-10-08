@@ -2,11 +2,11 @@
 
 #![cfg(unix)]
 
-use crate::common;
+use crate::common::{self, Running, lines};
+use std::ffi::OsStr;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -49,29 +49,31 @@ fn stderr(output: &Output) -> String {
 /// A running `tempest daemon` on 127.0.0.1 with ports the system picks and LAN discovery off,
 /// killed if still running when dropped.
 struct Daemon {
-    child: Child,
+    child: Running,
     stderr: mpsc::Receiver<String>,
 }
 
 impl Daemon {
     fn start(data_dir: &Path, extra: &[&str]) -> Self {
         let downloads = data_dir.join("downloads");
-        let mut child = tempest(data_dir)
-            .args(["daemon", "--set", "api.port=0", "--set", "peers.port=0"])
-            .args([
-                "--set",
-                r#"peers.bind=["127.0.0.1"]"#,
-                "--set",
-                "lan.enabled=false",
-            ])
-            .arg("--set")
-            .arg(format!("save_folder={}", downloads.display()))
-            .args(extra)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let stderr = lines(child.stderr.take().unwrap());
+        let mut child = Running(
+            tempest(data_dir)
+                .args(["daemon", "--set", "api.port=0", "--set", "peers.port=0"])
+                .args([
+                    "--set",
+                    r#"peers.bind=["127.0.0.1"]"#,
+                    "--set",
+                    "lan.enabled=false",
+                ])
+                .arg("--set")
+                .arg(format!("save_folder={}", downloads.display()))
+                .args(extra)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stderr = lines(child.0.stderr.take().unwrap());
         let started = Instant::now();
         loop {
             let line = stderr
@@ -86,33 +88,12 @@ impl Daemon {
 
     /// Interrupts the daemon as Ctrl-C would, and returns what it printed as it stopped.
     fn interrupt(mut self) -> String {
-        let pid = self.child.id().to_string();
+        let pid = self.child.0.id().to_string();
         run(Command::new("kill").args(["-INT", &pid]));
-        let status = self.child.wait().unwrap();
+        let status = self.child.0.wait().unwrap();
         assert!(status.success(), "the daemon exits cleanly: {status}");
         self.stderr.try_iter().collect::<Vec<_>>().join("\n")
     }
-}
-
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// The lines `stream` yields, read on another thread.
-/// It keeps reading once the receiver is gone, so the child never writes to a closed pipe,
-/// which would make its next `eprintln!` panic.
-fn lines(stream: impl std::io::Read + Send + 'static) -> mpsc::Receiver<String> {
-    let (lines, received) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stream).lines() {
-            let Ok(line) = line else { break };
-            let _ = lines.send(line);
-        }
-    });
-    received
 }
 
 /// The value of the stdout line starting with `name`.
@@ -160,7 +141,7 @@ fn contents(size: usize, seed: u64) -> Vec<u8> {
 
 /// A running `tempest-tracker` on localhost, killed when dropped.
 struct TrackerProcess {
-    child: Child,
+    _process: Running,
     url: String,
 }
 
@@ -171,22 +152,9 @@ impl TrackerProcess {
 
     /// [`TrackerProcess::start`] with `extra` arguments.
     fn start_with(extra: &[&str]) -> Self {
-        let mut child = common::tracker()
-            .args(["--bind", "127.0.0.1", "--port", "0"])
-            .args(extra)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let line = lines(child.stderr.take().unwrap())
-            .recv_timeout(LIMIT)
-            .expect("the tracker printed nothing");
-        let url = line
-            .strip_prefix("tracker listening on ")
-            .and_then(|rest| rest.split(';').next())
-            .unwrap_or_else(|| panic!("unexpected line: {line}"))
-            .to_owned();
-        Self { child, url }
+        let extra: Vec<&OsStr> = extra.iter().map(OsStr::new).collect();
+        let (_process, url) = common::start_tracker(&extra);
+        Self { _process, url }
     }
 
     /// How many complete peers the tracker lists for `bundle`.
@@ -214,13 +182,6 @@ impl TrackerProcess {
             Err(TrackerError::Refused { status, .. }) => status,
             Err(error) => panic!("{error}"),
         }
-    }
-}
-
-impl Drop for TrackerProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
     }
 }
 
@@ -431,27 +392,29 @@ fn stopping_an_engine_that_runs_for_a_ui_leaves_its_shares_stopped() {
     let a = root.path().join("a");
 
     // With no terminal to ask, quitting `tempest web` stops its transfers (D-228).
-    let mut web = tempest(&a)
-        .args([
-            "web",
-            "--no-open",
-            "--set",
-            "api.port=0",
-            "--set",
-            "peers.port=0",
-        ])
-        .args([
-            "--set",
-            r#"peers.bind=["127.0.0.1"]"#,
-            "--set",
-            "lan.enabled=false",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let log = lines(web.stderr.take().unwrap());
+    let mut web = Running(
+        tempest(&a)
+            .args([
+                "web",
+                "--no-open",
+                "--set",
+                "api.port=0",
+                "--set",
+                "peers.port=0",
+            ])
+            .args([
+                "--set",
+                r#"peers.bind=["127.0.0.1"]"#,
+                "--set",
+                "lan.enabled=false",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let log = lines(web.0.stderr.take().unwrap());
     let started = Instant::now();
     loop {
         let line = log
@@ -464,8 +427,8 @@ fn stopping_an_engine_that_runs_for_a_ui_leaves_its_shares_stopped() {
     let shared = run(tempest(&a).arg("share").arg(&source));
     let id = field(&shared, "bundle");
     wait_for_state(&a, &id, "sharing");
-    run(Command::new("kill").args(["-INT", &web.id().to_string()]));
-    assert!(web.wait().unwrap().success());
+    run(Command::new("kill").args(["-INT", &web.0.id().to_string()]));
+    assert!(web.0.wait().unwrap().success());
 
     // A new engine on the data directory must not resume it.
     let daemon = Daemon::start(&a, &[]);

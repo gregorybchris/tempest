@@ -1,12 +1,10 @@
 //! `tempest share` and `tempest get` as separate processes on localhost.
 
-use crate::common;
+use crate::common::{self, Running, lines};
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
 use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
-use std::sync::mpsc;
+use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use tempest_protocol::Link;
@@ -23,7 +21,7 @@ fn tempest() -> Command {
 
 /// A running `tempest share`, killed when dropped.
 struct Sharer {
-    child: Child,
+    _child: Running,
     /// The `peer` and `link` lines it printed.
     peer: String,
     link: String,
@@ -51,8 +49,8 @@ impl Sharer {
             .arg(path)
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut child = command.spawn().unwrap();
-        let received = lines(child.stdout.take().unwrap());
+        let mut child = Running(command.spawn().unwrap());
+        let received = lines(child.0.stdout.take().unwrap());
         let field = |name: &str| loop {
             let line = received
                 .recv_timeout(STARTUP)
@@ -63,68 +61,31 @@ impl Sharer {
         };
         let peer = field("peer");
         let link = field("link");
-        Self { child, peer, link }
-    }
-}
-
-/// The lines `stream` yields, read on another thread.
-/// It keeps reading once the receiver is gone, so the child never writes to a closed pipe,
-/// which would make its next `eprintln!` panic.
-fn lines(stream: impl std::io::Read + Send + 'static) -> mpsc::Receiver<String> {
-    let (lines, received) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stream).lines() {
-            let Ok(line) = line else { break };
-            let _ = lines.send(line);
+        Self {
+            _child: child,
+            peer,
+            link,
         }
-    });
-    received
+    }
 }
 
 /// A running `tempest-tracker` on localhost, killed when dropped.
 struct TrackerProcess {
-    child: Child,
+    _process: Running,
     url: String,
 }
 
 impl TrackerProcess {
     fn start() -> Self {
-        let mut child = common::tracker()
-            .args(["--bind", "127.0.0.1", "--port", "0"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let received = lines(child.stderr.take().unwrap());
-        let line = received
-            .recv_timeout(STARTUP)
-            .expect("the tracker printed nothing");
-        let url = line
-            .strip_prefix("tracker listening on ")
-            .and_then(|rest| rest.split(';').next())
-            .unwrap_or_else(|| panic!("unexpected line: {line}"))
-            .to_owned();
-        Self { child, url }
+        let (_process, url) = common::start_tracker(&[]);
+        Self { _process, url }
     }
 }
 
-impl Drop for TrackerProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-impl Drop for Sharer {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
+/// Runs `tempest get` to completion. It never asks the real router to map a port.
 fn get(link: &str, output: &Path, identity: &Path, extra: &[&str]) -> Output {
     tempest()
-        .args(["get", link, "--output"])
+        .args(["get", link, "--no-port-mapping", "--output"])
         .arg(output)
         .arg("--identity")
         .arg(identity)
@@ -370,22 +331,24 @@ fn the_default_port_is_4773() {
 
 /// A running `tempest-relay` on 127.0.0.1, killed when dropped.
 struct RelayProcess {
-    child: Child,
+    _process: Running,
     /// How peers name it: `<key>@127.0.0.1:<port>`.
     identity: String,
 }
 
 impl RelayProcess {
     fn start(identity: &Path) -> Self {
-        let mut child = common::relay()
-            .args(["--bind", "127.0.0.1", "--port", "0"])
-            .args(["--public-ip", "127.0.0.1", "--identity"])
-            .arg(identity)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let received = lines(child.stderr.take().unwrap());
+        let mut process = Running(
+            common::relay()
+                .args(["--bind", "127.0.0.1", "--port", "0"])
+                .args(["--public-ip", "127.0.0.1", "--identity"])
+                .arg(identity)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let received = lines(process.0.stderr.take().unwrap());
         let identity = loop {
             let line = received
                 .recv_timeout(STARTUP)
@@ -394,14 +357,10 @@ impl RelayProcess {
                 break identity.to_owned();
             }
         };
-        Self { child, identity }
-    }
-}
-
-impl Drop for RelayProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        Self {
+            _process: process,
+            identity,
+        }
     }
 }
 

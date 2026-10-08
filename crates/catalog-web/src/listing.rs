@@ -4,10 +4,10 @@ use leptos::html::Textarea;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use tempest_catalog_api::listing::{
-    Comment, Listing, ListingStatus, NewComment, Vote, VoteRequest,
+    Comment, Listing, ListingStatus, NewComment, NewReport, Vote, VoteRequest,
 };
 use tempest_catalog_api::query::ListingQuery;
-use tempest_catalog_api::text::{self, MAX_COMMENT};
+use tempest_catalog_api::text::{self, MAX_COMMENT, MAX_REPORT};
 use tempest_protocol::BundleId;
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
@@ -205,6 +205,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                             <Stat label="downloads" value=Signal::derive(move || format::count(listing.with(|l| l.downloads))) />
                         </Stats>
                     </Panel>
+                    <ReportLink bundle />
                     <Panel title="Votes">
                         <div class="votes">
                             <button
@@ -231,6 +232,76 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                 </aside>
             </div>
         </article>
+    }
+}
+
+/// A link that opens a form to report the listing to the operator.
+#[component]
+fn ReportLink(bundle: BundleId) -> impl IntoView {
+    let ctx = use_ctx();
+    let toasts = use_toasts();
+    let open = RwSignal::new(false);
+    let reason = RwSignal::new(String::new());
+    let problem = RwSignal::new(None::<String>);
+    let sending = RwSignal::new(false);
+    let start = move || {
+        if ctx.me.with_untracked(|m| m.account().is_none()) {
+            toasts.push(Tone::Warn, "Sign in to report a listing.");
+            ctx.sign_in();
+            return;
+        }
+        problem.set(None);
+        open.set(true);
+    };
+    let send = move || {
+        let reason = match text::clean_report(&reason.get_untracked()) {
+            Ok(reason) => reason,
+            Err(error) => {
+                problem.set(Some(request::sentence(&error.0)));
+                return;
+            }
+        };
+        problem.set(None);
+        sending.set(true);
+        spawn_local(async move {
+            let path = format!("listings/{bundle}/reports");
+            let body = NewReport { reason };
+            let answer = request::send::<serde_json::Value>(method::POST, &path, Some(&body)).await;
+            let _ = sending.try_set(false);
+            match answer {
+                Ok(_) => {
+                    let _ = open.try_set(false);
+                    let _ = problem.try_set(None);
+                    toasts.push(Tone::Neutral, "Reported. The operator will see it.");
+                }
+                Err(error) => {
+                    let _ = problem.try_set(Some(error.to_string()));
+                }
+            }
+        });
+    };
+    view! {
+        <p class="listing__report">
+            <button class="linkish" type="button" on:click=move |_| start()>"Report this listing"</button>
+        </p>
+        <Dialog
+            open
+            on_close=move || open.set(false)
+            title="Report this listing"
+            actions=ViewFn::from(move || view! {
+                <Button kind=ButtonKind::Ghost on_click=move || open.set(false)>"Cancel"</Button>
+                <Button
+                    kind=ButtonKind::Danger
+                    disabled=sending
+                    on_click=move || send()
+                >"Report"</Button>
+            })
+        >
+            <p class="note dim">
+                "Tell the operator what is wrong with it. They decide what to do; nothing happens automatically."
+            </p>
+            <TextArea label="Reason" value=reason max=MAX_REPORT rows=4 error=problem />
+        </Dialog>
     }
 }
 

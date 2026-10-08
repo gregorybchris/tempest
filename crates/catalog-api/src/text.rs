@@ -12,6 +12,9 @@ pub const MAX_TITLE: usize = 120;
 pub const MAX_DESCRIPTION: usize = 10_000;
 /// The longest comment.
 pub const MAX_COMMENT: usize = 4_000;
+
+/// The longest report.
+pub const MAX_REPORT: usize = 1_000;
 /// The longest account name.
 pub const MAX_NAME: usize = 40;
 /// The most tags on a listing.
@@ -56,6 +59,15 @@ pub fn clean_comment(body: &str) -> Result<String, TextError> {
     match body.is_empty() {
         true => Err(TextError("the comment is empty".into())),
         false => Ok(body),
+    }
+}
+
+/// A report's reason: lines and tabs allowed, not empty. Line endings become `\n`.
+pub fn clean_report(reason: &str) -> Result<String, TextError> {
+    let reason = paragraphs(reason, "the reason", MAX_REPORT)?;
+    match reason.is_empty() {
+        true => Err(TextError("the reason is empty".into())),
+        false => Ok(reason),
     }
 }
 
@@ -168,6 +180,9 @@ mod tests {
         assert_eq!(clean_description("a\r\nb\rc\t").unwrap(), "a\nb\nc");
         assert!(clean_description("bell\u{7}").is_err());
         assert!(clean_comment("  \n ").is_err());
+        assert!(clean_report(" \n").is_err());
+        assert_eq!(clean_report(" spam\r\n").unwrap(), "spam");
+        assert!(clean_report(&"x".repeat(MAX_REPORT + 1)).is_err());
         assert!(clean_name("").is_err());
     }
 

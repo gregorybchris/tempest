@@ -26,7 +26,8 @@ use tempest_catalog_api::account::{
     normalize_code, sign_in_message,
 };
 use tempest_catalog_api::listing::{
-    Comment, Content, Listing, ListingEdit, ListingPage, ListingStatus, MAX_PAGE, NewComment, Vote,
+    Comment, Content, Listing, ListingEdit, ListingPage, ListingStatus, MAX_PAGE, NewComment,
+    NewReport, Vote,
 };
 use tempest_catalog_api::query::ListingQuery;
 use tempest_catalog_api::{CatalogInfo, Category, codes, default_categories, text};
@@ -34,7 +35,7 @@ use tempest_protocol::tracker::{BundleStats, ErrorCode, Signature};
 use tempest_protocol::{BundleId, Hash, PeerId};
 
 pub use search::SearchIndex;
-pub use store::{Store, StoreError};
+pub use store::{Report, Store, StoreError};
 
 use crate::limits::client_key;
 use crate::swarms::Refusal;
@@ -147,6 +148,10 @@ fn forbidden(message: &str) -> Refusal {
     refusal(403, codes::FORBIDDEN, message)
 }
 
+fn banned() -> Refusal {
+    forbidden("this key is banned from the catalog")
+}
+
 fn invalid(error: text::TextError) -> Refusal {
     Refusal::new(ErrorCode::InvalidRequest, error.0)
 }
@@ -215,6 +220,41 @@ impl Catalog {
         let code = code_from(random::<CODE_LEN>()?);
         self.store.create_invite(&code, now)?;
         Ok(code)
+    }
+
+    // The operator's tools. The operator's commands run on the database, possibly while a
+    // tracker serves it from another process, so reads check the database rather than rely on
+    // this process's index alone.
+
+    /// Hides `bundle`'s listing from everyone but its publisher, or shows it again. Fails if
+    /// there is no such listing.
+    pub fn set_hidden(&mut self, bundle: &BundleId, hidden: bool) -> Result<(), Refusal> {
+        if !self.store.set_hidden(bundle, hidden)? {
+            return Err(not_found("listing"));
+        }
+        Ok(self.reindex(bundle)?)
+    }
+
+    /// Bans `key`, or lifts the ban. A banned key's listings are hidden, and it can't list,
+    /// edit, vote, comment or report. Fails if there is no such account.
+    pub fn set_banned(&mut self, key: &PeerId, banned: bool) -> Result<(), Refusal> {
+        if !self.store.set_banned(key, banned)? {
+            return Err(not_found("account"));
+        }
+        for bundle in self.store.bundles_of(key)? {
+            self.reindex(&bundle)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `key` is banned.
+    pub fn is_banned(&self, key: &PeerId) -> Result<bool, StoreError> {
+        self.store.is_banned(key)
+    }
+
+    /// The reports, newest first: those of `bundle` if given, else all.
+    pub fn reports(&self, bundle: Option<&BundleId>) -> Result<Vec<Report>, StoreError> {
+        self.store.reports(bundle)
     }
 
     // Signing in.
@@ -384,6 +424,9 @@ impl Catalog {
         bundle: &BundleId,
         key: &PeerId,
     ) -> Result<(), StoreError> {
+        if self.store.is_banned(key)? {
+            return Ok(());
+        }
         if self.store.account(key)?.is_none() {
             if self.config.invites_required {
                 return Ok(());
@@ -410,6 +453,9 @@ impl Catalog {
         key: &PeerId,
         edit: &ListingEdit,
     ) -> Result<Listing, Refusal> {
+        if self.store.is_banned(key)? {
+            return Err(banned());
+        }
         let title = edit.title.as_deref().map(text::clean_title);
         let description = edit.description.as_deref().map(text::clean_description);
         let tags = edit.tags.as_deref().map(text::normalize_tags);
@@ -476,12 +522,14 @@ impl Catalog {
         self.store.pending()
     }
 
-    /// `bundle`'s listing as `viewer` sees it: only its publisher sees it unless it is listed.
+    /// `bundle`'s listing as `viewer` sees it: only its publisher sees it unless it is listed
+    /// and neither hidden nor its publisher banned.
     /// Its swarm counts are zero; the swarms aren't the catalog's.
     pub fn listing(&self, bundle: &BundleId, viewer: Option<&PeerId>) -> Result<Listing, Refusal> {
         match self.store.listing(bundle, viewer)? {
             Some(listing)
-                if listing.status == ListingStatus::Listed
+                if (listing.status == ListingStatus::Listed
+                    && !self.store.is_blocked(bundle)?)
                     || Some(&listing.publisher.key) == viewer =>
             {
                 Ok(listing)
@@ -490,10 +538,14 @@ impl Catalog {
         }
     }
 
-    /// The listing of `bundle` if it is listed, for votes and comments.
-    fn listed(&self, bundle: &BundleId) -> Result<(), Refusal> {
+    /// The listing of `bundle` if it is listed and not taken down, for votes, comments and
+    /// reports, by `key`, who must not be banned.
+    fn listed(&self, bundle: &BundleId, key: &PeerId) -> Result<(), Refusal> {
+        if self.store.is_banned(key)? {
+            return Err(banned());
+        }
         match self.store.listing_owner(bundle)? {
-            Some((_, ListingStatus::Listed)) => Ok(()),
+            Some((_, ListingStatus::Listed)) if !self.store.is_blocked(bundle)? => Ok(()),
             _ => Err(not_found("listing")),
         }
     }
@@ -508,10 +560,17 @@ impl Catalog {
         viewer: Option<&PeerId>,
         swarm: impl Fn(&BundleId) -> BundleStats,
     ) -> Result<ListingPage, Refusal> {
-        let found = self
+        let mut found = self
             .search
             .search(&query.q, query.category.as_deref(), &query.tags)
             .map_err(StoreError::from)?;
+        // The operator's commands may run in another process, which can't update this index.
+        let blocked = self.store.blocked()?;
+        if !blocked.is_empty() {
+            found
+                .matches
+                .retain(|found| !blocked.contains(&found.bundle));
+        }
         let today = now / DAY;
         let mut votes = self.store.vote_counts()?;
         let mut downloads = self
@@ -579,7 +638,7 @@ impl Catalog {
         key: &PeerId,
         vote: Vote,
     ) -> Result<Listing, Refusal> {
-        self.listed(bundle)?;
+        self.listed(bundle, key)?;
         self.store.vote(bundle, key, vote, now)?;
         self.listing(bundle, Some(key))
     }
@@ -603,8 +662,22 @@ impl Catalog {
         comment: &NewComment,
     ) -> Result<Comment, Refusal> {
         let body = text::clean_comment(&comment.body).map_err(invalid)?;
-        self.listed(bundle)?;
+        self.listed(bundle, key)?;
         Ok(self.store.add_comment(bundle, key, &body, now)?)
+    }
+
+    /// Records `key`'s report of `bundle`'s listing, for the operator. A key's later report of
+    /// the same listing replaces its earlier one.
+    pub fn report(
+        &mut self,
+        now: u64,
+        bundle: &BundleId,
+        key: &PeerId,
+        report: &NewReport,
+    ) -> Result<(), Refusal> {
+        let reason = text::clean_report(&report.reason).map_err(invalid)?;
+        self.listed(bundle, key)?;
+        Ok(self.store.add_report(bundle, key, &reason, now)?)
     }
 
     /// Deletes `key`'s comment `id`.

@@ -30,6 +30,8 @@ pub enum Action {
     Vote,
     /// Commenting on a listing.
     Comment,
+    /// Reporting a listing to the operator.
+    Report,
     /// A download counted from a `completed` announce.
     Download,
 }
@@ -75,6 +77,7 @@ impl Default for CatalogLimits {
             (Action::Edit, Rate::new(30, 10)),
             (Action::Vote, Rate::new(60, 5)),
             (Action::Comment, Rate::new(10, 30)),
+            (Action::Report, Rate::new(5, 60)),
             (Action::Download, Rate::new(50, 60)),
         ];
         Self {
@@ -96,7 +99,7 @@ impl CatalogLimits {
 
 impl Action {
     /// Every action, for parsing and listing them.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Challenge,
         Self::SignIn,
         Self::Browse,
@@ -104,6 +107,7 @@ impl Action {
         Self::Edit,
         Self::Vote,
         Self::Comment,
+        Self::Report,
         Self::Download,
     ];
 
@@ -117,6 +121,7 @@ impl Action {
             Self::Edit => "edit",
             Self::Vote => "vote",
             Self::Comment => "comment",
+            Self::Report => "report",
             Self::Download => "download",
         }
     }

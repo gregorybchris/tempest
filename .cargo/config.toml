@@ -1,0 +1,4 @@
+[env]
+# Where the system DuckDB library is (Homebrew on macOS). Set DUCKDB_LIB_DIR in the environment to
+# override it, or build with the `tempest-sim/bundled-duckdb` feature to compile DuckDB instead.
+DUCKDB_LIB_DIR = { value = "/opt/homebrew/opt/duckdb/lib", force = false }

@@ -3,3 +3,4 @@ target/
 *.duckdb.wal
 dist/
 .DS_Store
+.claude/worktrees/

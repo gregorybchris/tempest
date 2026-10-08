@@ -21,5 +21,7 @@ pr-run-mode = "plan"
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Compile DuckDB into release binaries, so users need no DuckDB installed
+features = ["tempest-sim/bundled-duckdb"]
 # Steps to run before building, which build the embedded web UIs
 github-build-setup = "../build-setup.yml"

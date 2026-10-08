@@ -2,6 +2,13 @@
 
 How to work on Tempest efficiently, for people and coding agents. These guidelines come from measuring where the M1–M9 implementation runs spent their time and disk.
 
+## Setup
+
+The simulator stores results in DuckDB. Development builds link the system DuckDB library instead of compiling DuckDB's C++ source, which took minutes on every cold build:
+
+- **macOS:** `brew install duckdb`. `.cargo/config.toml` points the build at Homebrew's copy.
+- **Elsewhere:** install DuckDB's library and set `DUCKDB_LIB_DIR`, or build with `--features tempest-sim/bundled-duckdb` to compile it from source. CI and release builds use that feature.
+
 ## Iterating
 
 - **Test the crate you're changing.** Use `cargo nextest run -p <crate>` while iterating. Run the whole workspace once, before committing.
@@ -21,7 +28,6 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 - separate builds for tests, release, WebAssembly and fuzzing.
 
 - **Prune regularly.** Each file in a crate's `tests/` links into its own large executable, so stale test binaries add up quickly. Delete artifacts that haven't been used for a few hours, either with `cargo sweep --time <hours>` or by removing old files from `target/debug/deps`. Do this when no build is running.
-- **Keep the compiler output for DuckDB's C++ library** (`target/debug/build`). It's the slowest part of a rebuild.
 
 ## Parallel work
 

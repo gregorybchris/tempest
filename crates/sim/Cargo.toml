@@ -11,6 +11,9 @@ rust-version.workspace = true
 default = ["results"]
 # The DuckDB results database (D-075). Off for builds that only need runs, such as fuzzing.
 results = ["dep:duckdb", "dep:tempest-sim-api"]
+# Compile DuckDB from its bundled source instead of linking the system library. For CI and
+# release builds, so the shipped binary needs no DuckDB installed.
+bundled-duckdb = ["results", "duckdb/bundled", "duckdb/json"]
 
 [dependencies]
 tempest-core.workspace = true

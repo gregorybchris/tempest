@@ -27,6 +27,47 @@
   min-width: 0;
 }
 
+/* ---------- Signing in to a remote engine ---------- */
+
+.signin {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--gap-4);
+}
+
+.signin__card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: var(--gap-3);
+  padding: var(--gap-5);
+  border: 1px solid var(--line);
+  background: var(--raise);
+  box-shadow: 0 0 var(--glow-size) -2px var(--glow);
+}
+
+.signin__card .wordmark {
+  width: 168px;
+  margin-bottom: var(--gap-2);
+}
+
+.signin__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 500;
+  color: var(--up);
+}
+
+.signin__text {
+  margin: 0;
+  color: var(--dim);
+}
+
+.signin__card .btn {
+  justify-self: stretch;
+  padding: 7px 12px;
+}
+
 /* ---------- The engine's connection ---------- */
 
 .banner {

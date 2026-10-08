@@ -57,13 +57,17 @@ pub fn TextField(
     /// What is wrong with the text, if anything.
     #[prop(optional, into)]
     error: Signal<Option<String>>,
+    /// Whether the text is a secret: hidden, and left to a password manager.
+    #[prop(optional)]
+    secret: bool,
 ) -> impl IntoView {
     view! {
         <label class="field">
             <span class="field__label">{label}</span>
             <input
                 class="input"
-                type="text"
+                type=if secret { "password" } else { "text" }
+                autocomplete=secret.then_some("current-password")
                 placeholder=placeholder
                 spellcheck="false"
                 aria-invalid=move || bool_attr(error.with(Option::is_some))

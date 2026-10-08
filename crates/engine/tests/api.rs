@@ -603,6 +603,151 @@ async fn local_access_refuses_other_hosts_and_remote_access_needs_the_token() {
     engine.shutdown().await;
 }
 
+/// Signs in with `token`, returning the response.
+async fn sign_in(app: &Router, token: &str) -> axum::response::Response {
+    let body = json!({ "token": token });
+    let request = request(Method::POST, "/v1/session", Some(body));
+    app.clone().oneshot(request).await.unwrap()
+}
+
+/// The `name=value` part of a response's cookie, to send back.
+fn cookie_pair(response: &axum::response::Response) -> String {
+    let set = response.headers()[header::SET_COOKIE].to_str().unwrap();
+    set.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn signing_in_with_the_token_gives_a_session_that_the_api_and_event_stream_accept() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    let remote = router(engine.clone(), Access::Token("s3cret-token".into()));
+    let with_cookie = |uri: &str, cookie: &str| {
+        Request::builder()
+            .uri(uri)
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    // Before signing in, the engine says it wants a sign-in.
+    let (status, body) = send(&remote, Method::GET, "/v1/session", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!({ "required": true, "signed_in": false }));
+
+    // A wrong token is refused and sets nothing.
+    let wrong = sign_in(&remote, "wrong").await;
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    assert!(wrong.headers().get(header::SET_COOKIE).is_none());
+
+    // The right one starts a session, in a cookie that scripts can't read and other sites
+    // can't send.
+    let signed_in = sign_in(&remote, "s3cret-token").await;
+    assert_eq!(signed_in.status(), StatusCode::OK);
+    let set = signed_in.headers()[header::SET_COOKIE].to_str().unwrap();
+    for attribute in [
+        "HttpOnly",
+        "Secure",
+        "SameSite=Strict",
+        "Path=/",
+        "Max-Age=",
+    ] {
+        assert!(set.contains(attribute), "{attribute} in {set}");
+    }
+    assert!(set.starts_with("__Host-"), "{set}");
+    let cookie = cookie_pair(&signed_in);
+
+    // The cookie opens the API, without the header.
+    let (status, _) = call(&remote, with_cookie("/v1/transfers", &cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    let info = call(&remote, with_cookie("/v1/session", &cookie)).await;
+    assert_eq!(info.1, json!({ "required": true, "signed_in": true }));
+
+    // A cookie among others works, and junk or a forged one doesn't.
+    let among = format!("theme=dark; {cookie}; other=1");
+    assert_eq!(
+        call(&remote, with_cookie("/v1/transfers", &among)).await.0,
+        StatusCode::OK
+    );
+    let (name, _) = cookie.split_once('=').unwrap();
+    let forged = format!("{name}={}.{}", u64::MAX, "0".repeat(64));
+    for bad in [forged.as_str(), "x=y", &format!("{name}=")] {
+        assert_error(
+            call(&remote, with_cookie("/v1/transfers", bad)).await,
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+        );
+    }
+
+    // The event stream, which can't send the header, works with the cookie and not without.
+    let mut stream = SseReader::open_as(&remote, "/v1/events", None, Some(&cookie)).await;
+    assert_eq!(stream.next().await.event, "snapshot");
+    assert_error(
+        call(
+            &remote,
+            Request::builder()
+                .uri("/v1/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await,
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+    );
+
+    // Changing the token ends every session.
+    let rotated = router(engine.clone(), Access::Token("new-token".into()));
+    assert_error(
+        call(&rotated, with_cookie("/v1/transfers", &cookie)).await,
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+    );
+    let info = call(&rotated, with_cookie("/v1/session", &cookie)).await;
+    assert_eq!(info.1["signed_in"], false);
+
+    // Signing out clears the cookie.
+    let out = remote
+        .clone()
+        .oneshot(request(Method::DELETE, "/v1/session", None))
+        .await
+        .unwrap();
+    assert_eq!(out.status(), StatusCode::NO_CONTENT);
+    assert!(
+        out.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+
+    // Signing in takes JSON, so no cross-site form can do it.
+    let form = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/session")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from("token=s3cret-token"))
+        .unwrap();
+    assert_error(
+        call(&remote, form).await,
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "unsupported_media_type",
+    );
+
+    // A local engine needs no sign-in, and still refuses other hosts.
+    let local = router(engine.clone(), Access::Local);
+    let (_, body) = send(&local, Method::GET, "/v1/session", None).await;
+    assert_eq!(body, json!({ "required": false, "signed_in": true }));
+    let rebound = Request::builder()
+        .uri("/v1/session")
+        .header(header::HOST, "attacker.example")
+        .body(Body::empty())
+        .unwrap();
+    assert_error(
+        call(&local, rebound).await,
+        StatusCode::FORBIDDEN,
+        "forbidden",
+    );
+    engine.shutdown().await;
+}
+
 /// Reads server-sent events from a response body.
 struct SseReader {
     body: BodyDataStream,
@@ -623,7 +768,20 @@ impl SseReader {
     }
 
     async fn open_at(app: &Router, uri: &str, last_event_id: Option<u64>) -> Self {
+        Self::open_as(app, uri, last_event_id, None).await
+    }
+
+    /// Opens a stream carrying `cookie`, as a signed-in browser's `EventSource` does.
+    async fn open_as(
+        app: &Router,
+        uri: &str,
+        last_event_id: Option<u64>,
+        cookie: Option<&str>,
+    ) -> Self {
         let mut builder = Request::builder().uri(uri);
+        if let Some(cookie) = cookie {
+            builder = builder.header(header::COOKIE, cookie);
+        }
         if let Some(id) = last_event_id {
             builder = builder.header("last-event-id", id.to_string());
         }

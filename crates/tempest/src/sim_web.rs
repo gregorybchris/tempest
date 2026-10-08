@@ -74,6 +74,13 @@ pub fn web(args: SimWebArgs) -> Result<()> {
             args.db.display()
         );
     }
+    if !args.listen.ip().is_loopback() {
+        eprintln!(
+            "warning: listening on {}, which other machines can reach; the results UI has no \
+             authentication",
+            args.listen.ip()
+        );
+    }
     let sources = Sources {
         db: args.db,
         baselines: Baselines::new(Some(args.baselines)),

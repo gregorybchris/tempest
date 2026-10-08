@@ -6,6 +6,7 @@ use std::time::Duration;
 use leptos::ev;
 use leptos::html::Input;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use send_wrapper::SendWrapper;
 use serde_json::json;
 use tempest_api::prefs;
@@ -24,6 +25,7 @@ use crate::dialogs::Dialogs;
 use crate::keys::{self, Command, Scope};
 use crate::list::{Move, Order, Transfers};
 use crate::share::{Share, SharePath, share_ids};
+use crate::signin::{self, Auth, SignIn};
 use crate::state::{Area, Deeper, Dialog, Ui};
 use crate::store::Store;
 use crate::stream::{Follower, Link};
@@ -46,9 +48,18 @@ pub struct Fields {
 /// The whole page.
 #[component]
 pub fn App() -> impl IntoView {
+    let auth = RwSignal::new(Auth::Checking);
+    provide_context(auth);
+    signin::watch(auth);
+    // A memo, so the page is rebuilt only when the answer changes.
+    let state = Memo::new(move |_| auth.get());
     view! {
         <Toaster>
-            <Shell />
+            {move || match state.get() {
+                Auth::Checking => ().into_any(),
+                Auth::SignedOut => view! { <SignIn auth /> }.into_any(),
+                Auth::SignedIn { .. } => view! { <Shell /> }.into_any(),
+            }}
         </Toaster>
     }
 }
@@ -102,6 +113,7 @@ fn Shell() -> impl IntoView {
                 <Nav items=Area::ALL.iter().map(|a| (*a, a.title())).collect() current=ui.area />
                 <div class="appbar__spacer"></div>
                 <Meters />
+                <SignOut />
                 <button
                     class="theme-button"
                     type="button"
@@ -121,12 +133,46 @@ fn Shell() -> impl IntoView {
     }
 }
 
-/// Follows the engine's events into the store, and samples rates once a second.
+/// Offers to sign out, when the engine asked for a sign-in.
+#[component]
+fn SignOut() -> impl IntoView {
+    let auth = expect_context::<RwSignal<Auth>>();
+    move || {
+        matches!(auth.get(), Auth::SignedIn { remote: true }).then(|| {
+            view! {
+                <Button
+                    small=true
+                    kind=ButtonKind::Ghost
+                    title="End this browser's session"
+                    on_click=move || {
+                        spawn_local(async move {
+                            let _ = signin::sign_out().await;
+                            signin::check(auth);
+                        })
+                    }
+                >
+                    "Sign out"
+                </Button>
+            }
+        })
+    }
+}
+
+/// Follows the engine's events into the store, and samples rates once a second. When the
+/// stream breaks it also asks whether the session is still good, as the stream can't say.
 fn follow(store: Store) {
+    let auth = expect_context::<RwSignal<Auth>>();
     let follower = Follower::start(
         move |event| store.push(event),
-        move |link| store.link.set(link),
+        move |link| {
+            if matches!(link, Link::Lost { .. }) {
+                signin::check(auth);
+            }
+            store.link.set(link);
+        },
     );
+    let stopper = SendWrapper::new(follower.clone());
+    on_cleanup(move || stopper.stop());
     provide_context(StoredValue::new(SendWrapper::new(follower)));
     if let Ok(sampling) = set_interval_with_handle(move || store.sample(), Duration::from_secs(1)) {
         on_cleanup(move || sampling.clear());

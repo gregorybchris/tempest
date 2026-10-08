@@ -162,3 +162,21 @@ pub struct CatalogSignInRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invite: Option<String>,
 }
+
+/// `POST /v1/session`: signs in to a remote engine with its access token (D-222).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignInRequest {
+    /// The engine's access token.
+    pub token: String,
+}
+
+/// `GET /v1/session` and `POST /v1/session`: whether the engine wants a sign-in, and whether
+/// the request has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionInfo {
+    /// Whether requests need the access token or a session. A local engine doesn't.
+    pub required: bool,
+    /// Whether this request may use the API.
+    pub signed_in: bool,
+}

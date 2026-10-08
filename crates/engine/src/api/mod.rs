@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use serde::{Deserialize, Serialize};
@@ -111,7 +111,69 @@ pub fn router(engine: Engine, access: Access) -> Router {
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(engine)
-        .layer(axum::middleware::from_fn_with_state(access, access::guard))
+        .layer(axum::middleware::from_fn_with_state(
+            access.clone(),
+            access::guard,
+        ))
+        .merge(session_routes(access))
+}
+
+/// The routes for signing in (D-222), which a remote engine answers without a session.
+fn session_routes(access: Access) -> Router {
+    Router::new()
+        .route(
+            &format!("{PREFIX}/session"),
+            get(session_info).post(sign_in).delete(sign_out),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            access.clone(),
+            access::session_guard,
+        ))
+        .with_state(access)
+}
+
+async fn session_info(State(access): State<Access>, headers: HeaderMap) -> Result {
+    ok(&match &access {
+        Access::Local => SessionInfo {
+            required: false,
+            signed_in: true,
+        },
+        Access::Token(token) => SessionInfo {
+            required: true,
+            signed_in: access::is_authorized(&headers, token, access::unix_now()),
+        },
+    })
+}
+
+async fn sign_in(State(access): State<Access>, Json(request): Json<SignInRequest>) -> Result {
+    let Access::Token(token) = &access else {
+        return ok(&SessionInfo {
+            required: false,
+            signed_in: true,
+        });
+    };
+    if !access::token_matches(&request.token, token) {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED.as_u16(),
+            "unauthorized",
+            "that isn't the engine's access token",
+        ));
+    }
+    let info = SessionInfo {
+        required: true,
+        signed_in: true,
+    };
+    let mut response = json(StatusCode::OK, &info);
+    let cookie = access::session_cookie(token, access::unix_now());
+    response.headers_mut().insert(header::SET_COOKIE, cookie);
+    Ok(response)
+}
+
+async fn sign_out() -> Response {
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    let cookie = access::clearing_cookie();
+    response.headers_mut().insert(header::SET_COOKIE, cookie);
+    response
 }
 
 type Result<T = Response> = std::result::Result<T, ApiError>;

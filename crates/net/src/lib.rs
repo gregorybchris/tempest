@@ -1,6 +1,7 @@
 //! Tempest's network layer: QUIC connections between peers.
 //!
 //! - [`addresses`]: the direct addresses a peer advertises.
+//! - [`dirs`]: where Tempest keeps its files by default.
 //! - [`identity`]: a peer's Ed25519 key pair, stored once per installation (D-021).
 //! - [`tls`]: TLS 1.3 with raw public keys, so the key is the peer's identity (D-020).
 //! - [`endpoint`]: QUIC endpoints with one UDP socket per address family, and authenticated
@@ -22,6 +23,7 @@
 //! crate moves their messages over real connections.
 
 pub mod addresses;
+pub mod dirs;
 pub mod driver;
 pub mod endpoint;
 pub mod fetch;

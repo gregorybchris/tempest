@@ -406,6 +406,18 @@ where
     }
 }
 
+/// Whether a click on a table row whose first link goes where the row does should follow
+/// the row: a plain click, not one on a link, which goes by itself, nor one with a modifier,
+/// which opens the link elsewhere.
+pub fn row_click(e: &ev::MouseEvent) -> bool {
+    let modified = e.ctrl_key() || e.meta_key() || e.shift_key() || e.alt_key();
+    let on_link = e
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .is_some_and(|t| t.closest("a").ok().flatten().is_some());
+    e.button() == 0 && !modified && !on_link
+}
+
 /// A labeled figure in a [`Stats`] list.
 #[component]
 pub fn Stat(

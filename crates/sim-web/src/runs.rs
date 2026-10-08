@@ -211,7 +211,7 @@ fn RunRow(run: RunInfo, fixed_experiment: bool) -> impl IntoView {
         Tone::Warn
     };
     view! {
-        <tr class="row--link" on:click=move |_| ctx.go(Route::Run(id))>
+        <tr class="row--link" on:click=move |e| if row_click(&e) { ctx.go(Route::Run(id)) }>
             <td class="num dim"><a href=Route::Run(id).hash()>{id}</a></td>
             {(!fixed_experiment).then(|| view! { <td class="table__clip">{run.experiment_name.clone()}<span class="dim">" #"{run.experiment}</span></td> })}
             <td class="table__clip" title=run.variant_name.clone()>{present::variant_values(&run.variant_name)}</td>

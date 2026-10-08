@@ -72,7 +72,7 @@ fn Golden(b: BaselineInfo) -> impl IntoView {
             };
             let id = e.experiment;
             view! {
-                <tr class="row--link" on:click=move |_| ctx.go(Route::Experiment(id))>
+                <tr class="row--link" on:click=move |e| if row_click(&e) { ctx.go(Route::Experiment(id)) }>
                     <td class="num dim"><a href=Route::Experiment(id).hash()>{id}</a></td>
                     <td class="nowrap">{e.created_at}</td>
                     <td class="mono dim">{e.git_commit.as_deref().map(short).unwrap_or("–").to_owned()}</td>

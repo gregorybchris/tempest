@@ -14,7 +14,7 @@ pub(crate) mod routes;
 pub mod search;
 pub mod store;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -94,6 +94,8 @@ pub struct Catalog {
     search: SearchIndex,
     config: CatalogConfig,
     challenges: HashMap<String, Pending>,
+    /// The bundles taken down as of the last time the index was brought up to date.
+    blocked: HashSet<BundleId>,
 }
 
 /// Whether `sig` is `key`'s Ed25519 signature over `message`.
@@ -184,7 +186,9 @@ impl Catalog {
             search: SearchIndex::new()?,
             config,
             challenges: HashMap::new(),
+            blocked: HashSet::new(),
         };
+        catalog.blocked = catalog.store.blocked()?;
         let listed = catalog.store.all_indexed()?;
         let categories = &catalog.config.categories;
         catalog.search.rebuild(
@@ -204,6 +208,18 @@ impl Catalog {
             }
             None => self.search.remove(bundle)?,
         }
+        Ok(())
+    }
+
+    /// Brings the index up to date with listings taken down or restored by the operator's
+    /// commands, which may run in another process and can't update this index.
+    fn sync_blocked(&mut self) -> Result<(), StoreError> {
+        let now = self.store.blocked()?;
+        let changed: Vec<BundleId> = now.symmetric_difference(&self.blocked).copied().collect();
+        for bundle in &changed {
+            self.reindex(bundle)?;
+        }
+        self.blocked = now;
         Ok(())
     }
 
@@ -554,23 +570,17 @@ impl Catalog {
     /// matches spread over categories and tags. `swarm` gives a bundle's swarm now, for ranking
     /// and to show.
     pub fn listings(
-        &self,
+        &mut self,
         now: u64,
         query: &ListingQuery,
         viewer: Option<&PeerId>,
         swarm: impl Fn(&BundleId) -> BundleStats,
     ) -> Result<ListingPage, Refusal> {
-        let mut found = self
+        self.sync_blocked()?;
+        let found = self
             .search
             .search(&query.q, query.category.as_deref(), &query.tags)
             .map_err(StoreError::from)?;
-        // The operator's commands may run in another process, which can't update this index.
-        let blocked = self.store.blocked()?;
-        if !blocked.is_empty() {
-            found
-                .matches
-                .retain(|found| !blocked.contains(&found.bundle));
-        }
         let today = now / DAY;
         let mut votes = self.store.vote_counts()?;
         let mut downloads = self

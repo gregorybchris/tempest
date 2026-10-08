@@ -333,27 +333,37 @@ fn operator_commands_hide_ban_and_list_reports() {
     };
     let status = |bundle: &Hash| get(&url, &format!("/catalog/v1/listings/{bundle}")).0;
     assert_eq!(status(&first), 200);
+    let found = || {
+        get(&url, "/catalog/v1/listings").1["total"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(found(), 2);
 
     let (ok, out, err) = operate(&["hide", &first.to_string()]);
     assert!(ok, "{err}");
     assert_eq!(out.trim(), format!("hid {first}"));
     assert_eq!(status(&first), 404);
     assert_eq!(status(&second), 200);
+    assert_eq!(found(), 1);
     let (_, out, _) = operate(&["reports"]);
     assert!(out.contains("(taken down)"), "{out}");
     let (ok, _, _) = operate(&["unhide", &first.to_string()]);
     assert!(ok);
     assert_eq!(status(&first), 200);
+    assert_eq!(found(), 2);
 
     let (ok, out, err) = operate(&["ban", &publisher.to_string()]);
     assert!(ok, "{err}");
     assert_eq!(out.trim(), format!("banned {publisher}"));
     assert_eq!(status(&first), 404);
     assert_eq!(status(&second), 404);
+    assert_eq!(found(), 0);
     let (ok, out, _) = operate(&["unban", &publisher.to_string()]);
     assert!(ok);
     assert_eq!(out.trim(), format!("unbanned {publisher}"));
     assert_eq!(status(&second), 200);
+    assert_eq!(found(), 2);
 
     // Mistakes are errors, and never make a catalog.
     let (ok, _, err) = operate(&["hide", &Hash::new([7; 32]).to_string()]);

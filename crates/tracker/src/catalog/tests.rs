@@ -69,7 +69,7 @@ fn sign_in(catalog: &mut Catalog, key: &Key, now: u64) -> String {
 }
 
 /// The listings matching `query`, when every swarm is empty.
-fn browse(catalog: &Catalog, query: &ListingQuery) -> ListingPage {
+fn browse(catalog: &mut Catalog, query: &ListingQuery) -> ListingPage {
     catalog
         .listings(0, query, None, |_| BundleStats::default())
         .unwrap()
@@ -234,7 +234,7 @@ fn listings_show_once_their_content_is_known() {
     assert!(catalog.listing(&id, Some(&bob.id())).is_err());
     let mine = catalog.listing(&id, Some(&alice.id())).unwrap();
     assert_eq!(mine.status, ListingStatus::Pending);
-    assert_eq!(browse(&catalog, &ListingQuery::default()).total, 0);
+    assert_eq!(browse(&mut catalog, &ListingQuery::default()).total, 0);
 
     // Another key's request doesn't take it over.
     catalog.request_listing(11, &id, &bob.id()).unwrap();
@@ -361,7 +361,7 @@ fn browsing_pages_newest_first_and_filters_by_category() {
         limit: 2,
         ..ListingQuery::default()
     };
-    let page = browse(&catalog, &query);
+    let page = browse(&mut catalog, &query);
     assert_eq!(page.total, 5);
     let order: Vec<_> = page.listings.iter().map(|l| l.bundle).collect();
     assert_eq!(order, [bundle(4), bundle(3)]);
@@ -370,7 +370,7 @@ fn browsing_pages_newest_first_and_filters_by_category() {
         category: Some("models".into()),
         ..ListingQuery::default()
     };
-    let page = browse(&catalog, &models);
+    let page = browse(&mut catalog, &models);
     assert_eq!(page.total, 2);
     assert!(
         page.listings
@@ -494,13 +494,13 @@ fn reopening_rebuilds_the_search_index() {
         // Pending listings aren't searchable either.
         catalog.request_listing(3, &bundle(3), &alice.id()).unwrap();
     }
-    let catalog = Catalog::open(&path, CatalogConfig::default()).unwrap();
-    let search = |q: &str| {
+    let mut catalog = Catalog::open(&path, CatalogConfig::default()).unwrap();
+    let mut search = |q: &str| {
         let query = ListingQuery {
             q: q.into(),
             ..ListingQuery::default()
         };
-        let page = browse(&catalog, &query);
+        let page = browse(&mut catalog, &query);
         page.listings.iter().map(|l| l.bundle).collect::<Vec<_>>()
     };
     assert_eq!(search("orbitl"), [bundle(1)]);

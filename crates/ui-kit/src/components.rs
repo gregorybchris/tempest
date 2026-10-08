@@ -5,7 +5,10 @@
 use std::time::Duration;
 
 use leptos::ev;
+use leptos::html;
 use leptos::prelude::*;
+use send_wrapper::SendWrapper;
+use wasm_bindgen::JsCast;
 
 use crate::chart::{Color, Sparkline};
 pub use crate::form::*;
@@ -340,7 +343,8 @@ pub fn Panel(
     }
 }
 
-/// Tabs over a set of views. The arrow keys move between them.
+/// Tabs over a set of views. The arrow keys, `home` and `end` move between them, and focus
+/// follows the tab shown.
 #[component]
 pub fn Tabs<T>(
     /// What the tabs choose between, for screen readers.
@@ -355,17 +359,28 @@ where
 {
     let order: Vec<T> = tabs.iter().map(|(t, _)| *t).collect();
     let on_key = move |e: ev::KeyboardEvent| {
-        let step: isize = match e.key().as_str() {
-            "ArrowRight" => 1,
-            "ArrowLeft" => -1,
-            _ => return,
-        };
+        let len = order.len() as isize;
         let i = order
             .iter()
             .position(|&t| t == current.get_untracked())
             .unwrap_or(0) as isize;
-        current.set(order[(i + step).rem_euclid(order.len() as isize) as usize]);
+        let next = match e.key().as_str() {
+            "ArrowRight" => (i + 1).rem_euclid(len),
+            "ArrowLeft" => (i - 1).rem_euclid(len),
+            "Home" => 0,
+            "End" => len - 1,
+            _ => return,
+        } as usize;
+        current.set(order[next]);
         e.prevent_default();
+        let tab = e
+            .current_target()
+            .and_then(|list| list.dyn_into::<web_sys::Element>().ok())
+            .and_then(|list| list.children().item(next as u32))
+            .and_then(|tab| tab.dyn_into::<web_sys::HtmlElement>().ok());
+        if let Some(tab) = tab {
+            let _ = tab.focus();
+        }
     };
     view! {
         <div class="tabs" role="tablist" aria-label=label on:keydown=on_key>
@@ -389,6 +404,18 @@ where
                 .collect_view()}
         </div>
     }
+}
+
+/// Whether a click on a table row whose first link goes where the row does should follow
+/// the row: a plain click, not one on a link, which goes by itself, nor one with a modifier,
+/// which opens the link elsewhere.
+pub fn row_click(e: &ev::MouseEvent) -> bool {
+    let modified = e.ctrl_key() || e.meta_key() || e.shift_key() || e.alt_key();
+    let on_link = e
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .is_some_and(|t| t.closest("a").ok().flatten().is_some());
+    e.button() == 0 && !modified && !on_link
 }
 
 /// A labeled figure in a [`Stats`] list.
@@ -520,7 +547,8 @@ pub fn Drawer(
     view! {
         <Show when=move || open.get()>
             <div class="scrim" on:click=move |_| on_close.run(())></div>
-            <aside class="drawer" role="dialog" aria-modal="true" aria-label=move || title.get()>
+            <aside class="drawer" role="dialog" aria-modal="true" aria-label=move || title.get()
+                tabindex="-1" node_ref={focus_scope::<html::Aside>()} on:keydown=keep_tab_inside>
                 <header class="drawer__head">
                     <h2 class="drawer__title">{title}</h2>
                     {actions.with_value(|a| a.as_ref().map(ViewFn::run))}
@@ -558,7 +586,8 @@ pub fn Dialog(
     view! {
         <Show when=move || open.get()>
             <div class="scrim" on:click=move |_| on_close.run(())></div>
-            <div class="dialog" role="dialog" aria-modal="true" aria-label=move || title.get()>
+            <div class="dialog" role="dialog" aria-modal="true" aria-label=move || title.get()
+                tabindex="-1" node_ref={focus_scope::<html::Div>()} on:keydown=keep_tab_inside>
                 <header class="dialog__head">
                     <h2 class="dialog__title">{title}</h2>
                     <button class="close" type="button" aria-label="Close" on:click=move |_| on_close.run(())>
@@ -569,6 +598,84 @@ pub fn Dialog(
                 {actions.with_value(|a| a.as_ref().map(|a| view! { <div class="dialog__actions">{a.run()}</div> }))}
             </div>
         </Show>
+    }
+}
+
+/// A reference for a dialog's element that moves focus into it once it shows, unless something
+/// in it has already taken focus, and gives focus back to what had it when the dialog goes.
+/// Must be called as the dialog is created.
+fn focus_scope<E>() -> NodeRef<E>
+where
+    E: html::ElementType,
+    E::Output: JsCast + Clone + 'static,
+{
+    let node = NodeRef::<E>::new();
+    let opener = SendWrapper::new(
+        document()
+            .active_element()
+            .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()),
+    );
+    Effect::new(move |_| {
+        let Some(element) = node.get() else {
+            return;
+        };
+        let element: web_sys::HtmlElement = element.unchecked_into();
+        let inside = document()
+            .active_element()
+            .is_some_and(|active| element.contains(Some(&active)));
+        if !inside {
+            let _ = element.focus();
+        }
+    });
+    on_cleanup(move || {
+        if let Some(opener) = opener.take().filter(|o| o.is_connected()) {
+            let _ = opener.focus();
+        }
+    });
+    node
+}
+
+/// Keeps `tab` and `shift-tab` cycling through a dialog's controls rather than leaving it for
+/// the page behind.
+fn keep_tab_inside(e: ev::KeyboardEvent) {
+    if e.key() != "Tab" {
+        return;
+    }
+    let Some(dialog) = e
+        .current_target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return;
+    };
+    const FOCUSABLE: &str = "button:not([disabled]), [href], input:not([disabled]), \
+                             select:not([disabled]), textarea:not([disabled]), \
+                             [tabindex]:not([tabindex=\"-1\"])";
+    let Ok(all) = dialog.query_selector_all(FOCUSABLE) else {
+        return;
+    };
+    let item = |i: u32| {
+        all.item(i)
+            .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+    };
+    let (Some(first), Some(last)) = (item(0), item(all.length().saturating_sub(1))) else {
+        e.prevent_default();
+        return;
+    };
+    let active = document().active_element();
+    let at = |element: &web_sys::HtmlElement| {
+        active
+            .as_ref()
+            .is_some_and(|a| a == element.unchecked_ref::<web_sys::Element>())
+    };
+    let on_dialog = active
+        .as_ref()
+        .is_some_and(|a| a == dialog.unchecked_ref::<web_sys::Element>());
+    if e.shift_key() && (at(&first) || on_dialog) {
+        e.prevent_default();
+        let _ = last.focus();
+    } else if !e.shift_key() && at(&last) {
+        e.prevent_default();
+        let _ = first.focus();
     }
 }
 

@@ -82,6 +82,10 @@ pub fn compact(value: f64) -> String {
     }
     let digits = if suffix == 0 && v.fract() == 0.0 {
         format!("{v:.0}")
+    } else if v < 0.1 {
+        // Two significant figures, so small values don't read as zero.
+        let decimals = (1.0 - v.log10().floor()) as usize;
+        format!("{v:.decimals$}")
     } else {
         three_figures(v)
     };
@@ -146,6 +150,9 @@ mod tests {
         assert_eq!(compact(40.0), "40");
         assert_eq!(compact(1_200.0), "1.20k");
         assert_eq!(compact(-48_000_000.0), "-48.0M");
+        assert_eq!(compact(0.004), "0.0040");
+        assert_eq!(compact(0.0005), "0.00050");
+        assert_eq!(compact(0.1), "0.10");
         assert_eq!(ago(0), "now");
         assert_eq!(ago(-240_000), "-4m");
         assert_eq!(ago(-90_000), "-1m 30s");

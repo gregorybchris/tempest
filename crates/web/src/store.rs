@@ -31,6 +31,9 @@ pub struct Store {
     pub loaded: RwSignal<bool>,
     /// What the last batch of events had worth telling the user, if anything.
     pub notices: RwSignal<Vec<Notice>>,
+    /// Fires after each second's rates are sampled. Only the charts track it: sampling
+    /// changes the model's histories, not its transfers, so it doesn't notify the model.
+    pub sampled: Trigger,
     rows: StoredValue<HashMap<BundleId, RwSignal<TransferInfo>>>,
     pending: StoredValue<Vec<ApiEvent>>,
 }
@@ -43,6 +46,7 @@ impl Store {
             link: RwSignal::new(Link::Connecting),
             loaded: RwSignal::new(false),
             notices: RwSignal::new(Vec::new()),
+            sampled: Trigger::new(),
             rows: StoredValue::new(HashMap::new()),
             pending: StoredValue::new(Vec::new()),
         }
@@ -89,7 +93,9 @@ impl Store {
 
     /// Records every transfer's rates; called once a second (D-194).
     pub fn sample(self) {
-        let _ = self.model.try_update(Model::sample);
+        if self.model.try_update_untracked(Model::sample).is_some() {
+            self.sampled.notify();
+        }
     }
 
     /// The signal of transfer `id`'s row, while the engine has it.

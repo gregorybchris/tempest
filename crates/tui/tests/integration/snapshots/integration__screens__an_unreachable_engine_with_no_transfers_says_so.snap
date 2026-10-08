@@ -1,0 +1,14 @@
+---
+source: crates/tui/tests/integration/screens.rs
+expression: "draw(&app, 80, 10).backend()"
+---
+"  Transfers   Share   Settings             reconnecting…  ↓–     ↑–     [green] "
+"────────────────────────────────────────────────────────────────────────────────"
+"  Name               Size Progress            ↓     ↑    ETA Status        Peers"
+"                 No transfers to show until the engine answers.                 "
+"                                                                                "
+"────────────────────────────────────────────────────────────────────────────────"
+" Lost touch with the engine. Trying again…                                      "
+" cannot reach the engine at http://127.0.0.1:4776                               "
+"────────────────────────────────────────────────────────────────────────────────"
+" / filter  a add  : command  s sort  1-3 areas  v views  T theme  ? help        "

@@ -191,7 +191,7 @@ fn MyRow(listing: Listing) -> impl IntoView {
         false => listing.title.clone(),
     };
     view! {
-        <tr class="row--link" on:click=move |_| ctx.go(Route::Listing(bundle))>
+        <tr class="row--link" on:click=move |e| if row_click(&e) { ctx.go(Route::Listing(bundle)) }>
             <td class="table__clip"><a href=Route::Listing(bundle).hash()>{title}</a></td>
             <td title=why><Badge tone label=label.to_owned() /></td>
             <td class="num"><HealthBars swarm=listing.swarm /></td>

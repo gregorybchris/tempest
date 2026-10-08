@@ -4742,7 +4742,9 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "ratatui",
  "serde_json",
+ "tempest-api",
  "tempest-assets",
  "tempest-core",
  "tempest-engine",
@@ -4752,6 +4754,7 @@ dependencies = [
  "tempest-tui",
  "tempfile",
  "tokio",
+ "unicode-width",
 ]
 
 [[package]]

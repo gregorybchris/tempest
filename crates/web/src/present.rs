@@ -4,6 +4,7 @@
 use tempest_api::finding::StatusFilter;
 use tempest_api::inspect::{CellInfo, PeerInfo};
 use tempest_api::model::History;
+pub use tempest_api::units::{clock, date};
 use tempest_api::{Status, TransferInfo};
 use tempest_ui_kit::ChunkCell;
 use tempest_ui_kit::chart::{Color, LineData, Series, Unit, XAxis};
@@ -50,37 +51,6 @@ pub fn ratio(ratio: Option<f64>) -> String {
 /// Connections out of the peers known: `3/12`.
 pub fn peers(transfer: &TransferInfo) -> String {
     format!("{}/{}", transfer.connections, transfer.peers)
-}
-
-/// A moment in milliseconds since the Unix epoch as its date in UTC: `2026-10-07`.
-pub fn date(millis: i64) -> String {
-    // Howard Hinnant's days-to-civil algorithm, on days since 1970-01-01.
-    let days = millis.div_euclid(86_400_000) + 719_468;
-    let era = days.div_euclid(146_097);
-    let day_of_era = days.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02}")
-}
-
-/// A time on a session's clock, in seconds since it started: `0:07.3`, `1:02:03.5`.
-pub fn clock(seconds: f64) -> String {
-    let tenths = (seconds.max(0.0) * 10.0).floor() as u64;
-    let (whole, tenth) = (tenths / 10, tenths % 10);
-    let (hours, minutes, seconds) = (whole / 3600, whole / 60 % 60, whole % 60);
-    match hours {
-        0 => format!("{minutes}:{seconds:02}.{tenth}"),
-        hours => format!("{hours}:{minutes:02}:{seconds:02}.{tenth}"),
-    }
 }
 
 /// What a connection is doing, in a few words: `sends to us, we send`, `opening`, `idle`.
@@ -177,9 +147,6 @@ mod tests {
         assert_eq!(rate(9_800_000), "9.80 MB/s");
         assert_eq!(eta(Some(185)), "3m 05s");
         assert_eq!(ratio(Some(0.4242)), "0.42");
-        assert_eq!(date(1_791_331_200_000), "2026-10-07");
-        assert_eq!(date(-1), "1969-12-31");
-        assert_eq!(clock(3723.5), "1:02:03.5");
     }
 
     #[test]

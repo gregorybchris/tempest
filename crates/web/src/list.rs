@@ -105,7 +105,8 @@ fn Toolbar() -> impl IntoView {
     let ui = expect_context::<Ui>();
     let fields = expect_context::<Fields>();
     let order = expect_context::<Order>();
-    let query = RwSignal::new(String::new());
+    // The search box starts with the filter, which outlives the area.
+    let query = RwSignal::new(ui.finding.with_untracked(|f| f.text.clone()));
     // The search box types into the finding.
     Effect::new(move |_| {
         let text = query.get();

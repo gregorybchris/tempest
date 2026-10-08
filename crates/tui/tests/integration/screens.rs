@@ -701,3 +701,56 @@ fn quitting_an_embedded_engine_asks_what_to_do_with_its_transfers() {
     press(&mut app, "q");
     insta::assert_snapshot!(draw(&app, 80, 16).backend());
 }
+
+#[test]
+fn an_unreachable_engine_with_no_transfers_says_so() {
+    let mut app = App::new(Origin::Daemon, Theme::default());
+    app.model.connection = Connection::Lost {
+        error: "cannot reach the engine at http://127.0.0.1:4776".to_owned(),
+    };
+    insta::assert_snapshot!(draw(&app, 80, 10).backend());
+}
+
+#[test]
+fn a_small_terminal_names_only_the_current_area() {
+    let mut app = app();
+    press(&mut app, "2");
+    insta::assert_snapshot!(draw(&app, 40, 10).backend());
+}
+
+#[test]
+fn the_palette_keeps_its_highlight_on_a_short_terminal() {
+    let mut app = app();
+    press(&mut app, ":");
+    for _ in 0..10 {
+        press_code(&mut app, KeyCode::Down);
+    }
+    insta::assert_snapshot!(draw(&app, 80, 14).backend());
+}
+
+/// Every area and modal draws at any size, down to nothing, without panicking.
+#[test]
+fn every_screen_draws_at_tiny_sizes() {
+    let mut screens: Vec<App> = Vec::new();
+    for keys in [
+        "", "1\n", "1\nc", "1\ng", "2", "3", "?", ":", "a", "x", "r", "t", "|", "v", "/", "L",
+    ] {
+        let mut app = app();
+        with_settings(&mut app);
+        with_categories(&mut app);
+        for c in keys.chars() {
+            match c {
+                '\n' => press_code(&mut app, KeyCode::Enter),
+                c => press(&mut app, &c.to_string()),
+            }
+        }
+        screens.push(app);
+    }
+    for app in &screens {
+        for width in [0, 1, 5, 12, 20, 33, 47] {
+            for height in [0, 1, 3, 5, 9] {
+                draw(app, width, height);
+            }
+        }
+    }
+}

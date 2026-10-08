@@ -288,8 +288,9 @@ fn peers(t: &TransferInfo) -> String {
 }
 
 /// Fetches with `fetch` now and every [`POLL`] while the calling view shows, one request at a
-/// time (D-194). A failure shows in the view.
-fn poll<T: Clone + Send + Sync + 'static>(
+/// time (D-194). A failure shows in the view. An answer like the last one changes nothing, so
+/// the view keeps its rows, and their selection and scroll.
+fn poll<T: Clone + PartialEq + Send + Sync + 'static>(
     fetch: impl Fn() -> Pin<Box<dyn Future<Output = Result<T, RequestError>>>> + 'static,
 ) -> RwSignal<Option<Result<T, String>>> {
     let data = RwSignal::new(None);
@@ -302,7 +303,13 @@ fn poll<T: Clone + Send + Sync + 'static>(
         let request = fetch();
         spawn_local(async move {
             let answer = request.await.map_err(|e| e.to_string());
-            let _ = data.try_set(Some(answer));
+            let _ = data.try_maybe_update(|shown| {
+                let changed = shown.as_ref() != Some(&answer);
+                if changed {
+                    *shown = Some(answer);
+                }
+                (changed, ())
+            });
             let _ = busy.try_set_value(false);
         });
     };
@@ -474,6 +481,7 @@ fn Chunks(id: BundleId) -> impl IntoView {
 fn Rates(id: BundleId) -> impl IntoView {
     let store = expect_context::<Store>();
     let data = Signal::derive(move || {
+        store.sampled.track();
         store.model.with(|m| {
             m.history(&id)
                 .map(present::rates_chart)
@@ -481,6 +489,7 @@ fn Rates(id: BundleId) -> impl IntoView {
         })
     });
     let enough = move || {
+        store.sampled.track();
         store
             .model
             .with(|m| m.history(&id).is_some_and(|h| h.samples().len() > 1))

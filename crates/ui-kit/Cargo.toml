@@ -13,6 +13,7 @@ leptos-use.workspace = true
 send_wrapper.workspace = true
 wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = [
+  "Document",
   "DomRect",
   "DomRectReadOnly",
   "Element",
@@ -25,6 +26,7 @@ web-sys = { workspace = true, features = [
   "KeyboardEvent",
   "MouseEvent",
   "Node",
+  "NodeList",
   "PointerEvent",
   "ResizeObserver",
   "ResizeObserverEntry",

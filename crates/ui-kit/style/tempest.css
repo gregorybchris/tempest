@@ -251,15 +251,6 @@ a {
   white-space: nowrap;
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 /* Tones give a component one accent: `.tone--down` etc. set `--tone`. */
 .tone--neutral { --tone: var(--fg); }
 .tone--dim { --tone: var(--dim); }
@@ -342,8 +333,27 @@ a {
   font-size: var(--text-xs);
 }
 
-/* Phones: the navigation becomes a bottom tab bar (D-136). */
+.theme-button {
+  color: var(--dim);
+  font-size: var(--text-lg);
+  padding: 2px 6px;
+}
+
+.theme-button:hover {
+  color: var(--fg);
+}
+
+/* Phones: the navigation becomes a bottom tab bar (D-136), which the key hints make way
+   for. */
 @media (max-width: 640px) {
+  .app:has(.nav) {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+
+  .app:has(.nav) .hints {
+    display: none;
+  }
+
   .nav {
     position: fixed;
     left: 0;
@@ -1249,7 +1259,7 @@ textarea.input {
 }
 
 .sort:hover,
-.sort[aria-sort] {
+th[aria-sort] .sort {
   color: var(--fg);
 }
 
@@ -1295,6 +1305,12 @@ textarea.input {
   z-index: 30;
   background: var(--scrim);
   animation: fade-in 0.12s ease-out;
+}
+
+/* They take focus when they open, which is no reason to outline them. */
+.drawer:focus,
+.dialog:focus {
+  outline: none;
 }
 
 .drawer {
@@ -1479,11 +1495,6 @@ kbd {
   text-anchor: middle;
 }
 
-.chart__label text {
-  fill: var(--dim);
-  font-size: 10.5px;
-}
-
 .chart__line {
   fill: none;
   stroke: var(--c);
@@ -1626,13 +1637,6 @@ kbd {
   margin-top: 6px;
   color: var(--dim);
   font-size: var(--text-xs);
-}
-
-.chart__empty {
-  display: grid;
-  place-items: center;
-  color: var(--dim);
-  border: 1px dashed var(--line);
 }
 
 /* ---------- Chunk map ---------- */

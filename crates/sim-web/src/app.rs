@@ -6,7 +6,7 @@ use leptos::html::Input;
 use leptos::prelude::*;
 use tempest_sim_api::query::{CompareQuery, VariantRef};
 use tempest_ui_kit::components::*;
-use tempest_ui_kit::theme::apply_look;
+use tempest_ui_kit::theme::{ThemeButton, apply_look};
 use tempest_ui_kit::{Look, Theme};
 use wasm_bindgen::JsCast;
 
@@ -186,15 +186,7 @@ fn Shell() -> impl IntoView {
                         " picked"
                     </a>
                 </Show>
-                <button
-                    class="theme-button"
-                    type="button"
-                    title="Next theme (T)"
-                    aria-label=move || format!("Theme: {}. Switch to the next.", ctx.theme.get().name())
-                    on:click=move |_| ctx.theme.update(|t| *t = t.next())
-                >
-                    "◐"
-                </button>
+                <ThemeButton theme=ctx.theme />
             </header>
             <main class="main">{view}</main>
             <HintBar hints=keys::hints() />

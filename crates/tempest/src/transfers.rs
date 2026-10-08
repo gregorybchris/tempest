@@ -1,17 +1,14 @@
 //! `tempest list`, `start`, `stop` and `remove`: transfers in the engine, through the daemon's
 //! API or an engine opened here on its state.
 
-use std::time::Duration;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tempest_engine::{Status, TransferInfo};
 
 use crate::engine::{EngineArgs, Target, short_id};
-use crate::progress::{bytes, duration};
+use tempest_api::units::{bytes, duration, percent};
+use unicode_width::UnicodeWidthStr;
 
-/// What to say when no daemon runs the transfers.
-const NO_DAEMON: &str =
-    "no daemon is running, so nothing is transferring; `tempest daemon` runs it";
+use crate::progress::fit;
 
 #[derive(Debug, clap::Args)]
 pub struct ListArgs {
@@ -55,27 +52,8 @@ pub struct RemoveArgs {
     delete_files: bool,
 }
 
-/// Runs `command` against the engine, then closes an embedded one, saying that no daemon runs
-/// the transfers.
-fn with_target<T>(
-    engine: &EngineArgs,
-    command: impl AsyncFnOnce(&Target) -> Result<T>,
-) -> Result<T> {
-    let config = engine.load()?;
-    let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
-    runtime.block_on(async {
-        let target = Target::connect(config).await?;
-        let result = command(&target).await;
-        if !target.is_daemon() {
-            eprintln!("note: {NO_DAEMON}");
-        }
-        target.close().await;
-        result
-    })
-}
-
 pub fn list(args: ListArgs) -> Result<()> {
-    let transfers = with_target(&args.engine, async |target| target.list().await)?;
+    let transfers = Target::run(&args.engine, async |target| target.list().await)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&transfers)?);
     } else if transfers.is_empty() {
@@ -87,7 +65,7 @@ pub fn list(args: ListArgs) -> Result<()> {
 }
 
 pub fn start(args: StartArgs) -> Result<()> {
-    with_target(&args.engine, async |target| {
+    Target::run(&args.engine, async |target| {
         for query in &args.transfers {
             let transfer = target.find(query).await?;
             let started = target.start(transfer.id, args.force).await?;
@@ -103,7 +81,7 @@ pub fn start(args: StartArgs) -> Result<()> {
 }
 
 pub fn stop(args: StopArgs) -> Result<()> {
-    with_target(&args.engine, async |target| {
+    Target::run(&args.engine, async |target| {
         for query in &args.transfers {
             let transfer = target.find(query).await?;
             let stopped = target.stop(transfer.id).await?;
@@ -119,7 +97,7 @@ pub fn stop(args: StopArgs) -> Result<()> {
 }
 
 pub fn remove(args: RemoveArgs) -> Result<()> {
-    with_target(&args.engine, async |target| {
+    Target::run(&args.engine, async |target| {
         for query in &args.transfers {
             let transfer = target.find(query).await?;
             target.remove(transfer.id, args.delete_files).await?;
@@ -147,15 +125,15 @@ fn table(transfers: &[TransferInfo]) -> String {
         .map(|t| {
             [
                 short_id(&t.id),
-                truncate(&t.name, 40),
+                // A name may hold anything, even line breaks.
+                fit(&t.name.replace(char::is_control, " "), 40),
                 t.status.name().to_owned(),
-                format!("{:.0}%", (t.progress * 100.0).floor()),
+                percent(t.progress),
                 t.size.map_or("-".to_owned(), bytes),
                 rate(t.download_rate),
                 rate(t.upload_rate),
                 t.connections.to_string(),
-                t.eta
-                    .map_or("-".to_owned(), |secs| duration(Duration::from_secs(secs))),
+                t.eta.map_or("-".to_owned(), duration),
                 t.ratio
                     .map_or("-".to_owned(), |ratio| format!("{ratio:.2}")),
             ]
@@ -164,14 +142,14 @@ fn table(transfers: &[TransferInfo]) -> String {
     let mut widths = header.map(str::len);
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.chars().count());
+            *width = (*width).max(cell.width());
         }
     }
     let line = |cells: &[String]| {
         let padded: Vec<_> = cells
             .iter()
             .zip(widths)
-            .map(|(cell, width)| format!("{cell:<width$}"))
+            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.width())))
             .collect();
         format!("{}\n", padded.join("  ").trim_end())
     };
@@ -185,20 +163,26 @@ fn table(transfers: &[TransferInfo]) -> String {
     table
 }
 
-fn truncate(text: &str, max: usize) -> String {
-    match text.chars().count() > max {
-        true => format!("{}…", text.chars().take(max - 1).collect::<String>()),
-        false => text.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn long_names_are_truncated() {
-        assert_eq!(truncate("short", 8), "short");
-        assert_eq!(truncate("much too long", 8), "much to…");
+    fn wide_and_control_characters_keep_the_columns() {
+        let transfers: Vec<_> = ["日本語のファイル", "two\nlines", "plain"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| TransferInfo::example(i as u8, name, 0))
+            .collect();
+        let table = table(&transfers);
+        assert!(table.contains("two lines"), "{table}");
+        // The status column starts at the same display column on every line.
+        let lines: Vec<&str> = table.lines().collect();
+        assert_eq!(lines.len(), 4, "{table}");
+        let status = |line: &str, word: &str| line[..line.find(word).unwrap()].width();
+        let at = status(lines[0], "STATUS");
+        for (line, transfer) in lines[1..].iter().zip(&transfers) {
+            assert_eq!(status(line, transfer.status.name()), at, "{table}");
+        }
     }
 }

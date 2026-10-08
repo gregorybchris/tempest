@@ -16,6 +16,7 @@ license = false
 eula = false
 
 [dependencies]
+tempest-api.workspace = true
 tempest-assets.workspace = true
 tempest-tracker-api.workspace = true
 tempest-core.workspace = true
@@ -27,13 +28,17 @@ tempest-tui.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+# The terminal's width, through crossterm, so the status line never wraps.
+ratatui.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+unicode-width.workspace = true
 
 [build-dependencies]
 tempest-assets.workspace = true
 
 [dev-dependencies]
+tempest-api = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

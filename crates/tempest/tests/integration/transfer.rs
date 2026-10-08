@@ -257,10 +257,7 @@ fn get_needs_a_peer_with_an_address_a_tracker_or_lan_discovery() {
             format!("tempest:?bundle={bundle}&peer={peer}"),
             "names neither",
         ),
-        (
-            "https://example.com".to_owned(),
-            "not a valid tempest: link",
-        ),
+        ("https://example.com".to_owned(), "is not a link"),
     ];
     for (link, message) in cases {
         let output = get(&link, dir.path(), &identity, &["--no-lan"]);

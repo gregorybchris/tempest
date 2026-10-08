@@ -8,7 +8,7 @@ use leptos::task::spawn_local;
 use tempest_tracker_api::TrackerInfo;
 use tempest_tracker_api::account::Account;
 use tempest_ui_kit::components::*;
-use tempest_ui_kit::theme::apply_look;
+use tempest_ui_kit::theme::{ThemeButton, apply_look};
 use tempest_ui_kit::{Look, Theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -266,15 +266,7 @@ fn Shell() -> impl IntoView {
                 </nav>
                 <div class="appbar__spacer"></div>
                 <AccountButton />
-                <button
-                    class="theme-button"
-                    type="button"
-                    title="Next theme (T)"
-                    aria-label=move || format!("Theme: {}. Switch to the next.", ctx.theme.get().name())
-                    on:click=move |_| ctx.theme.update(|t| *t = t.next())
-                >
-                    "◐"
-                </button>
+                <ThemeButton theme=ctx.theme />
             </header>
             <main class="main">{view}</main>
             <HintBar hints />

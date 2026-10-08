@@ -112,7 +112,7 @@ fn ExperimentRow(e: ExperimentInfo) -> impl IntoView {
     let href = Route::Experiment(e.id).hash();
     let id = e.id;
     view! {
-        <tr class="row--link" on:click=move |_| ctx.go(Route::Experiment(id))>
+        <tr class="row--link" on:click=move |e| if row_click(&e) { ctx.go(Route::Experiment(id)) }>
             <td class="num dim">{e.id}</td>
             <td class="table__clip">
                 <a class="row__name" href=href>{e.name}</a>

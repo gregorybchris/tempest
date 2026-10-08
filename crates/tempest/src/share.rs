@@ -12,9 +12,12 @@ use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis
 use tempest_net::{DEFAULT_PORT, Storage, StorageConfig, TrackerClient};
 use tempest_protocol::{BundleId, Link, Manifest};
 
+use tempest_api::units::{self, bytes};
+use tempest_api::words::{self, peers};
+
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
-use crate::progress::{StatusLine, bytes, peers};
+use crate::progress::StatusLine;
 use crate::publish::{ListingArgs, print_listing};
 
 #[derive(Debug, clap::Args)]
@@ -31,11 +34,11 @@ pub struct ShareArgs {
     #[arg(long, default_value = "")]
     comment: String,
     /// Serve it from here even if a daemon is running, as --port, --identity, --bind, --relay,
-    /// --no-lan and --lan-port also do.
+    /// --no-lan, --no-port-mapping and --lan-port also do.
     #[arg(long)]
     standalone: bool,
     /// The bundle's creation time, in milliseconds since the Unix epoch. Defaults to now.
-    #[arg(long, allow_hyphen_values = true)]
+    #[arg(long, allow_hyphen_values = true, value_name = "MILLIS")]
     created: Option<i64>,
     /// A tracker to announce the bundle to, and to name in the link, such as
     /// `https://tracker.example.org`. Repeat for more. A daemon also uses its config's
@@ -122,7 +125,7 @@ async fn through_daemon(client: &ApiClient, args: &ShareArgs) -> Result<()> {
     let added = client.add(&request).await?;
     println!("name      {}", added.name);
     if let Some(size) = added.size {
-        println!("size      {} bytes", size);
+        println!("size      {}", units::size(size));
     }
     println!("bundle    {}", added.id);
     println!("link      {}", added.link);
@@ -165,12 +168,9 @@ fn print_summary(manifest: &Manifest) {
         .filter(|entry| entry.as_file().is_some())
         .count();
     println!("name      {}", manifest.name());
-    println!(
-        "entries   {} ({files} files, {} bytes)",
-        manifest.entries().len(),
-        manifest.total_size()
-    );
-    println!("manifest  {} bytes", manifest.encoded_len());
+    println!("size      {}", units::size(manifest.total_size()));
+    println!("files     {}", words::count(files, "file"));
+    println!("manifest  {}", units::size(manifest.encoded_len() as u64));
     println!("bundle    {}", manifest.bundle_id());
 }
 

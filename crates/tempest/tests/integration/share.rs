@@ -70,7 +70,8 @@ fn dry_run_shares_a_single_file() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(output.status.success(), "{stdout}");
     assert!(stdout.contains("&name=Holiday%20Photos.zip\n"), "{stdout}");
-    assert!(stdout.contains("(1 files, 16 bytes)"), "{stdout}");
+    assert!(stdout.contains("size      16 bytes\n"), "{stdout}");
+    assert!(stdout.contains("files     1 file\n"), "{stdout}");
 }
 
 #[test]

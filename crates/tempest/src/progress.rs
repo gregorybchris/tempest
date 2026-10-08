@@ -1,22 +1,9 @@
-//! Progress output: byte counts and a status line that redraws in place on a terminal.
+//! Progress output: elapsed times and a status line that redraws in place on a terminal.
 
 use std::io::{IsTerminal, Write, stderr};
 use std::time::Duration;
 
-/// `bytes` in binary units with one decimal, such as `1.5 MiB`.
-pub fn bytes(bytes: u64) -> String {
-    const UNITS: [&str; 6] = ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
-    if bytes < 1024 {
-        return format!("{bytes} B");
-    }
-    let mut value = bytes as f64 / 1024.0;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    format!("{value:.1} {}", UNITS[unit])
-}
+use unicode_width::UnicodeWidthChar;
 
 /// `elapsed` as `1.5 s`, `2m 05s` or `1h 02m`.
 pub fn duration(elapsed: Duration) -> String {
@@ -28,16 +15,22 @@ pub fn duration(elapsed: Duration) -> String {
     }
 }
 
-/// The number of peers connected, and how many of them through a relay.
-pub fn peers(connections: usize, relayed: usize) -> String {
-    let noun = if connections == 1 { "peer" } else { "peers" };
-    match relayed {
-        0 => format!("{connections} {noun}"),
-        relayed => format!("{connections} {noun} ({relayed} through relays)"),
+/// Ctrl-C ended a command early; it says what became of the work. The command exits with 130,
+/// as a shell reports an interrupted program.
+#[derive(Debug)]
+pub struct Interrupted(pub &'static str);
+
+impl std::fmt::Display for Interrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "interrupted: {}", self.0)
     }
 }
 
-/// A line on stderr that each update replaces. It shows nothing unless stderr is a terminal.
+impl std::error::Error for Interrupted {}
+
+/// A line on stderr that each update replaces. It shows nothing unless stderr is a terminal
+/// that can move the cursor, and it is cut to the terminal's width: a line that wrapped would
+/// leave a copy of itself behind at every update.
 pub struct StatusLine {
     enabled: bool,
     shown: bool,
@@ -46,7 +39,8 @@ pub struct StatusLine {
 impl StatusLine {
     pub fn new() -> Self {
         Self {
-            enabled: stderr().is_terminal(),
+            enabled: stderr().is_terminal()
+                && std::env::var("TERM").ok().is_none_or(|t| t != "dumb"),
             shown: false,
         }
     }
@@ -55,6 +49,8 @@ impl StatusLine {
     pub fn show(&mut self, text: &str) {
         if self.enabled {
             // Return to the line's start, write, and clear whatever the last text left over.
+            let width = ratatui::crossterm::terminal::size().map_or(80, |(columns, _)| columns);
+            let text = fit(text, usize::from(width).saturating_sub(1));
             let _ = write!(stderr(), "\r{text}\x1b[K");
             let _ = stderr().flush();
             self.shown = true;
@@ -71,23 +67,38 @@ impl StatusLine {
     }
 }
 
+/// `text` cut to `width` columns, ending in `…` if it was cut.
+pub fn fit(text: &str, width: usize) -> String {
+    let columns = |text: &str| text.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>();
+    if columns(text) <= width {
+        return text.to_owned();
+    }
+    let mut fitted = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        let w = c.width().unwrap_or(0);
+        if used + w + 1 > width {
+            break;
+        }
+        fitted.push(c);
+        used += w;
+    }
+    if width > 0 {
+        fitted.push('…');
+    }
+    fitted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn bytes_use_binary_units() {
-        assert_eq!(bytes(0), "0 B");
-        assert_eq!(bytes(1023), "1023 B");
-        assert_eq!(bytes(1024), "1.0 KiB");
-        assert_eq!(bytes(1536 * 1024), "1.5 MiB");
-        assert_eq!(bytes(u64::MAX), "16.0 EiB");
-    }
-
-    #[test]
-    fn relayed_peers_are_counted_apart() {
-        assert_eq!(peers(1, 0), "1 peer");
-        assert_eq!(peers(3, 2), "3 peers (2 through relays)");
+    fn lines_fit_the_terminal() {
+        assert_eq!(fit("short", 10), "short");
+        assert_eq!(fit("much too long", 8), "much to…");
+        assert_eq!(fit("日本語のファイル", 7), "日本語…");
+        assert_eq!(fit("abc", 0), "");
     }
 
     #[test]

@@ -298,13 +298,15 @@ impl LineData {
             range: (layout.plot_left(), layout.plot_right()),
         };
 
+        // About one label per 90 pixels, so narrow charts don't crowd them.
+        let target = ((layout.plot_right() - layout.plot_left()) / 90.0).clamp(2.0, 8.0) as usize;
         let x_ticks = match self.x {
             XAxis::Ago => scale::ago_ticks(window, full.1),
-            XAxis::Value(unit) => {
-                labeled(&unit.ticks(window.0, window.1, 6), window, |v| unit.axis(v))
-            }
+            XAxis::Value(unit) => labeled(&unit.ticks(window.0, window.1, target), window, |v| {
+                unit.axis(v)
+            }),
             XAxis::Number => labeled(
-                &scale::nice_ticks(window.0, window.1, 6),
+                &scale::nice_ticks(window.0, window.1, target),
                 window,
                 format::compact,
             ),

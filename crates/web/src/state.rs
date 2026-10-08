@@ -111,6 +111,21 @@ pub enum Dialog {
     Network,
 }
 
+impl Dialog {
+    /// The transfer it acts on, if it acts on one.
+    pub fn transfer(&self) -> Option<BundleId> {
+        match self {
+            Self::Remove(id)
+            | Self::Rename(id)
+            | Self::Tags(id)
+            | Self::Category(id)
+            | Self::Move(id)
+            | Self::Limits(id) => Some(*id),
+            _ => None,
+        }
+    }
+}
+
 /// The page's state. It is `Copy`; every copy is the same state.
 #[derive(Clone, Copy)]
 pub struct Ui {

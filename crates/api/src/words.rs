@@ -8,6 +8,21 @@ pub fn count(count: usize, noun: &str) -> String {
     }
 }
 
+/// Connected peers, and how many of them through a relay: "3 peers, 1 through a relay".
+pub fn peers(connections: usize, relayed: usize) -> String {
+    count(connections, "peer") + &through_relays(relayed)
+}
+
+/// How many connections go through a relay, as a clause to follow a count of peers:
+/// ", 2 through relays", or nothing.
+pub fn through_relays(relayed: usize) -> String {
+    match relayed {
+        0 => String::new(),
+        1 => ", 1 through a relay".to_owned(),
+        n => format!(", {n} through relays"),
+    }
+}
+
 /// A duration as words, rounded: "less than a minute", "3 minutes", "about 2 hours".
 pub fn duration(seconds: u64) -> String {
     let plural = |n: u64, unit: &str| match n {
@@ -34,5 +49,8 @@ mod tests {
         assert_eq!(duration(3 * 86_400), "3 days");
         assert_eq!(count(1, "peer"), "1 peer");
         assert_eq!(count(0, "peer"), "0 peers");
+        assert_eq!(peers(1, 0), "1 peer");
+        assert_eq!(peers(3, 1), "3 peers, 1 through a relay");
+        assert_eq!(peers(3, 2), "3 peers, 2 through relays");
     }
 }

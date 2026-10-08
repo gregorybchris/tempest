@@ -21,7 +21,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use tempest_engine::Status;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, Area, Hint, Modal, Origin, Screen};
 use crate::format;
@@ -126,12 +126,18 @@ fn fit(text: &str, width: usize) -> String {
     if text.width() <= width {
         return text.to_owned();
     }
+    if width == 0 {
+        return String::new();
+    }
     let mut cut = String::new();
+    let mut used = 0;
     for c in text.chars() {
-        if cut.width() + c.to_string().width() + 1 > width {
+        let c_width = c.width().unwrap_or(0);
+        if used + c_width + 1 > width {
             break;
         }
         cut.push(c);
+        used += c_width;
     }
     cut.push('…');
     cut
@@ -146,37 +152,45 @@ fn pad(text: &str, width: usize) -> String {
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
+    // The rates always show, dimmed while they can't be kept up to date; the rest only while
+    // there is room, most important first.
+    let live = app.model.connection == Connection::Live;
+    let tone = |color| Style::new().fg(if live { color } else { theme.dim });
+    let (down, up) = app.model.total_rates();
+    let rates = vec![
+        Span::styled("↓", Style::new().fg(theme.dim)),
+        Span::styled(format!("{:<5}", format::rate(down)), tone(theme.down)),
+        Span::styled(" ↑", Style::new().fg(theme.dim)),
+        Span::styled(format!("{:<5}", format::rate(up)), tone(theme.up)),
+    ];
+    let rates_width = Line::from(rates.clone()).width();
+
+    // Where the names of the areas don't fit beside the rates, the others show as their keys.
+    let full = Area::ALL
+        .iter()
+        .map(|a| a.title().width() + 3)
+        .sum::<usize>()
+        + 1;
+    let compact = full + rates_width + 1 > usize::from(area.width);
     let mut nav = vec![Span::raw(" ")];
-    for each in Area::ALL {
-        let style = if each == app.area {
-            Style::new()
+    for (index, each) in Area::ALL.into_iter().enumerate() {
+        let (label, style) = if each == app.area {
+            let style = Style::new()
                 .fg(theme.bg)
                 .bg(theme.down)
-                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::BOLD);
+            (each.title().to_owned(), style)
+        } else if compact {
+            ((index + 1).to_string(), Style::new().fg(theme.dim))
         } else {
-            Style::new().fg(theme.dim)
+            (each.title().to_owned(), Style::new().fg(theme.dim))
         };
-        nav.push(Span::styled(format!(" {} ", each.title()), style));
+        nav.push(Span::styled(format!(" {label} "), style));
         nav.push(Span::raw(" "));
     }
     let nav = Line::from(nav);
     let nav_width = nav.width() as u16;
     frame.render_widget(Paragraph::new(nav), area);
-
-    // The rates always show; the rest only while there is room, most important first.
-    let (down, up) = app.model.total_rates();
-    let rates = vec![
-        Span::styled("↓", Style::new().fg(theme.dim)),
-        Span::styled(
-            format!("{:<5}", format::rate(down)),
-            Style::new().fg(theme.down),
-        ),
-        Span::styled(" ↑", Style::new().fg(theme.dim)),
-        Span::styled(
-            format!("{:<5}", format::rate(up)),
-            Style::new().fg(theme.up),
-        ),
-    ];
     let connection = match &app.model.connection {
         Connection::Live => None,
         Connection::Connecting => Some(Span::styled("connecting…  ", Style::new().fg(theme.dim))),

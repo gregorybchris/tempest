@@ -31,9 +31,8 @@ anyhow = "1"
 # Local time for the alternative speed limits' schedule.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive", "env"] }
-# Bundled so no system DuckDB is needed (D-075); json gives JSON columns and functions.
-# Links the system DuckDB library (see specs/development.md); `tempest-sim-cli/bundled-duckdb` compiles
-# the bundled source instead, for CI and releases.
+# Links the system DuckDB library (see specs/development.md); `tempest-sim/bundled-duckdb` compiles
+# the bundled source instead.
 duckdb = "1.10506"
 # Seeds the tracker's peer sampler. Through rand it would give tempest-core OS randomness too.
 getrandom = { version = "0.3", features = ["std"] }
@@ -73,7 +72,7 @@ socket2 = { version = "0.6", features = ["all"] }
 # gets rustls on ring with the platform's certificate verifier, like the rest of the TLS stack.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
-rustls-platform-verifier = "0.6"
+rustls-platform-verifier = "0.7"
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 
 hex = "0.4"

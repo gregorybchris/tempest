@@ -14,11 +14,10 @@ name = "tempest-sim"
 path = "src/main.rs"
 
 [features]
-# Compile DuckDB from its bundled source instead of linking the system library. For CI and
-# release builds, so the shipped binary needs no DuckDB installed.
+# Compile DuckDB from its bundled source instead of linking the system library, so the binary
+# needs no DuckDB installed.
 bundled-duckdb = ["tempest-sim/bundled-duckdb"]
 
-# Releases bundle DuckDB (D-214).
 # The simulator is a development tool, built from source rather than released (D-233).
 [package.metadata.dist]
 dist = false

@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use rand::seq::IteratorRandom;
-use tempest_protocol::{Message, PeerId};
 use tempest_protocol::message::{GoodbyeReason, MAX_PEER_RECORDS, PeerRecord, Peers};
+use tempest_protocol::{Message, PeerId};
 
 use super::Session;
 use crate::event::{EventKind, StopReason};
@@ -99,8 +99,8 @@ impl Session {
         for id in open {
             let recipient = self.conns[&id].peer();
             let connected = self.connected_records(recipient);
-            let mut peers = (connected.values().cloned())
-                .choose_multiple(&mut self.rng, MAX_PEER_RECORDS);
+            let mut peers =
+                (connected.values().cloned()).choose_multiple(&mut self.rng, MAX_PEER_RECORDS);
             let room = MAX_PEER_RECORDS - peers.len();
             let others = (self.known.iter())
                 .filter(|&(peer, _)| *peer != recipient && !connected.contains_key(peer))

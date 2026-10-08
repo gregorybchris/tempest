@@ -372,8 +372,9 @@ impl Swarm {
                 reason,
                 message,
             } => {
+                // The closing end stops hearing from the other at once. The other end keeps
+                // its link until the Goodbye arrives, so messages sent before it still land.
                 if let Some((j, c)) = self.links.remove(&(i, conn)) {
-                    self.links.remove(&(j, c));
                     let closed = Closed::Goodbye { reason, message };
                     let arrive = now + self.latency(i, j);
                     self.schedule(arrive, Delivery::Closed(j, c, closed));
@@ -428,7 +429,9 @@ impl Swarm {
                 node.session.handle_message(now, conn, inbound);
             }
             Delivery::Closed(i, conn, closed) => {
-                self.nodes[i].session.handle_closed(now, conn, closed)
+                if self.links.remove(&(i, conn)).is_some() {
+                    self.nodes[i].session.handle_closed(now, conn, closed);
+                }
             }
             Delivery::DialFailed(i, peer) => self.nodes[i].session.handle_dial_failed(now, peer),
         }

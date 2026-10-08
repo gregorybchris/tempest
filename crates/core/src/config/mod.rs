@@ -610,7 +610,10 @@ mod tests {
         config.set("lingering.idle_timeout", json!(null)).unwrap();
         assert_eq!(config.lingering, LingerSettings::KEEP_SHARING);
         config.set("lingering.idle_timeout", json!("2m")).unwrap();
-        assert_eq!(config.lingering.idle_timeout, Some(Duration::from_secs(120)));
+        assert_eq!(
+            config.lingering.idle_timeout,
+            Some(Duration::from_secs(120))
+        );
         assert_eq!(config.get("lingering.idle_timeout"), Some(json!("2m")));
         assert_eq!(
             config.set("lingering.idle_timeout", json!("0s")),

@@ -148,7 +148,13 @@ pub fn run_with_sink(
     options: RunOptions,
     sink: Option<&mut dyn Sink>,
 ) -> Result<RunResult, ScenarioError> {
-    Ok(Simulation::new(scenario, variant, seed, options, sink)?.run())
+    let slots = scenario.slots();
+    let resolved = scenario.resolve(variant);
+    let plain = Variant {
+        index: variant.index,
+        values: BTreeMap::new(),
+    };
+    Ok(Simulation::new(&resolved, &plain, &slots, seed, options, sink)?.run())
 }
 
 #[derive(Debug)]
@@ -316,6 +322,7 @@ impl<'a, 's> Simulation<'a, 's> {
     fn new(
         scenario: &'a Scenario,
         variant: &Variant,
+        slots: &[u32],
         seed: u64,
         options: RunOptions,
         sink: Option<&'s mut dyn Sink>,
@@ -382,12 +389,16 @@ impl<'a, 's> Simulation<'a, 's> {
         for (class, spec) in scenario.peers.iter().enumerate() {
             // The time since the start of the class's Poisson arrivals.
             let mut poisson = Duration::ZERO;
-            for k in 0..spec.count {
-                // Every peer draws the same numbers whatever its class uses, so that changing
-                // one class leaves the others' randomness alone.
+            for k in 0..slots[class].max(spec.count) {
+                // Every peer draws the same numbers whatever its class uses, and so does every
+                // slot that another variant fills, so that changing one class leaves the others'
+                // randomness alone.
                 let (u_arrival, u_session, session_seed): (f64, f64, u64) =
                     (world.random(), world.random(), world.random());
                 let u_router: f64 = routers.random();
+                if k >= spec.count {
+                    continue;
+                }
                 let arrive = Time::ZERO
                     + match spec.arrivals {
                         Arrivals::AtOnce { at } => at,

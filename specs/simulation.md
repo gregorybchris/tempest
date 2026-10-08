@@ -71,6 +71,8 @@ experiment:
 
 This produces 2 × 3 = 6 variants × 20 seeds = 120 runs, which `tempest sim run <scenario.yaml>` runs and summarizes (D-160). Every run records its seed, the resolved scenario, a hash of the scenario file, and the git commit.
 
+A varied key is either a setting for every peer, as above, or a field of one class, written `peers.<class>.<field>`: its `count`, `bandwidth.up`, or a setting for that class alone under `settings`, such as `peers.origin.settings.strategies.superseed` (D-230). Variants stay paired on each seed: every class draws its randomness for as many peers as it has in any variant, so changing one class's count leaves the other classes' arrivals and sessions as they were.
+
 ## Results (D-073, D-074, D-075)
 
 - **Storage:** one local **DuckDB** database holds experiments, runs, summary metrics and full event logs (every message, decision event and state change). `tempest sim run` adds each experiment to it. The simulator's `results` module defines the schema (D-161):

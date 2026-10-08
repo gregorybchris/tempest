@@ -5,6 +5,7 @@
 //! and how many seeds to run each variant with. [`Scenario::from_yaml`] reads and checks one.
 //! The field names are documented on the types below; `crates/sim/scenarios/` has examples.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -327,10 +328,15 @@ fn unit_shape() -> f64 {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Experiment {
-    /// Settings to vary, by dotted key, each with the values to try. Every combination is a
-    /// variant.
+    /// What to vary, by dotted key, each with the values to try. Every combination is a
+    /// variant. A key is a setting for every peer, such as `strategies.upload`, or a field of
+    /// one peer class, `peers.<class>.<field>`: `peers.origin.count`, `peers.home.bandwidth.up`,
+    /// or a setting for that class alone, such as `peers.origin.settings.strategies.superseed`.
     pub vary: BTreeMap<String, Vec<Value>>,
 }
+
+/// The prefix of a varied key that addresses a peer class.
+const CLASS_KEY: &str = "peers.";
 
 /// One combination of the experiment's values.
 #[derive(Debug, Clone, PartialEq)]
@@ -446,7 +452,7 @@ impl Scenario {
             return Err(invalid("peers", "needs at least one class"));
         }
         let bundle = self.bundle.build().map_err(|m| invalid("bundle", m))?;
-        let peers = self.peer_count();
+        let peers = self.most_peers();
         if peers > MAX_PEERS {
             return Err(invalid(
                 "peers",
@@ -467,6 +473,12 @@ impl Scenario {
         }
         let mut variants: u64 = 1;
         for (key, values) in &self.experiment.vary {
+            if key.starts_with(CLASS_KEY) && self.class_key(key).is_none() {
+                return Err(invalid(
+                    format!("experiment.vary.{key}"),
+                    "names no peer class: use peers.<class>.<field>",
+                ));
+            }
             if values.is_empty() {
                 return Err(invalid(
                     format!("experiment.vary.{key}"),
@@ -519,10 +531,34 @@ impl Scenario {
             .resolve()
             .map_err(|e| config_error("settings", e))?;
         for (key, values) in &self.experiment.vary {
+            let field = format!("experiment.vary.{key}");
             for value in values {
-                base.clone()
-                    .set(key, value.clone())
-                    .map_err(|e| config_error(&format!("experiment.vary.{key}"), e))?;
+                let Some((class, path)) = self.class_key(key) else {
+                    base.clone()
+                        .set(key, value.clone())
+                        .map_err(|e| config_error(&field, e))?;
+                    continue;
+                };
+                if let Some(setting) = path.strip_prefix("settings.") {
+                    base.clone()
+                        .set(setting, value.clone())
+                        .map_err(|e| config_error(&field, e))?;
+                }
+                // The class must still make sense with the new value.
+                let mut changed = self.clone();
+                changed.experiment = Experiment::default();
+                changed.peers[class] = set_class_field(&self.peers[class], path, value)
+                    .map_err(|m| invalid(&field, m))?;
+                changed
+                    .validate()
+                    .map_err(|e| invalid(&field, e.to_string()))?;
+            }
+        }
+        // Values for the same class must also fit together, such as a whole `arrivals` and one
+        // of its fields.
+        if self.varies_classes() {
+            for variant in self.variants() {
+                self.try_resolve(&variant)?;
             }
         }
         for i in 0..self.peers.len() {
@@ -532,6 +568,61 @@ impl Scenario {
             }
         }
         Ok(())
+    }
+
+    /// Whether the experiment varies any class's fields.
+    fn varies_classes(&self) -> bool {
+        self.experiment
+            .vary
+            .keys()
+            .any(|key| key.starts_with(CLASS_KEY))
+    }
+
+    /// The class a varied key addresses, and the field of it, for keys of the form
+    /// `peers.<class>.<field>`. The longest matching class name wins.
+    pub fn class_key<'k>(&self, key: &'k str) -> Option<(usize, &'k str)> {
+        let rest = key.strip_prefix(CLASS_KEY)?;
+        self.peers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                let field = rest.strip_prefix(c.class.as_str())?.strip_prefix('.')?;
+                (!field.is_empty()).then_some((i, c.class.len(), field))
+            })
+            .max_by_key(|&(_, len, _)| len)
+            .map(|(i, _, field)| (i, field))
+    }
+
+    /// The most peers any variant has.
+    pub fn most_peers(&self) -> u64 {
+        self.slots().iter().map(|&n| u64::from(n)).sum()
+    }
+
+    /// How many peers each class has room for: the most it has in any variant. A run draws
+    /// every slot's randomness whether or not the slot holds a peer, so that varying one
+    /// class's count leaves the other classes' peers as they were (D-073).
+    pub fn slots(&self) -> Vec<u32> {
+        let mut slots: Vec<u32> = self.peers.iter().map(|c| c.count).collect();
+        for (key, values) in &self.experiment.vary {
+            if let Some((class, "count")) = self.class_key(key) {
+                for value in values {
+                    let count = value.as_u64().and_then(|n| u32::try_from(n).ok());
+                    slots[class] = slots[class].max(count.unwrap_or(0));
+                }
+            }
+        }
+        slots
+    }
+
+    /// The peer classes as variant `variant` (an index into [`Scenario::variants`]) has them.
+    pub fn classes(&self, variant: usize) -> Cow<'_, [PeerClass]> {
+        if !self.varies_classes() {
+            return Cow::Borrowed(&self.peers);
+        }
+        match self.variants().get(variant) {
+            Some(variant) => Cow::Owned(self.resolve(variant).peers),
+            None => Cow::Borrowed(&self.peers),
+        }
     }
 
     /// The total number of peers.
@@ -561,23 +652,91 @@ impl Scenario {
             .collect()
     }
 
-    /// The scenario as `variant` runs it: its values become overrides, and nothing varies.
+    /// The scenario as `variant` runs it, with nothing left to vary: its settings become the
+    /// scenario's overrides and its class fields are set on their classes, a class's settings
+    /// among its overrides.
+    ///
+    /// The variant must be one of this scenario's, which [`Scenario::validate`] has checked.
     pub fn resolve(&self, variant: &Variant) -> Self {
+        self.try_resolve(variant)
+            .expect("a validated scenario's class fields")
+    }
+
+    /// [`Scenario::resolve`], or why a class field's value doesn't fit with the variant's
+    /// others.
+    fn try_resolve(&self, variant: &Variant) -> Result<Self, ScenarioError> {
         let mut resolved = self.clone();
-        resolved.settings.overrides.extend(variant.values.clone());
         resolved.experiment = Experiment::default();
-        resolved
+        for (key, value) in &variant.values {
+            match self.class_key(key) {
+                Some((class, path)) => {
+                    resolved.peers[class] = set_class_field(&resolved.peers[class], path, value)
+                        .map_err(|m| invalid(format!("experiment.vary.{key}"), m))?;
+                }
+                None => {
+                    resolved
+                        .settings
+                        .overrides
+                        .insert(key.clone(), value.clone());
+                }
+            }
+        }
+        Ok(resolved)
     }
 
     /// The config of class `class`'s peers in `variant`: the profile, then the scenario's
-    /// overrides, then the variant's values, then the class's overrides.
+    /// overrides, then the variant's settings for every class, then the class's overrides with
+    /// the variant's settings for this class among them.
     pub fn config(&self, class: usize, variant: &Variant) -> Result<Config, ConfigError> {
         let mut config = self.settings.resolve()?;
-        for (key, value) in variant.values.iter().chain(&self.peers[class].overrides) {
-            config.set(key, value.clone())?;
+        let mut overrides = self.peers[class].overrides.clone();
+        for (key, value) in &variant.values {
+            match self.class_key(key) {
+                Some((c, path)) => {
+                    if let Some(setting) = path.strip_prefix("settings.")
+                        && c == class
+                    {
+                        overrides.insert(setting.to_owned(), value.clone());
+                    }
+                }
+                None => config.set(key, value.clone())?,
+            }
+        }
+        for (key, value) in overrides {
+            config.set(&key, value)?;
         }
         Ok(config)
     }
+}
+
+/// `class` with the field at dotted `path` set to `value`. `settings.<key>` sets the class's
+/// override of setting `<key>`.
+fn set_class_field(class: &PeerClass, path: &str, value: &Value) -> Result<PeerClass, String> {
+    let mut class = class.clone();
+    if let Some(setting) = path.strip_prefix("settings.") {
+        class.overrides.insert(setting.to_owned(), value.clone());
+        return Ok(class);
+    }
+    let first = path.split('.').next().unwrap_or_default();
+    if matches!(first, "class" | "overrides" | "settings") {
+        return Err(format!(
+            "`{first}` can't be varied; vary a class's settings as `settings.<key>`"
+        ));
+    }
+    let mut json = serde_json::to_value(&class).map_err(|e| e.to_string())?;
+    let mut node = &mut json;
+    for part in path.split('.') {
+        // An absent optional field, such as `nat`, takes its defaults.
+        if node.is_null() {
+            *node = Value::Object(serde_json::Map::new());
+        }
+        let Value::Object(map) = node else {
+            return Err(format!("`{path}` is not a field of a peer class"));
+        };
+        node = map.entry(part).or_insert(Value::Null);
+    }
+    *node = value.clone();
+    serde_json::from_value(json).map_err(|e| e.to_string())
 }
 
 fn config_error(field: &str, error: ConfigError) -> ScenarioError {
@@ -769,5 +928,82 @@ relay: {{ latency: 35ms, bandwidth: 20Mbps }}
         ))
         .unwrap();
         assert_eq!(scenario.variants()[0].values["strategies.endgame"], "off");
+    }
+
+    #[test]
+    fn experiments_vary_class_fields() {
+        let scenario = Scenario::from_yaml(&format!(
+            "{MINIMAL}    overrides: {{ strategies.upload: propshare }}
+experiment:
+  vary:
+    peers.origin.settings.strategies.superseed: [false, true]
+    peers.leecher.count: [1, 5]
+    peers.leecher.bandwidth.up: [10Mbps]
+    peers.leecher.settings.strategies.upload: [cooperative]
+    peers.leecher.nat.punchable: [50%]
+    strategies.endgame: [classic]
+"
+        ))
+        .unwrap();
+        assert_eq!(scenario.slots(), vec![1, 5]);
+        assert_eq!(scenario.most_peers(), 6);
+        let variants = scenario.variants();
+        assert_eq!(variants.len(), 4);
+        let last = &variants[3];
+        let origin = scenario.config(0, last).unwrap();
+        assert!(origin.strategies.superseed);
+        assert_eq!(
+            origin.get("strategies.endgame"),
+            Some(Value::String("classic".into()))
+        );
+        // The variant's setting for the class wins over the class's own.
+        let leecher = scenario.config(1, last).unwrap();
+        assert!(!leecher.strategies.superseed);
+        assert_eq!(
+            leecher.get("strategies.upload"),
+            Some(Value::String("cooperative".into()))
+        );
+
+        let resolved = scenario.resolve(last);
+        assert_eq!(resolved.peers[1].count, 5);
+        assert_eq!(resolved.peers[1].bandwidth.up.get(), 10e6 / 8.0);
+        assert_eq!(resolved.peers[1].nat.unwrap().punchable.get(), 0.5);
+        assert!(resolved.experiment.vary.is_empty());
+        let plain = &resolved.variants()[0];
+        for class in 0..2 {
+            assert_eq!(
+                scenario.config(class, last).unwrap(),
+                resolved.config(class, plain).unwrap()
+            );
+        }
+        assert_eq!(scenario.classes(0)[1].count, 1);
+        assert_eq!(scenario.classes(3)[1].count, 5);
+    }
+
+    #[test]
+    fn bad_class_fields_say_what_is_wrong() {
+        let vary = |entry: &str| error(&format!("{MINIMAL}experiment: {{ vary: {{ {entry} }} }}"));
+        let e = vary("peers.nobody.count: [2]");
+        assert!(e.starts_with("experiment.vary.peers.nobody.count:"), "{e}");
+        let e = vary("peers.leecher.colour: [red]");
+        assert!(e.contains("unknown field `colour`"), "{e}");
+        let e = vary("peers.leecher.class: [other]");
+        assert!(e.contains("can't be varied"), "{e}");
+        let e = vary("peers.leecher.settings.requests.nope: [1]");
+        assert!(e.contains("no setting \"requests.nope\""), "{e}");
+        let e = vary("peers.leecher.loss: [100%]");
+        assert!(e.contains("must be below 100%"), "{e}");
+        let e = vary("peers.leecher.count: [2000000]");
+        assert!(e.contains("more than the limit"), "{e}");
+        // Each value fits on its own, but not together.
+        let e = vary(
+            "peers.leecher.arrivals: [{ pattern: steady, interval: 1s }], \
+             peers.leecher.arrivals.at: [1s]",
+        );
+        assert!(
+            e.starts_with("experiment.vary.peers.leecher.arrivals.at:"),
+            "{e}"
+        );
+        assert!(e.contains("unknown field `at`"), "{e}");
     }
 }

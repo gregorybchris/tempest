@@ -47,8 +47,9 @@ impl RunResult {
     /// `None` if no such peer was present.
     pub fn upload_utilization(&self, scenario: &Scenario) -> Option<f64> {
         let (mut uploaded, mut capacity) = (0.0, 0.0);
+        let classes = scenario.classes(self.variant);
         for peer in &self.peers {
-            let rate = scenario.peers[peer.class].bandwidth.up.get();
+            let rate = classes[peer.class].bandwidth.up.get();
             let Some(arrived) = peer.arrived else {
                 continue;
             };

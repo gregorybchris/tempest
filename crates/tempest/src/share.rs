@@ -12,8 +12,8 @@ use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis
 use tempest_net::{DEFAULT_PORT, Storage, StorageConfig, TrackerClient};
 use tempest_protocol::{BundleId, Link, Manifest};
 
-use tempest_api::units::bytes;
-use tempest_api::words::peers;
+use tempest_api::units::{self, bytes};
+use tempest_api::words::{self, peers};
 
 use crate::engine::{EngineArgs, Target};
 use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
@@ -125,7 +125,7 @@ async fn through_daemon(client: &ApiClient, args: &ShareArgs) -> Result<()> {
     let added = client.add(&request).await?;
     println!("name      {}", added.name);
     if let Some(size) = added.size {
-        println!("size      {} bytes", size);
+        println!("size      {}", units::size(size));
     }
     println!("bundle    {}", added.id);
     println!("link      {}", added.link);
@@ -168,12 +168,9 @@ fn print_summary(manifest: &Manifest) {
         .filter(|entry| entry.as_file().is_some())
         .count();
     println!("name      {}", manifest.name());
-    println!(
-        "entries   {} ({files} files, {} bytes)",
-        manifest.entries().len(),
-        manifest.total_size()
-    );
-    println!("manifest  {} bytes", manifest.encoded_len());
+    println!("size      {}", units::size(manifest.total_size()));
+    println!("files     {}", words::count(files, "file"));
+    println!("manifest  {}", units::size(manifest.encoded_len() as u64));
     println!("bundle    {}", manifest.bundle_id());
 }
 

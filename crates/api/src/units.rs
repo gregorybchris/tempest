@@ -77,6 +77,27 @@ pub fn date(millis: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+/// A whole number with commas between thousands: `256,348`.
+pub fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut text = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
+}
+
+/// A size in full, for a summary: `812M (812,345,678 bytes)`, or `16 bytes` below a thousand.
+pub fn size(n: u64) -> String {
+    match n {
+        0..1000 => format!("{n} bytes"),
+        n => format!("{} ({} bytes)", bytes(n), thousands(n)),
+    }
+}
+
 /// A speed limit as settings show it: `2.0M/s`, or `none`.
 pub fn limit(bytes_per_second: Option<u64>) -> String {
     bytes_per_second.map_or_else(|| "none".to_owned(), |rate| format!("{}/s", bytes(rate)))
@@ -178,6 +199,21 @@ mod tests {
         assert_eq!(date(1_791_331_200_000), "2026-10-07");
         assert_eq!(date(951_782_400_000), "2000-02-29");
         assert_eq!(date(-1), "1969-12-31");
+    }
+
+    #[test]
+    fn thousands_are_separated() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1000), "1,000");
+        assert_eq!(thousands(256_348), "256,348");
+        assert_eq!(thousands(12_345_678), "12,345,678");
+    }
+
+    #[test]
+    fn sizes_are_given_in_full() {
+        assert_eq!(size(16), "16 bytes");
+        assert_eq!(size(812_345_678), "812M (812,345,678 bytes)");
     }
 
     #[test]

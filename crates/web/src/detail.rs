@@ -18,9 +18,10 @@ use tempest_ui_kit::components::*;
 use tempest_ui_kit::{ChunkMap, format};
 
 use crate::api;
-use crate::controls::{Controls, runs};
+use crate::controls::{Controls, folder_of, runs};
 use crate::present;
 use crate::request::RequestError;
+use crate::signin::Auth;
 use crate::state::{Area, Deeper, Dialog, Tab, Ui};
 use crate::store::Store;
 
@@ -204,8 +205,11 @@ fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
                 })}
             </dd>
             <dt>"folder"</dt>
-            <dd class="facts__path">
-                {move || transfer.with(|t| t.as_ref().map(|t| t.content_dir.as_ref().unwrap_or(&t.save_folder).display().to_string()))}
+            <dd class="facts__folder">
+                <span class="facts__path">
+                    {move || transfer.with(|t| t.as_ref().map(|t| folder_of(t).display().to_string()))}
+                </span>
+                <FolderActions transfer />
             </dd>
             <dt>"link"</dt>
             <dd class="facts__link" title=move || transfer.with(|t| t.as_ref().map(|t| t.link.clone()))>
@@ -220,6 +224,57 @@ fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
                 "Rates chart " <kbd>"g"</kbd>
             </Button>
         </div>
+    }
+}
+
+/// Opens the transfer's folder in the engine's file manager, which only a browser on the
+/// engine's own machine can ask for, and copies its path, which any browser can.
+#[component]
+fn FolderActions(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
+    let controls = expect_context::<Controls>();
+    let auth = expect_context::<RwSignal<Auth>>();
+    let remote = move || matches!(auth.get(), Auth::SignedIn { remote: true });
+    let saved = move || transfer.with(|t| t.as_ref().is_some_and(|t| t.content_dir.is_some()));
+    let label = file_manager();
+    let reason = move || {
+        if remote() {
+            "Folders open only on the engine's own machine, and this browser is connected remotely. Copy the path instead."
+                .to_owned()
+        } else if !saved() {
+            "Nothing has been saved yet.".to_owned()
+        } else {
+            format!("{label}, on the engine's machine (o)")
+        }
+    };
+    let with = move |act: fn(Controls, &TransferInfo)| {
+        move || {
+            if let Some(t) = transfer.get_untracked() {
+                act(controls, &t);
+            }
+        }
+    };
+    view! {
+        <span class="facts__actions">
+            <Button small=true title=Signal::derive(move || Some(reason())) disabled=Signal::derive(move || remote() || !saved()) on_click=with(Controls::reveal)>
+                {label}
+            </Button>
+            <Button small=true kind=ButtonKind::Ghost title="Copy the folder's path" on_click=with(Controls::copy_path)>
+                "Copy path"
+            </Button>
+        </span>
+    }
+}
+
+/// What opening a folder is called on this machine's file manager: the browser is on the
+/// engine's machine whenever the button works.
+fn file_manager() -> &'static str {
+    let platform = window().navigator().platform().unwrap_or_default();
+    if platform.starts_with("Mac") {
+        "Show in Finder"
+    } else if platform.starts_with("Win") {
+        "Show in Explorer"
+    } else {
+        "Open folder"
     }
 }
 

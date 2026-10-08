@@ -14,6 +14,8 @@ pub mod server;
 pub mod sse;
 
 use std::collections::BTreeMap;
+use std::path::Path as FsPath;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -69,8 +71,23 @@ struct UnpublishQuery {
     tracker: String,
 }
 
+/// Shows a path in the file manager of the engine's machine, as `POST .../reveal` does.
+pub type Revealer = Arc<dyn Fn(&FsPath) -> std::result::Result<(), String> + Send + Sync>;
+
 /// The API's routes over `engine`, refusing what `access` doesn't allow.
 pub fn router(engine: Engine, access: Access) -> Router {
+    router_with(engine, access, Arc::new(crate::reveal::reveal))
+}
+
+/// [`router`], with `revealer` showing paths instead of the system's file manager.
+pub fn router_with(engine: Engine, access: Access, revealer: Revealer) -> Router {
+    let local = matches!(access, Access::Local);
+    let reveal_route = post(
+        move |State(engine): State<Engine>, Path(id): Path<String>| {
+            let revealer = revealer.clone();
+            async move { reveal(engine, id, local, revealer).await }
+        },
+    );
     let transfer = |path: &str| format!("{PREFIX}/transfers/{{id}}{path}");
     Router::new()
         .route(&format!("{PREFIX}/engine"), get(engine_info))
@@ -86,6 +103,7 @@ pub fn router(engine: Engine, access: Access) -> Router {
         .route(&transfer("/force-start"), post(force_start))
         .route(&transfer("/stop"), post(stop))
         .route(&transfer("/recheck"), post(recheck))
+        .route(&transfer("/reveal"), reveal_route)
         .route(&transfer("/move"), post(move_storage))
         .route(&transfer("/name"), put(rename))
         .route(&transfer("/tags"), put(set_tags))
@@ -329,6 +347,44 @@ async fn stop(State(engine): State<Engine>, Path(id): Path<String>) -> Result {
 
 async fn recheck(State(engine): State<Engine>, Path(id): Path<String>) -> Result {
     ok(&engine.recheck(bundle_id(&id)?).await?)
+}
+
+/// Shows a transfer's files in the file manager of the engine's machine: the file, for a
+/// bundle of one, and otherwise its folder. Only a local engine does, since a remote client's
+/// screen is not the engine's.
+async fn reveal(engine: Engine, id: String, local: bool, revealer: Revealer) -> Result {
+    let id = bundle_id(&id)?;
+    if !local {
+        return Err(ApiError::new(
+            403,
+            "local_only",
+            "revealing files works only on the engine's own machine, not through remote access",
+        ));
+    }
+    let info = engine
+        .get(id)
+        .await
+        .ok_or(crate::EngineError::NotFound(id))?;
+    let no_files = |message: &str| ApiError::new(409, "no_files", message);
+    let Some(folder) = info.content_dir else {
+        return Err(no_files("nothing has been saved yet"));
+    };
+    if !folder.is_dir() {
+        return Err(no_files(&format!("{} does not exist", folder.display())));
+    }
+    let mut target = folder;
+    if let [file] = engine.files(id).await?.as_slice() {
+        let path = target.join(&file.path);
+        if path.is_file() {
+            target = path;
+        }
+    }
+    let shown = target.clone();
+    tokio::task::spawn_blocking(move || revealer(&shown))
+        .await
+        .map_err(|error| ApiError::new(500, "internal", error.to_string()))?
+        .map_err(|message| ApiError::new(500, "reveal_failed", message))?;
+    ok(&RevealInfo { path: target })
 }
 
 async fn move_storage(

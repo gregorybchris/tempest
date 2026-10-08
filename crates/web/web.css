@@ -772,3 +772,21 @@
   display: grid;
   gap: 0.6rem;
 }
+
+.facts__folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2) var(--gap-3);
+}
+
+.facts__folder .facts__path {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.facts__actions {
+  display: inline-flex;
+  gap: var(--gap-2);
+  flex: none;
+}

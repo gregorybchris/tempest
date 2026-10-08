@@ -22,7 +22,7 @@ pub use tempest_api::ApiEvent;
 use super::sse::{SseDecoder, SseEvent};
 use super::{
     AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
-    PublishRequest, QueuePlace, QueueRequest, TagsRequest, TrackerSignInRequest,
+    PublishRequest, QueuePlace, QueueRequest, RevealInfo, TagsRequest, TrackerSignInRequest,
 };
 use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use crate::{SettingsView, TransferInfo};
@@ -211,6 +211,11 @@ impl ApiClient {
     /// Adds a download or a share.
     pub async fn add(&self, request: &AddRequest) -> Result<TransferInfo, ClientError> {
         self.send(Method::POST, "/transfers", Some(request)).await
+    }
+
+    /// Shows a transfer's files in the file manager of the engine's machine.
+    pub async fn reveal(&self, id: BundleId) -> Result<RevealInfo, ClientError> {
+        self.post(&format!("/transfers/{id}/reveal")).await
     }
 
     /// Starts a transfer through the queue.

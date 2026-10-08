@@ -2,6 +2,7 @@
 //! no state of their own; the change shows when its event arrives (D-189).
 
 use std::future::Future;
+use std::path::Path;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -81,6 +82,20 @@ impl Controls {
         self.run(api::queue(transfer.id, QueuePlace::Step(step)), done);
     }
 
+    /// Shows a transfer's files in the file manager of the engine's machine.
+    pub fn reveal(self, transfer: &TransferInfo) {
+        let name = transfer.name.clone();
+        self.run(
+            api::reveal(transfer.id),
+            format!("Showed {name} in the file manager"),
+        );
+    }
+
+    /// Copies the path of the folder a transfer's files are in.
+    pub fn copy_path(self, transfer: &TransferInfo) {
+        self.copy_as(folder_of(transfer).display().to_string(), "path");
+    }
+
     /// Copies a transfer's link.
     pub fn copy_link(self, transfer: &TransferInfo) {
         self.copy(transfer.link.clone());
@@ -88,14 +103,27 @@ impl Controls {
 
     /// Copies `link`.
     pub fn copy(self, link: String) {
+        self.copy_as(link, "link");
+    }
+
+    /// Copies `text`, calling it `what` in the toast.
+    pub fn copy_as(self, text: String, what: &'static str) {
         spawn_local(async move {
-            let promise = window().navigator().clipboard().write_text(&link);
+            let promise = window().navigator().clipboard().write_text(&text);
             match JsFuture::from(promise).await.is_ok() {
-                true => self.say(Tone::Neutral, "Copied the link"),
-                false => self.say(Tone::Bad, "The browser wouldn't copy the link."),
+                true => self.say(Tone::Neutral, format!("Copied the {what}")),
+                false => self.say(Tone::Bad, format!("The browser wouldn't copy the {what}.")),
             }
         });
     }
+}
+
+/// The folder a transfer's files are in, or will be in.
+pub fn folder_of(transfer: &TransferInfo) -> &Path {
+    transfer
+        .content_dir
+        .as_deref()
+        .unwrap_or(&transfer.save_folder)
 }
 
 /// Whether a transfer runs or waits to, so that its control stops it.

@@ -18,7 +18,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 
 - Every route is under `/v1`. A later, incompatible version gets a new prefix.
 - Request bodies are JSON and must be sent as `application/json`; anything else gets 415. Browsers can't send such requests to another origin without asking first, and the API never says yes.
-- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `unsupported_media_type` (415), `internal` (500) and `unavailable` (503, the engine is shutting down).
+- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `no_files` (409, nothing on disk to show yet), `local_only` (403, the action works only on the engine's own machine), `reveal_failed` (500, the file manager didn't start), `unsupported_media_type` (415), `internal` (500) and `unavailable` (503, the engine is shutting down).
 - A transfer's ID is its bundle ID in hex.
 
 ## Routes
@@ -37,6 +37,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `POST /v1/transfers/{id}/force-start` | | The transfer, started regardless of the queue |
 | `POST /v1/transfers/{id}/stop` | | The transfer |
 | `POST /v1/transfers/{id}/recheck` | | The transfer, whose data is hashed again from scratch ("checking"); it then resumes, fetching what failed |
+| `POST /v1/transfers/{id}/reveal` | | `{"path": "..."}`, what the engine showed in its machine's file manager (D-237): the file, for a bundle of one, and otherwise the folder. Only with local access; remote access answers 403 `local_only`. 409 `no_files` before anything is saved or if the folder is gone |
 | `POST /v1/transfers/{id}/move` | `{"save_folder": "..."}`, absolute | The transfer, whose files move there ("moving"); a failed move leaves them in place and shows the error |
 | `PUT /v1/transfers/{id}/name` | `{"name": "..."}`, or `null` for the bundle's own | The transfer |
 | `PUT /v1/transfers/{id}/tags` | `{"tags": [...]}` | The transfer |

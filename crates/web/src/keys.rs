@@ -52,6 +52,8 @@ pub enum Command {
     Rename,
     /// Check the transfer's data again.
     Recheck,
+    /// Show the transfer's files in the engine's file manager.
+    OpenFolder,
     /// Copy the transfer's link.
     CopyLink,
     /// Add a transfer from a link.
@@ -225,6 +227,13 @@ pub const BINDINGS: &[Binding] = &[
         command: Command::Recheck,
         hint: "",
         help: "Check the transfer's data on disk again",
+    },
+    Binding {
+        keys: &["o"],
+        scopes: TRANSFER,
+        command: Command::OpenFolder,
+        hint: "",
+        help: "Open its folder, on the engine's machine",
     },
     Binding {
         keys: &["y"],
@@ -517,6 +526,8 @@ mod tests {
         assert_eq!(command("Enter", Share), Some(Command::ShowShare));
         assert_eq!(command(" ", Rows), Some(Command::Change));
         assert_eq!(command("y", Share), Some(Command::CopyLink));
+        assert_eq!(command("o", Detail), Some(Command::OpenFolder));
+        assert_eq!(command("o", Share), None);
         assert_eq!(command("K", Detail), Some(Command::QueueUp));
         assert_eq!(command("|", List), Some(Command::Columns));
         // Transfer keys need a transfer.

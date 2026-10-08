@@ -9,6 +9,7 @@
 //! - [`inspect`]: what the UIs show inside a transfer: files, peers and a chunk map.
 //! - [`manifest`]: building a bundle from a file or folder.
 //! - [`api`]: the HTTP API over an [`Engine`] (D-080), and a client for it.
+//! - [`reveal`]: showing a path in the system's file manager.
 //! - [`schedule`]: the weekly schedule for alternative speed limits.
 
 pub mod api;
@@ -18,6 +19,7 @@ pub mod events;
 pub mod inspect;
 pub mod manifest;
 mod queue;
+pub mod reveal;
 pub mod schedule;
 mod status;
 pub mod store;

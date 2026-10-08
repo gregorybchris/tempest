@@ -10,7 +10,7 @@ use axum::body::{Body, BodyDataStream};
 use axum::http::{Method, Request, StatusCode, header};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tempest_engine::api::{Access, router};
+use tempest_engine::api::{Access, router, router_with};
 use tempest_engine::config::{LanSettings, PeerSettings};
 use tempest_engine::{Engine, EngineConfig};
 use tempest_protocol::{Hash, Link};
@@ -981,6 +981,82 @@ async fn a_share_takes_its_own_trackers_and_creation_time() {
     let body = json!({ "link": nobodys_link(8), "created": 5 });
     let response = send(&app, Method::POST, "/v1/transfers", Some(body)).await;
     assert_error(response, StatusCode::BAD_REQUEST, "invalid_request");
+
+    engine.shutdown().await;
+}
+
+/// `reveal` shows a bundle of one file by selecting the file and any other bundle by opening its
+/// folder, only on the engine's own machine and only once there are files.
+#[tokio::test]
+async fn reveal_shows_files_on_the_engines_machine_only() {
+    use std::sync::{Arc, Mutex};
+
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    let shown = Arc::new(Mutex::new(Vec::new()));
+    let revealer = {
+        let shown = shown.clone();
+        Arc::new(move |path: &Path| {
+            shown.lock().unwrap().push(path.to_owned());
+            Ok(())
+        })
+    };
+    let app = router_with(engine.clone(), Access::Local, revealer.clone());
+    let reveal = |id: &Value| format!("/v1/transfers/{}/reveal", id.as_str().unwrap());
+
+    let folder = root.path().join("notes");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("a.txt"), b"hello").unwrap();
+    std::fs::write(folder.join("b.txt"), b"world").unwrap();
+    let file = root.path().join("single.txt");
+    std::fs::write(&file, b"alone").unwrap();
+    let share = |path: &Path| json!({ "path": path, "created": 1_700_000_000_000_i64 });
+    let (_, many) = send(&app, Method::POST, "/v1/transfers", Some(share(&folder))).await;
+    let (_, one) = send(&app, Method::POST, "/v1/transfers", Some(share(&file))).await;
+
+    // A folder is opened, and a single file is selected.
+    let (status, body) = send(&app, Method::POST, &reveal(&many["id"]), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let content = Path::new(many["content_dir"].as_str().unwrap());
+    assert_eq!(body["path"], json!(content));
+    let (status, body) = send(&app, Method::POST, &reveal(&one["id"]), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["path"], json!(file.canonicalize().unwrap()));
+    let expected = [content.to_owned(), file.canonicalize().unwrap()];
+    assert_eq!(*shown.lock().unwrap(), expected);
+
+    // Nothing to show before anything is saved.
+    let link = json!({ "link": nobodys_link(9), "stopped": true });
+    let (_, empty) = send(&app, Method::POST, "/v1/transfers", Some(link)).await;
+    let response = send(&app, Method::POST, &reveal(&empty["id"]), None).await;
+    assert_error(response, StatusCode::CONFLICT, "no_files");
+
+    // Nor once the folder is gone.
+    std::fs::remove_dir_all(&folder).unwrap();
+    let response = send(&app, Method::POST, &reveal(&many["id"]), None).await;
+    assert_error(response, StatusCode::CONFLICT, "no_files");
+
+    // Unknown transfers and a failing file manager.
+    let missing = json!(Hash::new([1; 32]).to_string());
+    let response = send(&app, Method::POST, &reveal(&missing), None).await;
+    assert_error(response, StatusCode::NOT_FOUND, "not_found");
+    let failing: tempest_engine::api::Revealer = Arc::new(|_| Err("no file manager".to_owned()));
+    let broken = router_with(engine.clone(), Access::Local, failing);
+    let response = send(&broken, Method::POST, &reveal(&one["id"]), None).await;
+    assert_error(response, StatusCode::INTERNAL_SERVER_ERROR, "reveal_failed");
+
+    // Remote access refuses, even with the token.
+    let remote = router_with(engine.clone(), Access::Token("tok".into()), revealer);
+    let mut request = request(Method::POST, &reveal(&one["id"]), None);
+    request
+        .headers_mut()
+        .insert(header::AUTHORIZATION, "Bearer tok".parse().unwrap());
+    assert_error(
+        call(&remote, request).await,
+        StatusCode::FORBIDDEN,
+        "local_only",
+    );
+    assert_eq!(shown.lock().unwrap().len(), 2);
 
     engine.shutdown().await;
 }

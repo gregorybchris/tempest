@@ -931,7 +931,7 @@ impl App {
                     .clone()
                     .unwrap_or_else(|| transfer.save_folder.clone());
                 if self.local {
-                    return Some(Request::Open(folder));
+                    return Some(Request::Open(target.id, folder));
                 }
                 let text = format!(
                     "{} is in {} on the engine's machine.",

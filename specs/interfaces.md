@@ -35,7 +35,7 @@ These apply to both the TUI and the client web UI (D-118).
 
 | Area | Features |
 | --- | --- |
-| Transfer controls | Start/stop, force start (bypasses the queue), remove (keep or delete files), rename, open download folder, recheck data |
+| Transfer controls | Start/stop, force start (bypasses the queue), remove (keep or delete files), rename, open download folder (on the engine's machine, so not through remote access; D-237), recheck data |
 | Queue | Limits on active downloads and uploads; reorder queued transfers |
 | Limits | Global and per-transfer speed limits; alternative-limits mode (toggle or schedule); sharing limits (ratio, time or idle timeout) |
 | Organizing | Tags (many per transfer), categories (one per transfer, each with a default save folder), move storage |

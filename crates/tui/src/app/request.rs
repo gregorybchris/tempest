@@ -99,8 +99,9 @@ pub enum Request {
         /// What it is, for the notice: "field-recordings's link".
         what: String,
     },
-    /// Open a folder on this machine.
-    Open(PathBuf),
+    /// Show a transfer's files in this machine's file manager, through the engine. The path is
+    /// the folder it is in, for the notice.
+    Open(BundleId, PathBuf),
     /// Fetch something from inside a transfer.
     Look(BundleId, Look),
 }
@@ -155,7 +156,7 @@ impl Request {
             }
             (Self::RemoveCategory(name), _) => format!("Removed the category {name}."),
             (Self::Copy { what, .. }, _) => format!("Copied {what} to the clipboard."),
-            (Self::Open(path), _) => format!("Opened {}.", path.display()),
+            (Self::Open(_, path), _) => format!("Opened {}.", path.display()),
         })
     }
 
@@ -184,7 +185,7 @@ impl Request {
                 format!("Couldn't remove the category {name}: {error}")
             }
             Self::Copy { what, .. } => format!("Couldn't copy {what}: {error}"),
-            Self::Open(path) => format!("Couldn't open {}: {error}", path.display()),
+            Self::Open(_, path) => format!("Couldn't open {}: {error}", path.display()),
             Self::Look(_, look) => {
                 let what = match look {
                     Look::Files => "files",

@@ -177,7 +177,7 @@ pub fn Button(
     disabled: Signal<bool>,
     /// A tooltip, such as its keyboard shortcut.
     #[prop(optional, into)]
-    title: Option<String>,
+    title: MaybeProp<String>,
     /// Its label.
     children: Children,
 ) -> impl IntoView {
@@ -192,7 +192,7 @@ pub fn Button(
         class.push_str(" btn--small");
     }
     view! {
-        <button class=class type="button" title=title disabled=disabled on:click=move |_| on_click.run(())>
+        <button class=class type="button" title=move || title.get() disabled=disabled on:click=move |_| on_click.run(())>
             {children()}
         </button>
     }

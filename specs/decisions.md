@@ -3844,3 +3844,20 @@ This revises D-175, D-182 and D-189.
 **Releases:** both new packages set `dist = false`, so releases stay `tempest` only, as in D-233. **Open question for the owner:** whether releases should ship `tempest-tracker` and `tempest-relay`, for example for Linux and macOS. Shipping the tracker means building its website and compiling SQLite for each target.
 
 **Rationale:** Operators get a program that matches their job, and everyone else gets a smaller client that builds faster. Keeping the engine in `tempest` means the common case stays one command.
+
+## D-237: The engine opens a transfer's folder for the web UI
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The TUI opens a download's folder with the system's file manager (`o`), since it runs on the engine's machine. A browser can't open local folders, and the web UI showed only the folder's path.
+
+**Options:** the web UI shows the path only; a `file:` link (browsers block it); the engine opens the folder on request (chosen).
+
+**Decision:**
+
+- `POST /v1/transfers/{id}/reveal` makes the engine show the transfer's files in its machine's file manager: for a bundle of one file, that file selected (macOS `open -R`, Windows `explorer /select,`, and on Linux its folder), otherwise the folder. It answers with the path.
+- Only a local engine does it (D-125). Remote access answers 403 `local_only`, since the browser's screen is not the engine's, even with a valid token. Nothing saved yet, or a missing folder, answers 409 `no_files`.
+- The opener is `tempest_engine::reveal`. The TUI's `o` now calls the route instead of opening the folder itself, so both select a single file. The router takes the opener as a parameter so tests record paths instead of starting a file manager.
+- The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
+
+**Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.

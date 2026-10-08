@@ -28,7 +28,6 @@ pub use tempest_api::{explain, finding, model};
 
 use std::io;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -254,13 +253,11 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
             };
             reply.map_err(|e| e.to_string())
         }
-        Request::Open(folder) => {
-            let folder = folder.clone();
-            tokio::task::spawn_blocking(move || open(folder))
-                .await
-                .unwrap_or_else(|error| Err(error.to_string()))
-                .map(|()| Reply::Done)
-        }
+        Request::Open(id, _) => client
+            .reveal(*id)
+            .await
+            .map(|_| Reply::Done)
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -306,30 +303,6 @@ fn base64(bytes: &[u8]) -> String {
         }
     }
     text
-}
-
-/// Opens `folder` in the system's file manager.
-fn open(folder: PathBuf) -> Result<(), String> {
-    let program = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(windows) {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    let status = Command::new(program)
-        .arg(&folder)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|error| format!("cannot run {program}: {error}"))?;
-    // Explorer exits with 1 even when it opens the folder.
-    if status.success() || cfg!(windows) {
-        Ok(())
-    } else {
-        Err(format!("{program} failed ({status})"))
-    }
 }
 
 /// Whether the API at `url` is on this machine.

@@ -94,6 +94,13 @@ pub struct CategoryRequest {
     pub category: Option<String>,
 }
 
+/// `POST /v1/transfers/{id}/reveal`: what the engine showed in its machine's file manager.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RevealInfo {
+    /// The file it selected, or the folder it opened.
+    pub path: PathBuf,
+}
+
 /// `POST /v1/transfers/{id}/move`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

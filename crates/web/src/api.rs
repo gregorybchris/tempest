@@ -6,7 +6,7 @@ use serde_json::Value;
 use tempest_api::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use tempest_api::requests::{
     AddRequest, Category, CategoryRequest, MoveRequest, NameRequest, QueuePlace, QueueRequest,
-    TagsRequest,
+    RevealInfo, TagsRequest,
 };
 use tempest_api::settings::SettingsInfo;
 use tempest_api::{PREFIX, TransferInfo};
@@ -42,6 +42,11 @@ pub async fn stop(id: BundleId) -> Result<TransferInfo> {
 /// Checks a transfer's data again.
 pub async fn recheck(id: BundleId) -> Result<TransferInfo> {
     act(&id, "/recheck").await
+}
+
+/// Shows a transfer's files in the file manager of the engine's machine.
+pub async fn reveal(id: BundleId) -> Result<RevealInfo> {
+    send(method::POST, &transfer(&id, "/reveal"), None::<&()>).await
 }
 
 /// Removes a transfer, deleting its files if asked.

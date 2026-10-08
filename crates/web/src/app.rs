@@ -425,6 +425,7 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
         | Command::Rename
         | Command::Recheck
         | Command::CopyLink
+        | Command::OpenFolder
         | Command::Tags
         | Command::Category
         | Command::MoveStorage
@@ -443,6 +444,7 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
                 Command::ForceStart => controls.force_start(&transfer),
                 Command::Recheck => controls.recheck(&transfer),
                 Command::CopyLink => controls.copy_link(&transfer),
+                Command::OpenFolder => controls.reveal(&transfer),
                 Command::QueueUp => controls.queue(&transfer, QueueStep::Up),
                 Command::QueueDown => controls.queue(&transfer, QueueStep::Down),
                 Command::QueueTop => controls.queue(&transfer, QueueStep::Top),

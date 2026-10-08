@@ -396,14 +396,16 @@ fn move_storage_needs_an_absolute_path() {
 #[test]
 fn open_shows_the_folder_here_or_names_it_when_the_engine_is_remote() {
     let mut app = three();
+    let alpha = target(&app).id;
     assert_eq!(
         press(&mut app, KeyCode::Char('o')),
-        Some(Request::Open(PathBuf::from("/downloads")))
+        Some(Request::Open(alpha, PathBuf::from("/downloads")))
     );
     press(&mut app, KeyCode::Char('G'));
+    let gamma = target(&app).id;
     assert_eq!(
         press(&mut app, KeyCode::Char('o')),
-        Some(Request::Open(PathBuf::from("/downloads/gamma")))
+        Some(Request::Open(gamma, PathBuf::from("/downloads/gamma")))
     );
     app.local = false;
     assert_eq!(press(&mut app, KeyCode::Char('o')), None);

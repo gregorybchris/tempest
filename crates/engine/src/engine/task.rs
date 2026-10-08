@@ -759,7 +759,8 @@ impl EngineTask {
         }
     }
 
-    /// A share's link: the bundle, this peer and its addresses, and its trackers: those it was shared with, then the config's.
+    /// A share's link: the bundle, this peer and its addresses, and its trackers, those it was
+    /// shared with and then the config's.
     fn share_link(&self, link: &Link) -> Link {
         let mut link = link.clone();
         link.peer = Some(self.peer_id);

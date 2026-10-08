@@ -8,9 +8,11 @@
 //!   [`settings`] for the settings clients show and [`ui`] for the clients' shared look, and
 //!   [`schedule`] for the alternative limits' schedule.
 //! - What clients make of it, shared by the TUI and the web UI (D-119): [`model`] follows the
-//!   event stream, [`notices`] picks out what to tell the user, [`finding`] filters and sorts (D-192), [`columns`] decides which columns fit
-//!   (D-138), [`explain`] says what a transfer is doing in plain language, [`prefs`] reads
-//!   and writes the `ui` settings, and [`units`] shows and reads byte counts and limits.
+//!   event stream, [`notices`] picks out what to tell the user, [`network`] says what the
+//!   network defaults share (D-227), [`finding`] filters and sorts (D-192), [`columns`] decides
+//!   which columns fit (D-138), [`explain`] says what a transfer is doing in plain language,
+//!   [`prefs`] reads and writes the `ui` settings, and [`units`] shows and reads byte counts
+//!   and limits.
 
 pub mod columns;
 mod error;

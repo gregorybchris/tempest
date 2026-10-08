@@ -356,7 +356,7 @@ fn follow_address(ctx: Ctx) {
 }
 
 /// The theme: `?theme=` in the address, or the one last chosen in this browser, or else the
-/// light theme for a browser that prefers light and green otherwise.
+/// default, green (D-135).
 fn initial_theme() -> Theme {
     let search = window().location().search().unwrap_or_default();
     let asked = search
@@ -371,15 +371,7 @@ fn initial_theme() -> Theme {
             .flatten()
             .and_then(|n| Theme::named(&n))
     };
-    let preferred = || {
-        let light = window()
-            .match_media("(prefers-color-scheme: light)")
-            .ok()
-            .flatten()
-            .is_some_and(|m| m.matches());
-        light.then_some(Theme::Beige)
-    };
-    asked.or_else(saved).or_else(preferred).unwrap_or_default()
+    asked.or_else(saved).unwrap_or_default()
 }
 
 fn keep_look(ctx: Ctx) {
@@ -387,7 +379,7 @@ fn keep_look(ctx: Ctx) {
         theme: ctx.theme.get(),
         ..Look::default()
     }));
-    // Saved only once chosen, so the browser's preference keeps deciding until then.
+    // Saved only once chosen, so the default applies until then.
     Effect::new(move |previous: Option<Theme>| {
         let theme = ctx.theme.get();
         if previous.is_some_and(|p| p != theme)

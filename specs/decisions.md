@@ -3361,7 +3361,7 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - A crate, `catalog-web`, built by trunk into `crates/catalog-web/dist` and embedded in `tempest`. `tempest tracker --catalog` serves it at `/` beside the API; without the files, `/` says how to build them.
 - Views: browsing (`#/?q=…&category=…&tag=…&sort=…&offset=…`), a listing, its edit form, sign-in and the account with its listings. The search runs as it is typed, a moment after the last key, replacing the history entry; an answer that arrives after a newer request was sent is dropped. Facets and the old results stay while a new answer loads, dimmed.
 - The sign-in view asks for a challenge, shows the code and the command that signs it with the tracker's origin (and an invite when the catalog requires one), and polls every two seconds until the session's cookie is set or the code expires; then it returns to where the user was.
-- Keys come from one table, scoped by view: `/` search, `j`/`k`/`enter` move and open, `[`/`]` pages, `s` sort, `+`/`-` vote, `c` comment, `e` edit, `a` account, `T` theme, `esc` back. The theme follows the browser's light or dark preference until one is chosen.
+- Keys come from one table, scoped by view: `/` search, `j`/`k`/`enter` move and open, `[`/`]` pages, `s` sort, `+`/`-` vote, `c` comment, `e` edit, `a` account, `T` theme, `esc` back. The theme defaults to green (D-135) until one is chosen.
 - `crates/tempest/tests/catalog_web.rs` drives headless Chrome through ChromeDriver: search with a typo, category and tag facets, the keyboard, and sign-in with `tempest catalog sign-in`. It passes with a note when the UI isn't built or `CHROMEDRIVER` isn't set; CI's web job sets both.
 
 **Rationale:** Embedding keeps the one-binary promise, and hash routes need nothing from the tracker but `/`. Numbered pages give every result a link and work with `[`/`]`. Showing the command, with the origin the signer must use, turns a code into one paste. WebDriver needs no new dependencies or toolchains, and CI's runners already have ChromeDriver.
@@ -3414,3 +3414,15 @@ Strict parsing makes a mistyped relay in a config file or tracker response fail 
 - `deny.toml` still allows Apache-2.0 and the other listed licenses for dependencies.
 
 **Rationale:** One license is simpler than two.
+
+---
+
+## D-214: The simulator ships as its own binary
+
+**Date:** 2026-10-07 · **Status:** Decided
+
+**Context:** The `tempest` binary includes the simulator, DuckDB and the simulation results UI, which most users never need. D-079 put everything in one binary.
+
+**Decision:** The simulator, its results UI and its DuckDB dependency move out of `tempest` into a separate binary. The `tempest` binary keeps the client, the engine, the UIs, the tracker and the relay. This refines D-079.
+
+**Rationale:** The everyday client gets smaller and builds faster. Simulation is a development and research tool.

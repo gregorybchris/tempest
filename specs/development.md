@@ -20,9 +20,8 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 - incremental caches;
 - separate builds for tests, release, WebAssembly and fuzzing.
 
-- **Prune regularly.** Delete artifacts that haven't been used for a few hours, either with `cargo sweep --time <hours>` or by removing old files from `target/debug/deps`. Do this when no build is running.
+- **Prune regularly.** Each file in a crate's `tests/` links into its own large executable, so stale test binaries add up quickly. Delete artifacts that haven't been used for a few hours, either with `cargo sweep --time <hours>` or by removing old files from `target/debug/deps`. Do this when no build is running.
 - **Keep the compiler output for DuckDB's C++ library** (`target/debug/build`). It's the slowest part of a rebuild.
-- **Prefer one integration-test binary per crate.** Each file in `tests/` links into its own large executable. Grouping a crate's integration tests into a single `tests/main.rs` with modules saves disk and link time.
 
 ## Parallel work
 

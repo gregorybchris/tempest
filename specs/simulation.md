@@ -105,6 +105,8 @@ A varied key is either a setting for every peer, as above, or a field of one cla
 
 The simulator reproduces the classic results qualitatively. Numbers are medians over 10 seeds.
 
+The numbers below predate max-min bandwidth sharing (D-245), which moved some results. Two checks in `validation.rs`, the rarest-first chunk-survival test and the flash-crowd bound test, currently fail, and the strategic gain fell to about 5%. The tests are `#[ignore]`d, so only the slow CI step runs them.
+
 - **Rarest-first keeps every chunk alive** (Legout; Bharambe's last-block problem). When the origin leaves after uploading about 4.5 copies' worth, every peer completes with rarest-first; with random selection a chunk is lost in 3 seeds of 10 and nobody completes in those, and with sequential selection nobody ever completes. The rarest chunk averages about 21 copies with rarest-first and 7 with random.
 - **Near-optimal distribution** (Bharambe). 100 peers arriving at once finish within about 1.2× the bound set by total upload capacity, using over 80% of it. Random selection is about 14% slower at the 90th percentile.
 - **The BitTorrent strategy resists free riders, mildly** (Legout). Free riders take about 15% longer than contributors under the BitTorrent strategy and no longer under the cooperative one. Finished peers and the origin serve everyone, which limits the penalty. Fast peers upload about twice what they download under either strategy (Bharambe: tit-for-tat doesn't equalize heterogeneous peers).

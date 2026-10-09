@@ -12,7 +12,7 @@ Tempest's user-facing interfaces and the quality bar they share. Decisions refer
 | Tracker website | Same framework as the client web UI | Tracker server, served by the `tempest-tracker` binary (D-236) |
 | Simulation results UI | Same framework as the client web UI | The results API over the DuckDB results database (D-204), served by the `tempest-sim` binary (D-214) |
 
-The three web UIs share a design-system crate, `ui-kit`, with colors, typography, components and chart styles (D-076, D-198). `ui-gallery` shows all of it.
+The three web UIs share a design-system crate, `ui-kit`, with colors, typography, components, form controls, charts steered by keyboard and touch as well as the pointer, and the request layer and app shell the web UIs share (D-076, D-198, D-250). `ui-gallery` shows all of it.
 
 ## Quality bar
 
@@ -24,6 +24,7 @@ Guardrails from the research:
 - Keep text contrast at least 4.5:1. Glow applies to headings and numbers only, never body text.
 - Check font licenses. VT323, IBM Plex Mono, JetBrains Mono and Departure Mono are free (OFL). The Ultimate Oldschool PC Font Pack needs attribution (CC BY-SA). Berkeley Mono is commercial.
 - Explain states in plain language. "No one online has this bundle right now" beats "Stalled".
+- Charts work by keyboard and touch, not only the pointer (D-248).
 
 ## Web framework
 
@@ -35,7 +36,7 @@ These apply to both the TUI and the client web UI (D-118).
 
 | Area | Features |
 | --- | --- |
-| Transfer controls | Start/stop, force start (bypasses the queue), remove (keep or delete files), rename, open download folder (on the engine's machine, so not through remote access; D-237), recheck data |
+| Transfer controls | Start/stop, force start (bypasses the queue), remove (keep or delete files; for a share, the dialog warns the files are the user's originals), rename, open download folder (on the engine's machine, so not through remote access; D-237; copying the path works anywhere), recheck data |
 | Queue | Limits on active downloads and uploads; reorder queued transfers |
 | Limits | Global and per-transfer speed limits; alternative-limits mode (toggle or schedule); sharing limits (ratio, time or idle timeout) |
 | Organizing | Tags (many per transfer), categories (one per transfer, each with a default save folder), move storage |
@@ -74,7 +75,7 @@ Shared by the TUI and the web UI (D-119, D-131, D-136 to D-139). Statuses and wo
 - **Detail on demand.** Selecting a transfer opens its detail beside or over the list. The summary comes first: plain-language state, then files, peers and the decision log. The chunk map and rates chart are one level further in.
 - **Three areas.** Transfers, Share, Settings (limits, queue, network, trackers and relays, categories, theme). Transfers is home. The client is only for transfers; browsing listings happens on a tracker's website.
 - **One focus at a time.** A single pane is active, and the hint bar lists only the keys that work there.
-- **Explain, don't decode.** A stalled or errored transfer says why in a sentence and offers the fix.
+- **Explain, don't decode.** A stalled or errored transfer says why in a sentence and offers the fix. An explanation can carry a detail sentence, such as which sharing limit stopped a transfer, behind "More info" in the web UI (D-256).
 
 **Web UI (wide)**
 
@@ -117,7 +118,7 @@ Pressing `enter` replaces the bottom summary with a split detail pane (tabs: Sum
 - **TUI:** `1` to `3` or `[` and `]` (with `tab` for panes) switch areas. `?` shows keys for the current screen.
 - **Web:** the top bar, with the same order. Keyboard shortcuts match the TUI where they exist.
 
-**Share** is a drop or paste target: choose a file or folder, see the bundle being built, then the `tempest:` link with copy. **Settings** groups limits (including alternative limits), queue, the network defaults, the trackers every transfer announces to and the relays, categories and tags, and theme.
+**Share** takes the path of a file or folder on the engine's machine, shows the bundle being built, then the `tempest:` link with copy. **Settings** takes its labels, help sentences and section order from `tempest_api::settings::text`, shared by both UIs, and groups limits (including alternative limits), queue, the network defaults, the trackers every transfer announces to and the relays, categories and tags, and theme.
 
 ## Terminal UI and web UI together
 
@@ -145,7 +146,7 @@ The key map in outline:
 | Where | Keys |
 | --- | --- |
 | Everywhere | `1`-`3` or `[` `]` areas, `:` commands, `T` theme, `?` help, `q` quit; `esc` closes what is open or goes back one level |
-| Transfers list | `j`/`k` move, `enter` detail; `a` add a link, `space` start/stop, `F` force start, `x` remove, `r` rename, `t` tags, `C` category, `m` move, `R` recheck, `o` open folder, `y` copy link, `L` limits; `K`/`J` and `<`/`>` queue; `/` filter, `f` status, `s` sort, `S` reverse, `v`/`V` views, `|` columns |
+| Transfers list | `j`/`k` move, `enter` detail; `a` add a link, `space` start/stop, `F` force start, `x` remove, `r` rename, `t` tags, `C` category, `m` move, `R` recheck, `U` unpublish, `o` open folder, `y` copy link, `L` limits; `K`/`J` and `<`/`>` queue; `/` filter, `f` status, `s` sort, `S` reverse, `v`/`V` views, `|` columns |
 | Detail | `tab` or `h`/`l` tabs, `j`/`k` scroll, `c` chunk map, `g` rates chart; the transfer and queue keys still apply |
 | Share | `a` fills in the form and `enter` shares; `j`/`k` choose a share, `y` copy its link, `enter` show it in Transfers |
 | Settings | `j`/`k` move, `tab` next section, `enter` change, `a` add, `x` remove or reset |
@@ -175,4 +176,4 @@ These come from the research, as ideas to try:
 ## Open questions
 
 - CLI command names and output style.
-- Onboarding flow for first-time users (e.g. one big "drop or paste anything" target).
+- Onboarding flow for first-time users (e.g. one big "paste a link or choose a file" target).

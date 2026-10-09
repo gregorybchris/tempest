@@ -132,10 +132,14 @@ fn random<const N: usize>() -> Result<[u8; N], Refusal> {
 }
 
 /// The name of the category whose slug is `slug`.
-fn category_name<'a>(categories: &'a [Category], slug: &Option<String>) -> Option<&'a str> {
+fn category_name<'a>(categories: &'a [Category], slug: &'a Option<String>) -> Option<&'a str> {
     let slug = slug.as_deref()?;
-    let category = categories.iter().find(|c| c.slug == slug)?;
-    Some(&category.name)
+    Some(
+        categories
+            .iter()
+            .find(|c| c.slug == slug)
+            .map_or(slug, |c| &c.name),
+    )
 }
 
 /// A refusal with one of the catalog's codes.
@@ -229,8 +233,14 @@ impl Catalog {
 
     /// What the catalog is like.
     pub fn info(&self) -> TrackerInfo {
+        let mut categories = self.config.categories.clone();
+        for slug in self.store.categories_in_use().unwrap_or_default() {
+            if !categories.iter().any(|c| c.slug == slug) {
+                categories.push(Category::new(&slug, &slug));
+            }
+        }
         TrackerInfo {
-            categories: self.config.categories.clone(),
+            categories,
             invites_required: self.config.invites_required,
         }
     }
@@ -484,12 +494,12 @@ impl Catalog {
             description.transpose().map_err(invalid)?,
             tags.transpose().map_err(invalid)?,
         );
-        if let Some(Some(category)) = &edit.category
-            && !self.config.categories.iter().any(|c| &c.slug == category)
-        {
-            let message = format!("this catalog has no category {category:?}");
-            return Err(Refusal::new(ErrorCode::InvalidRequest, message));
-        }
+        let category = edit
+            .category
+            .as_ref()
+            .map(|c| c.as_deref().map(text::normalize_category).transpose())
+            .transpose()
+            .map_err(invalid)?;
 
         match self.store.listing_owner(bundle)? {
             None => self.store.create_listing(bundle, key, now)?,
@@ -502,7 +512,7 @@ impl Catalog {
         let mut fields = self.store.listing_fields(bundle)?;
         fields.title = title.unwrap_or(fields.title);
         fields.description = description.unwrap_or(fields.description);
-        fields.category = edit.category.clone().unwrap_or(fields.category);
+        fields.category = category.unwrap_or(fields.category);
         fields.tags = tags.unwrap_or(fields.tags);
         self.store.set_listing_fields(bundle, &fields, now)?;
         self.reindex(bundle)?;

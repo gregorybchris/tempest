@@ -284,17 +284,6 @@ fn publishers_edit_and_unpublish_their_listings() {
             .status,
         403
     );
-    let unknown = ListingEdit {
-        category: Some(Some("warez".into())),
-        ..ListingEdit::default()
-    };
-    assert_eq!(
-        catalog
-            .edit_listing(7, &id, &alice.id(), &unknown)
-            .unwrap_err()
-            .status,
-        400
-    );
     let bad = ListingEdit {
         title: Some("two\nlines".into()),
         ..ListingEdit::default()
@@ -305,6 +294,32 @@ fn publishers_edit_and_unpublish_their_listings() {
             .unwrap_err()
             .status,
         400
+    );
+    let bad_category = ListingEdit {
+        category: Some(Some("a/b".into())),
+        ..ListingEdit::default()
+    };
+    assert_eq!(
+        catalog
+            .edit_listing(7, &id, &alice.id(), &bad_category)
+            .unwrap_err()
+            .status,
+        400
+    );
+
+    // A new category is made by using it, in its normal form, and the info lists it.
+    let new = ListingEdit {
+        category: Some(Some("Field Recordings".into())),
+        ..ListingEdit::default()
+    };
+    let listing = catalog.edit_listing(7, &id, &alice.id(), &new).unwrap();
+    assert_eq!(listing.category.as_deref(), Some("field-recordings"));
+    assert!(
+        catalog
+            .info()
+            .categories
+            .iter()
+            .any(|c| c.slug == "field-recordings")
     );
 
     // Unpublished listings hide, and announces don't bring them back; an edit does.

@@ -629,6 +629,22 @@ impl EngineTask {
         }
     }
 
+    /// A share's category, made with the default save folder if it is new: a share stays
+    /// where it is, so the folder only matters to later downloads.
+    fn share_category(&mut self, category: Option<String>) -> Result<Option<String>, EngineError> {
+        let Some(category) = category.map(|c| c.trim().to_owned()) else {
+            return Ok(None);
+        };
+        if category.is_empty() {
+            return Err(EngineError::Empty("a category name"));
+        }
+        if !self.store.categories()?.contains_key(&category) {
+            let folder = checked_path(&self.save_folder)?;
+            self.store.set_category(&category, &folder)?;
+        }
+        Ok(Some(category))
+    }
+
     fn check_new(&self, id: BundleId) -> Result<(), EngineError> {
         if self.transfers.contains_key(&id) {
             return Err(EngineError::AlreadyAdded(id));
@@ -701,7 +717,7 @@ impl EngineTask {
         } = share;
         let id = manifest.bundle_id();
         self.check_new(id)?;
-        let category = self.checked_category(options.category)?;
+        let category = self.share_category(options.category)?;
         let base = checked_path(&base)?;
         let added = now_millis();
         let chunks = u64::from(ChunkLayout::new(&manifest).chunk_count());

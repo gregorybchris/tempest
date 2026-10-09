@@ -100,6 +100,11 @@ pub fn normalize_tag(tag: &str) -> Result<String, TextError> {
     Ok(normal)
 }
 
+/// A category in its one form, which is a tag's: `Machine Learning` becomes `machine-learning`.
+pub fn normalize_category(category: &str) -> Result<String, TextError> {
+    normalize_tag(category).map_err(|TextError(e)| TextError(e.replace("tag", "category")))
+}
+
 /// Tags, each normalized, without repeats, in their first order.
 pub fn normalize_tags(tags: &[String]) -> Result<Vec<String>, TextError> {
     let mut normal = Vec::new();

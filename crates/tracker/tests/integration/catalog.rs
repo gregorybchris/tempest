@@ -480,7 +480,7 @@ async fn publishers_describe_listings_and_others_vote_and_comment() {
         Method::PUT,
         &path,
         &alice_h,
-        json!({ "category": "nope" }),
+        json!({ "category": "no way!" }),
     )
     .await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);

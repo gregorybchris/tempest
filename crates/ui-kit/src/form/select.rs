@@ -367,3 +367,79 @@ pub fn Select(
         </Show>
     }
 }
+
+/// What the [`CategoryField`]'s last option stands for.
+const NEW: &str = "\u{0}new";
+
+/// A labeled [`Select`] of named values that also takes a new one: its last option, "New…",
+/// shows a text field for the value. A value no option has counts as typed.
+#[component]
+pub fn CategoryField(
+    /// Its label.
+    label: &'static str,
+    /// Each value and its name; the first is the one for none.
+    #[prop(into)]
+    options: Signal<Vec<(String, String)>>,
+    /// The value chosen or typed. Empty is none.
+    value: RwSignal<String>,
+    /// Shown in the text field while it is empty.
+    #[prop(optional)]
+    placeholder: &'static str,
+) -> impl IntoView {
+    let label_id = unique_id("select-label");
+    let trigger = NodeRef::<html::Button>::new();
+    let focus = move |_| {
+        if let Some(trigger) = trigger.get_untracked() {
+            let _ = trigger.focus();
+        }
+    };
+    let typing = RwSignal::new(false);
+    let is_new = move || {
+        typing.get()
+            || value.with(|v| !v.is_empty() && !options.with(|o| o.iter().any(|(x, _)| x == v)))
+    };
+    let all = Signal::derive(move || {
+        let mut all = options.get();
+        all.push((NEW.to_owned(), "New…".to_owned()));
+        all
+    });
+    let shown = Signal::derive(move || match is_new() {
+        true => NEW.to_owned(),
+        false => value.get(),
+    });
+    let input = NodeRef::<html::Input>::new();
+    let choose = move |v: String| match v == NEW {
+        true => {
+            typing.set(true);
+            value.set(String::new());
+            request_animation_frame(move || {
+                if let Some(input) = input.get_untracked() {
+                    let _ = input.focus();
+                }
+            });
+        }
+        false => {
+            typing.set(false);
+            value.set(v);
+        }
+    };
+    view! {
+        <div class="field">
+            <span class="field__label" id=label_id.clone() on:click=focus>{label}</span>
+            <Select options=all value=shown on_change=choose labelledby=label_id node_ref=trigger />
+            {move || is_new().then(|| view! {
+                <input
+                    node_ref=input
+                    class="input"
+                    type="text"
+                    aria-label="New category"
+                    placeholder=placeholder
+                    spellcheck="false"
+                    autocomplete="off"
+                    prop:value=move || value.get()
+                    on:input=move |e| value.set(event_target_value(&e))
+                />
+            })}
+        </div>
+    }
+}

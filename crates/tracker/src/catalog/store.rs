@@ -434,6 +434,15 @@ impl Store {
         Ok(())
     }
 
+    /// The categories some listing is in.
+    pub fn categories_in_use(&self) -> Result<Vec<String>, StoreError> {
+        let mut statement = self.conn.prepare(
+            "SELECT DISTINCT category FROM listings WHERE category IS NOT NULL ORDER BY category",
+        )?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// The publisher's fields of `bundle`'s listing.
     pub fn listing_fields(&self, bundle: &BundleId) -> Result<ListingFields, StoreError> {
         let (title, description, category) = self.conn.query_row(

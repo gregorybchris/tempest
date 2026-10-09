@@ -28,7 +28,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | --- | --- | --- |
 | `GET /v1/engine` | | The engine's version, peer ID, advertised addresses, home relay and port mapping |
 | `GET /v1/transfers` | | Every transfer, in queue order |
-| `POST /v1/transfers` | `link`, or an absolute `path` to share; optionally `category`, `tags`, `trackers`; for a link `save_folder`, `stopped`; for a path `name`, `comment`, `created` | 201 and the transfer |
+| `POST /v1/transfers` | `link`, or an absolute `path` to share; optionally `category`, `tags`, `trackers`; for a link `save_folder`, `stopped`; for a path `name`, `comment`, `created` (a share's new `category` is made, with the default save folder) | 201 and the transfer |
 | `GET /v1/transfers/{id}` | | The transfer |
 | `DELETE /v1/transfers/{id}?delete_files=true` | | 204, once removed (and its files deleted, if asked) |
 | `GET /v1/transfers/{id}/files` | | Each file's path, size, chunks and chunks stored; none before the manifest arrives |

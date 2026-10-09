@@ -205,7 +205,7 @@ fn NewShare() -> impl IntoView {
                     <span class="field__help">{help}</span>
                 </div>
                 {text_field("Name", name, "the file or folder's name", "")}
-                <SelectField label="Category" options=categories value=category />
+                <CategoryField label="Category" options=categories value=category placeholder="a new category" />
                 {text_field("Tags", tags, "comma-separated", "")}
                 {text_field("Comment", comment, "optional description", "share-form__wide")}
                 <div class="share-form__actions">

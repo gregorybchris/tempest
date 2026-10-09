@@ -124,11 +124,30 @@ impl PerClient {
     }
 }
 
+/// The most announce paths a peer's addresses are kept from.
+const MAX_PATHS: usize = 4;
+
+/// What one announce said about a peer: the address it came from, then the ones it announced.
+#[derive(Debug, Clone)]
+struct Path {
+    /// The IP the announce came from.
+    observed: IpAddr,
+    /// The observed address first, then the ones announced.
+    addrs: Vec<Address>,
+    /// When the announce arrived.
+    at: Instant,
+}
+
 /// One peer in a swarm.
 #[derive(Debug, Clone)]
 struct Listing {
-    /// Where to reach it: the observed address first, then the ones it announced.
+    /// Where to reach it: every live path's addresses, the latest announce's first.
     addrs: Vec<Address>,
+    /// The announces the addresses come from, the latest first. A peer that announces to this
+    /// tracker by more than one route, such as a public URL and a local one, is seen from a
+    /// different IP on each, and any of them may be the one that reaches it. A path is
+    /// forgotten when it stops announcing.
+    paths: Vec<Path>,
     /// The client that last announced it, as [`client_key`] groups them.
     client: IpAddr,
     relay: Option<Address>,
@@ -362,6 +381,7 @@ impl Swarms {
         let swarm = (self.swarms.entry(request.bundle)).or_insert_with(|| Swarm::new(now));
         self.listed -= swarm.expire(now, &mut self.per_client);
         let known = swarm.get(&request.peer);
+        let previous: Vec<Path> = known.map(|l| l.paths.clone()).unwrap_or_default();
         if let Some(listing) = known
             && request.event == AnnounceEvent::Update
         {
@@ -402,14 +422,33 @@ impl Swarms {
             if known.is_none() {
                 self.listed += 1;
             }
-            let mut addrs = vec![observed];
+            let mut here = vec![observed];
             for addr in &request.addrs {
+                if !here.contains(addr) {
+                    here.push(*addr);
+                }
+            }
+            let window = config.interval.saturating_mul(2);
+            let mut paths = vec![Path {
+                observed: observed.ip(),
+                addrs: here,
+                at: now,
+            }];
+            paths.extend(
+                previous
+                    .into_iter()
+                    .filter(|p| p.observed != observed.ip() && later(p.at, window) > now),
+            );
+            paths.truncate(MAX_PATHS);
+            let mut addrs: Vec<Address> = Vec::new();
+            for addr in paths.iter().flat_map(|p| &p.addrs) {
                 if !addrs.contains(addr) {
                     addrs.push(*addr);
                 }
             }
             let listing = Listing {
                 addrs,
+                paths,
                 client,
                 relay: request.relay,
                 complete: request.complete,
@@ -642,6 +681,45 @@ mod tests {
         s.announce(t, &first, ip()).unwrap();
         let response = s.announce(t, &request(2, AnnounceEvent::Started), ip());
         assert_eq!(response.unwrap().peers[0].addrs.len(), 1);
+    }
+
+    #[test]
+    fn a_peer_seen_from_two_routes_keeps_both_until_one_goes_quiet() {
+        let mut s = swarms();
+        let t = Instant::now();
+        let a: IpAddr = "198.51.100.9".parse().unwrap();
+        let b: IpAddr = "203.0.113.7".parse().unwrap();
+        s.announce(t, &request(1, AnnounceEvent::Started), a)
+            .unwrap();
+        let later_t = t + Duration::from_secs(10);
+        s.announce(later_t, &request(1, AnnounceEvent::Started), b)
+            .unwrap();
+        let seen = |s: &mut Swarms, now: Instant| {
+            let response = s.announce(now, &request(2, AnnounceEvent::Started), a);
+            response.unwrap().peers[0].addrs.clone()
+        };
+        let both = seen(&mut s, later_t);
+        assert_eq!(
+            both,
+            vec![
+                "203.0.113.7:4773".parse::<Address>().unwrap(),
+                "198.51.100.9:4773".parse().unwrap(),
+            ]
+        );
+
+        // `b` keeps announcing; `a` doesn't, and is dropped after two intervals.
+        let update = |s: &mut Swarms, secs: u64| {
+            let now = t + Duration::from_secs(secs);
+            s.announce(now, &request(1, AnnounceEvent::Update), b)
+                .unwrap();
+            now
+        };
+        update(&mut s, 400);
+        let now = update(&mut s, 700);
+        assert_eq!(
+            seen(&mut s, now),
+            vec!["203.0.113.7:4773".parse::<Address>().unwrap()]
+        );
     }
 
     #[test]

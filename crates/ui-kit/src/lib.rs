@@ -1,8 +1,10 @@
 //! Tempest's design system for its web UIs (D-076): themes, number formatting, components,
-//! form controls, charts and the chunk map, styled by `style/tempest.css`; and what the apps
-//! share beneath their views: [`request`]s to their server and the [`shell`] around the views.
+//! form controls, charts and the chunk map, styled by the sheets in `style/`, one per kind of
+//! component; and what the apps share beneath their views: [`request`]s to their server and
+//! the [`shell`] around the views.
 //!
-//! An app links the stylesheet and copies `style/fonts` beside it. Components follow the
+//! An app links every sheet, in the order the other apps' pages do (the tests check both), and
+//! copies `style/fonts` beside them. Components follow the
 //! Leptos guidelines in specs/interfaces.md: logic lives in plain functions with tests, and
 //! views stay thin.
 

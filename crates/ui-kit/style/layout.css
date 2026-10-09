@@ -1,0 +1,111 @@
+/* Panels, tabs, stats and empty states (`components::layout`). */
+
+/* ---------- Panels (terminal frames with inset titles) ---------- */
+
+.panel {
+  position: relative;
+  border: 1px solid var(--line);
+  padding: 18px 14px 12px;
+  min-width: 0;
+}
+
+.panel__head {
+  position: absolute;
+  top: -0.8em;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--gap-3);
+  pointer-events: none;
+}
+
+.panel__head > * {
+  pointer-events: auto;
+  background: var(--bg);
+  padding: 0 6px;
+}
+
+.panel__title {
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  font-size: var(--text-xs);
+}
+
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: var(--gap-4);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs__tab {
+  padding: 6px 0;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tabs__tab:hover {
+  color: var(--fg);
+}
+
+.tabs__tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--down);
+}
+
+/* ---------- Stats ---------- */
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 30px;
+  margin: 0;
+}
+
+.stats > div {
+  display: grid;
+}
+
+.stats dt {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.stats dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  color: var(--tone, var(--fg));
+  text-shadow: 0 0 var(--glow-size) var(--glow);
+}
+
+/* ---------- Empty states ---------- */
+
+.empty {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: var(--gap-5) 0;
+  max-width: 60ch;
+}
+
+.empty__title {
+  font-size: var(--text-lg);
+}
+
+.empty__text {
+  margin: 0;
+  color: var(--dim);
+}

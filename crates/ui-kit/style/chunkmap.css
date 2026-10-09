@@ -1,0 +1,88 @@
+/* The chunk map (`chunkmap`). */
+
+.chunkmap {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 64), minmax(0, 1fr));
+  gap: 1.5px;
+}
+
+.cell {
+  aspect-ratio: 1;
+  background: var(--cell-off);
+}
+
+.cell--have {
+  background: var(--down);
+  box-shadow: 0 0 3px var(--glow);
+}
+
+/* Missing cells grow brighter the more peers hold them. Rare is dim. */
+.cell--missing {
+  background: color-mix(in srgb, var(--faint) calc(var(--a, 0.5) * 100%), var(--cell-off));
+}
+
+/* No connected peer holds these chunks. */
+.cell--nowhere {
+  background: var(--cell-off);
+  outline: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+  outline-offset: -1px;
+}
+
+.cell--partial {
+  background: linear-gradient(
+    to top,
+    var(--down) calc(var(--p, 0.5) * 100%),
+    var(--cell-off) calc(var(--p, 0.5) * 100%)
+  );
+}
+
+.cell--flight {
+  background: var(--hot);
+  box-shadow: 0 0 6px var(--hot);
+  animation: flight 1.1s ease-in-out infinite alternate;
+}
+
+.cell--empty {
+  background: transparent;
+}
+
+@keyframes flight {
+  to {
+    opacity: 0.55;
+  }
+}
+
+.chunkmap__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-top: 10px;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  min-height: 1.5em;
+}
+
+.key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.key__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key__item .cell {
+  width: 9px;
+  height: 9px;
+  animation: none;
+}
+
+@media (max-width: 640px) {
+  .chunkmap {
+    --cols: 32 !important;
+  }
+}

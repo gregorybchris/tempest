@@ -1,0 +1,241 @@
+/* Form fields (`form`). */
+
+/*
+ * Every control is drawn from the theme's tokens: the browser's own look never shows. Text
+ * inputs, checkboxes, radios, sliders and file inputs stay native elements with
+ * `appearance: none`; the select draws its own popup. States: hover lightens
+ * the frame, focus lights it in `--down` with the glow, `aria-invalid` turns it `--bad`, and
+ * disabled controls fade.
+ */
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field__label {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.field__help {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.field__error {
+  color: var(--bad);
+  font-size: var(--text-xs);
+}
+
+.input,
+.select {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 9px;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.input::placeholder {
+  color: var(--dim);
+  opacity: 0.8;
+}
+
+.input:hover:not(:disabled):not(:focus),
+.select:hover:not(:disabled):not(:focus) {
+  border-color: var(--dim);
+}
+
+.input:focus,
+.select:focus,
+.select[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--down);
+  box-shadow: 0 0 0 1px var(--down), 0 0 var(--glow-size) var(--glow);
+}
+
+.input[aria-invalid="true"],
+.select[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.input[aria-invalid="true"]:focus,
+.select[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 1px var(--bad);
+}
+
+.input:disabled,
+.select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Browsers paint autofilled fields their own color; an inset shadow paints over it. */
+.input:autofill {
+  -webkit-text-fill-color: var(--fg);
+  box-shadow: 0 0 0 100px var(--raise) inset;
+  caret-color: var(--fg);
+}
+
+/* The search field's clear button, as a drawn ×. */
+input[type="search"]::-webkit-search-cancel-button {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  cursor: pointer;
+  background:
+    linear-gradient(45deg, transparent 44%, var(--dim) 44%, var(--dim) 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 44%, var(--dim) 44%, var(--dim) 56%, transparent 56%);
+}
+
+input[type="search"]::-webkit-search-cancel-button:hover {
+  background:
+    linear-gradient(45deg, transparent 44%, var(--fg) 44%, var(--fg) 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 44%, var(--fg) 44%, var(--fg) 56%, transparent 56%);
+}
+
+textarea.input {
+  resize: vertical;
+  line-height: 1.5;
+  scrollbar-color: var(--faint) transparent;
+}
+
+.search {
+  position: relative;
+}
+
+.search::before {
+  content: "/";
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--dim);
+  pointer-events: none;
+}
+
+.search .input {
+  padding-left: 22px;
+}
+
+/* The select's button: a field with a chevron that turns over while the popup is open. */
+.select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: 28px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.select::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -5px;
+  border-right: 1px solid var(--dim);
+  border-bottom: 1px solid var(--dim);
+  transform: rotate(45deg);
+  transition: transform 0.12s, margin-top 0.12s;
+}
+
+.select:hover:not(:disabled)::after {
+  border-color: var(--fg);
+}
+
+.select[aria-expanded="true"]::after {
+  margin-top: -1px;
+  border-color: var(--down);
+  transform: rotate(225deg);
+}
+
+.select__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select__value--empty {
+  color: var(--dim);
+}
+
+/* The select's popup, placed over the page against its button. */
+.listbox {
+  position: fixed;
+  z-index: 50;
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-width: calc(100vw - 16px);
+  background: var(--raise);
+  border: 1px solid var(--down);
+  box-shadow: 0 0 var(--glow-size) var(--glow), 0 10px 28px rgba(0, 0, 0, 0.45);
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+  animation: listbox-in 0.1s ease-out;
+}
+
+.listbox--above {
+  animation-name: listbox-in-above;
+}
+
+@keyframes listbox-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes listbox-in-above {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.listbox__option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 10px 4px 8px;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* The chosen option's mark, lit like a badge's. */
+.listbox__option::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+}
+
+.listbox__option[aria-selected="true"] {
+  color: var(--down);
+}
+
+.listbox__option[aria-selected="true"]::before {
+  background: currentColor;
+  box-shadow: 0 0 var(--glow-size) currentColor;
+}
+
+.listbox__option[data-active] {
+  color: var(--fg);
+  background: var(--select);
+  box-shadow: inset 2px 0 0 var(--down);
+}
+
+.listbox__option[data-active][aria-selected="true"] {
+  color: var(--down);
+}

@@ -1,0 +1,70 @@
+/* Badges, chips and progress bars (`components::marks`). */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tone, var(--fg));
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  box-shadow: 0 0 var(--glow-size) currentColor;
+}
+
+.badge.tone--dim::before {
+  box-shadow: none;
+  background: transparent;
+  outline: 1px solid currentColor;
+  outline-offset: -1px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.chip__remove {
+  color: var(--dim);
+}
+
+.chip__remove:hover {
+  color: var(--bad);
+}
+
+.progress {
+  display: inline-grid;
+  grid-template-columns: minmax(48px, 1fr) 5ch;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.progress__track {
+  height: 4px;
+  background: var(--cell-off);
+}
+
+.progress__fill {
+  display: block;
+  height: 100%;
+  background: var(--tone, var(--down));
+  box-shadow: 0 0 var(--glow-size) var(--glow);
+  transition: width 0.25s linear;
+}
+
+.progress__label {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  text-align: right;
+}

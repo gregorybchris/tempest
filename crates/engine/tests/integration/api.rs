@@ -1060,3 +1060,108 @@ async fn reveal_shows_files_on_the_engines_machine_only() {
 
     engine.shutdown().await;
 }
+
+/// `path` as a query value.
+fn query_value(path: &Path) -> String {
+    let text = path.to_str().unwrap();
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                (b as char).to_string()
+            }
+            b => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_engines_folders_can_be_browsed_by_local_and_remote_clients() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = Engine::open(config(root.path())).await.unwrap();
+    let app = router(engine.clone(), Access::Local);
+    let folder = root.path().join("my files");
+    std::fs::create_dir_all(folder.join("photos 10")).unwrap();
+    std::fs::create_dir_all(folder.join("Photos 9")).unwrap();
+    std::fs::write(folder.join("notes.txt"), b"hello").unwrap();
+    std::fs::write(folder.join(".hidden"), b"").unwrap();
+    let list = |path: &Path, extra: &str| format!("/v1/folder?path={}{extra}", query_value(path));
+    let names = |body: &Value| -> Vec<String> {
+        let entries = body["entries"].as_array().unwrap();
+        entries
+            .iter()
+            .map(|e| e["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    let (status, body) = send(&app, Method::GET, &list(&folder, ""), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["path"], folder.display().to_string());
+    assert_eq!(body["parent"], root.path().display().to_string());
+    assert_eq!(body["truncated"], false);
+    assert_eq!(names(&body), ["Photos 9", "photos 10", "notes.txt"]);
+    let notes = &body["entries"][2];
+    assert_eq!(notes["kind"], "file");
+    assert_eq!(notes["size"], 5);
+    assert_eq!(notes["symlink"], false);
+    assert_eq!(notes["hidden"], false);
+    assert!(notes["modified"].as_i64().is_some_and(|m| m > 0));
+    assert_eq!(body["entries"][0]["kind"], "folder");
+    assert_eq!(body["entries"][0]["size"], Value::Null);
+
+    let (_, body) = send(&app, Method::GET, &list(&folder, "&hidden=true"), None).await;
+    assert_eq!(names(&body)[2], ".hidden");
+    assert_eq!(body["entries"][2]["hidden"], true);
+
+    // With no path, browsing starts at the save folder once it exists.
+    let downloads = root.path().join("downloads");
+    std::fs::create_dir_all(&downloads).unwrap();
+    let (status, body) = send(&app, Method::GET, "/v1/folder", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["path"], downloads.display().to_string());
+
+    let (status, places) = send(&app, Method::GET, "/v1/places", None).await;
+    assert_eq!(status, StatusCode::OK, "{places}");
+    let places = places.as_array().unwrap();
+    let saved = places.iter().find(|p| p["kind"] == "save_folder").unwrap();
+    assert_eq!(saved["path"], downloads.display().to_string());
+    assert!(places.iter().any(|p| p["kind"] == "root"));
+
+    // What can't be listed, in the API's one shape.
+    for (uri, status, code) in [
+        (
+            "/v1/folder?path=relative".to_owned(),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+        (
+            list(&folder.join("gone"), ""),
+            StatusCode::NOT_FOUND,
+            "not_found",
+        ),
+        (
+            list(&folder.join("notes.txt"), ""),
+            StatusCode::BAD_REQUEST,
+            "not_a_folder",
+        ),
+        (
+            list(&folder, "&hidden=maybe"),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+    ] {
+        assert_error(send(&app, Method::GET, &uri, None).await, status, code);
+    }
+
+    // Remote clients may browse too, with the token like any other route.
+    let remote = router(engine.clone(), Access::Token("tok".into()));
+    let (status, _) = send(&remote, Method::GET, &list(&folder, ""), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let mut authorized = request(Method::GET, &list(&folder, ""), None);
+    authorized
+        .headers_mut()
+        .insert(header::AUTHORIZATION, "Bearer tok".parse().unwrap());
+    let (status, body) = call(&remote, authorized).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(names(&body).len(), 3);
+    engine.shutdown().await;
+}

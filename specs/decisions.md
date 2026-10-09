@@ -4184,3 +4184,21 @@ This revises D-175, D-182 and D-189.
 - The explanation stays short, "Complete. It stopped sharing.", and gains a detail sentence naming the limit. Explanations can carry such a detail; the web UI shows it behind a "More info" toggle, and the terminal UI's detail screen shows it under the explanation.
 
 **Rationale:** The short line is enough at a glance; the reason is there for whoever asks, and it differs enough between limits to matter.
+
+---
+
+## D-257: The engine lists its own folders, and the web UI picks paths from them
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Sharing, saving and moving take absolute paths on the engine's machine, which the web UI asked people to type. A browser's file picker can't help: it never reveals real absolute paths, and with remote access it shows the browser's disk, not the engine's.
+
+**Options:** keep typed paths only; a browser upload or drag and drop, which gives names but no paths; the engine listing its own folders for a picker the web UI draws (chosen).
+
+**Decision:**
+
+- `GET /v1/folder` lists a folder on the engine's machine: its resolved path, its parent, and its entries, folders first in natural order, cut short past a cap with `truncated`. With no path it starts at the save folder, or home. `GET /v1/places` names where to start: home, the save folder, the home folder's usual folders, mounted volumes or drive letters, and the root. Symbolic links count as their target's kind and are flagged. Errors add `not_a_folder` and `permission_denied`. The work runs off the async executor.
+- Both routes take the same access as every other, and remote clients may use them. They can already share any path they type, so listing folders grants nothing new.
+- The path is resolved by its text alone, without following links, so a folder reached through a link keeps the path it was reached by.
+
+**Rationale:** Only the engine can see its own disk, and a picker that shows it keeps the paths exact without making people type them.

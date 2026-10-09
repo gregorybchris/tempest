@@ -28,7 +28,8 @@ use tempest_protocol::{Address, BundleId};
 pub use self::access::Access;
 pub use self::error::ApiError;
 use self::error::{Json, json};
-use crate::{AddOptions, Engine, QueueMove, ShareOptions};
+use crate::{AddOptions, Engine, QueueMove, ShareOptions, folders};
+use tempest_api::folders::MAX_ENTRIES;
 
 pub use tempest_api::events::{DecisionInfo, MissedInfo, RemovedInfo, SnapshotInfo};
 pub use tempest_api::requests::*;
@@ -62,6 +63,13 @@ fn default_cells() -> u32 {
 struct RemoveQuery {
     #[serde(default)]
     delete_files: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct FolderQuery {
+    path: Option<String>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +131,8 @@ pub fn router_with(engine: Engine, access: Access, revealer: Revealer) -> Router
             &format!("{PREFIX}/categories/{{name}}"),
             put(set_category_folder).delete(remove_category),
         )
+        .route(&format!("{PREFIX}/folder"), get(folder))
+        .route(&format!("{PREFIX}/places"), get(places))
         .route(&format!("{PREFIX}/events"), get(events::events))
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
@@ -510,6 +520,52 @@ async fn set_category_folder(
 async fn remove_category(State(engine): State<Engine>, Path(name): Path<String>) -> Result {
     engine.remove_category(&name).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// The save folder in effect, which browsing starts from and names as a place.
+async fn save_folder(engine: &Engine) -> Result<Option<std::path::PathBuf>> {
+    Ok(engine.settings().await?.settings.save_folder().ok())
+}
+
+/// Lists a folder on the engine's machine (D-257); with no path, where browsing starts.
+async fn folder(
+    State(engine): State<Engine>,
+    query: std::result::Result<Query<FolderQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result {
+    let Query(query) = query.map_err(|rejection| ApiError::invalid(rejection.body_text()))?;
+    let path = match query.path {
+        Some(path) => path,
+        None => {
+            let save_folder = save_folder(&engine).await?;
+            let start = blocking(move || folders::start(save_folder.as_deref())).await?;
+            start.display().to_string()
+        }
+    };
+    let listed = blocking(move || folders::list(&path, query.hidden, MAX_ENTRIES)).await?;
+    ok(&listed.map_err(|error| {
+        use folders::FolderError as E;
+        let (status, code) = match &error {
+            E::Relative => (StatusCode::BAD_REQUEST, "invalid_request"),
+            E::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            E::NotAFolder(_) => (StatusCode::BAD_REQUEST, "not_a_folder"),
+            E::PermissionDenied(_) => (StatusCode::FORBIDDEN, "permission_denied"),
+            E::Io { .. } => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+        };
+        ApiError::new(status.as_u16(), code, error.to_string())
+    })?)
+}
+
+/// The places worth browsing from on the engine's machine (D-257).
+async fn places(State(engine): State<Engine>) -> Result {
+    let save_folder = save_folder(&engine).await?;
+    ok(&blocking(move || folders::places(save_folder.as_deref())).await?)
+}
+
+/// Runs `work`, which touches the disk, off the async executor.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| ApiError::new(500, "internal", error.to_string()))
 }
 
 async fn not_found() -> ApiError {

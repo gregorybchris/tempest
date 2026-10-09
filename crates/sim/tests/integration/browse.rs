@@ -112,12 +112,12 @@ impl Fixture {
 #[test]
 fn the_results_ui_reads_what_the_runs_recorded() {
     let f = fixture();
-    let conn = &f.db;
+    let db = &f.db;
     let baselines = f.baselines();
 
     // Experiments: newest first by default, searchable, and flagged with their logs and
     // baselines.
-    let listed = browse::experiments(&conn, &ExperimentQuery::default(), &baselines).unwrap();
+    let listed = browse::experiments(db, &ExperimentQuery::default(), &baselines).unwrap();
     let ids: Vec<i64> = listed.iter().map(|e| e.id).collect();
     assert_eq!(ids, [2, 1]);
     let swarm = &listed[1];
@@ -129,7 +129,7 @@ fn the_results_ui_reads_what_the_runs_recorded() {
     assert!(!listed[0].logged && listed[0].baseline);
     assert_eq!(swarm.created_at.len(), "2026-01-01 00:00:00".len());
     let found = browse::experiments(
-        &conn,
+        db,
         &ExperimentQuery {
             search: "SMALL CROWD".to_owned(),
             sort: ExperimentSort::Runs,
@@ -141,19 +141,19 @@ fn the_results_ui_reads_what_the_runs_recorded() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].name, "swarm");
 
-    let detail = browse::experiment(&conn, 1, &baselines).unwrap().unwrap();
+    let detail = browse::experiment(db, 1, &baselines).unwrap().unwrap();
     assert_eq!(detail.variants.len(), 2);
     assert_eq!(detail.variants[1].vary[0].key, "strategies.upload");
     assert_eq!(detail.variants[1].vary[0].value, "cooperative");
     assert_eq!(detail.variants[1].runs, 6);
     assert_eq!(detail.scenario["name"], "swarm");
-    assert!(browse::experiment(&conn, 9, &baselines).unwrap().is_none());
+    assert!(browse::experiment(db, 9, &baselines).unwrap().is_none());
 
     // Runs: filtered, sorted and paged.
-    let all = browse::runs(&conn, &RunQuery::default()).unwrap();
+    let all = browse::runs(db, &RunQuery::default()).unwrap();
     assert_eq!((all.total, all.runs.len()), (16, 16));
     let page = browse::runs(
-        &conn,
+        db,
         &RunQuery {
             experiment: Some(1),
             variant: Some(1),
@@ -178,7 +178,7 @@ fn the_results_ui_reads_what_the_runs_recorded() {
         .collect();
     assert!(p50.windows(2).all(|w| w[0] >= w[1]), "{p50:?}");
     let seeded = browse::runs(
-        &conn,
+        db,
         &RunQuery {
             seed: Some(2),
             search: "cooperative".to_owned(),
@@ -190,7 +190,7 @@ fn the_results_ui_reads_what_the_runs_recorded() {
     assert_eq!(seeded.runs[0].variant_name, "strategies.upload=cooperative");
     for outcome in [Outcome::Complete, Outcome::Incomplete] {
         let runs = browse::runs(
-            &conn,
+            db,
             &RunQuery {
                 outcome,
                 ..RunQuery::default()
@@ -205,7 +205,7 @@ fn the_results_ui_reads_what_the_runs_recorded() {
     }
 
     // A run's detail adds up to its headline numbers.
-    let run = browse::run(&conn, 1).unwrap().unwrap();
+    let run = browse::run(db, 1).unwrap().unwrap();
     let result = &f.swarm.1[0];
     assert_eq!((run.run.seed, run.run.variant), (result.seed, 0));
     assert!(run.logged);
@@ -226,14 +226,14 @@ fn the_results_ui_reads_what_the_runs_recorded() {
         run.traffic.windows(2).all(|w| w[0].bytes >= w[1].bytes),
         "most bytes first"
     );
-    let peers = browse::peers(&conn, 1).unwrap().unwrap();
+    let peers = browse::peers(db, 1).unwrap().unwrap();
     assert_eq!(peers.len(), 8);
     assert_eq!(peers[0].starts, "complete");
-    assert!(browse::run(&conn, 99).unwrap().is_none());
+    assert!(browse::run(db, 99).unwrap().is_none());
 
     // Its time series: completions count up to the run's, and the Data sent per second adds
     // back up to the Data in its traffic.
-    let series = browse::series(&conn, 1).unwrap().unwrap();
+    let series = browse::series(db, 1).unwrap().unwrap();
     assert!(!series.availability.is_empty());
     assert_eq!(
         series.completed.last().map(|c| c.1),
@@ -246,7 +246,7 @@ fn the_results_ui_reads_what_the_runs_recorded() {
         "{sent} vs {}",
         data.bytes
     );
-    let quiet = browse::series(&conn, 13).unwrap().unwrap();
+    let quiet = browse::series(db, 13).unwrap().unwrap();
     assert!(
         quiet.throughput.is_empty(),
         "experiment 2 kept no event log"
@@ -256,10 +256,10 @@ fn the_results_ui_reads_what_the_runs_recorded() {
 #[test]
 fn comparisons_match_the_statistics_sim_run_prints() {
     let f = fixture();
-    let conn = &f.db;
+    let db = &f.db;
     let (scenario, results) = &f.swarm;
     let query = CompareQuery::experiment(1, 2);
-    let compared = browse::compare(&conn, &query).unwrap();
+    let compared = browse::compare(db, &query).unwrap();
     assert_eq!(compared.variants[1].seeds, [1, 2, 3, 4, 5, 6]);
     assert_eq!(compared.confidence, 0.95);
 
@@ -305,7 +305,7 @@ fn comparisons_match_the_statistics_sim_run_prints() {
         ],
         reference: 1,
     };
-    let compared = browse::compare(&conn, &across).unwrap();
+    let compared = browse::compare(db, &across).unwrap();
     assert_eq!(compared.variants[0].experiment_name, "golden-pair");
     assert_eq!(compared.reference, 1);
     let missing = CompareQuery {
@@ -316,12 +316,12 @@ fn comparisons_match_the_statistics_sim_run_prints() {
         reference: 0,
     };
     assert!(matches!(
-        browse::compare(&conn, &missing),
+        browse::compare(db, &missing),
         Err(BrowseError::NotFound(_))
     ));
 
     // Over time: each band ends at the median of the runs' completed fractions.
-    let series = browse::compare_series(&conn, &query).unwrap();
+    let series = browse::compare_series(db, &query).unwrap();
     let keys: Vec<&str> = series.series.iter().map(|s| s.key.as_str()).collect();
     assert_eq!(keys, ["completed", "rarest", "present"]);
     let completed = &series.series[0];
@@ -341,22 +341,20 @@ fn comparisons_match_the_statistics_sim_run_prints() {
 #[test]
 fn experiments_are_checked_against_their_golden_baseline() {
     let f = fixture();
-    let conn = &f.db;
+    let db = &f.db;
     let baselines = f.baselines();
     assert!(
-        browse::baseline_report(&conn, 1, &baselines)
+        browse::baseline_report(db, 1, &baselines)
             .unwrap()
             .is_none()
     );
     assert!(matches!(
-        browse::baseline_report(&conn, 7, &baselines),
+        browse::baseline_report(db, 7, &baselines),
         Err(BrowseError::NotFound(_))
     ));
 
     // The same runs as the baseline: nothing regressed or improved.
-    let report = browse::baseline_report(&conn, 2, &baselines)
-        .unwrap()
-        .unwrap();
+    let report = browse::baseline_report(db, 2, &baselines).unwrap().unwrap();
     let checked = &report.variants[0];
     assert_eq!(
         checked.method,
@@ -385,9 +383,7 @@ fn experiments_are_checked_against_their_golden_baseline() {
     }
     .save(&f.baselines.path().join("golden-pair.json"))
     .unwrap();
-    let report = browse::baseline_report(&conn, 2, &baselines)
-        .unwrap()
-        .unwrap();
+    let report = browse::baseline_report(db, 2, &baselines).unwrap().unwrap();
     let checked = &report.variants[0];
     assert_eq!(checked.method, Method::Mean);
     assert_eq!(checked.missing, [3, 4]);
@@ -398,13 +394,13 @@ fn experiments_are_checked_against_their_golden_baseline() {
         .unwrap();
     assert!(p50.regressed);
 
-    let listed = browse::baselines(&conn, &baselines).unwrap();
+    let listed = browse::baselines(db, &baselines).unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].seeds, [1, 2]);
     assert_eq!(listed[0].experiments.len(), 1);
     assert!(listed[0].experiments[0].regressed >= 1);
     assert!(
-        browse::baselines(&conn, &Baselines::default())
+        browse::baselines(db, &Baselines::default())
             .unwrap()
             .is_empty()
     );
@@ -455,7 +451,7 @@ fn a_database_opens_read_only_beside_its_writer_closing() {
     let first = Database::open_read_only(&path).unwrap();
     let second = Database::open_read_only(&path).unwrap();
     for db in [&first, &second] {
-        let runs = browse::runs(&db, &RunQuery::default()).unwrap();
+        let runs = browse::runs(db, &RunQuery::default()).unwrap();
         assert_eq!(runs.total, 4);
     }
     assert!(Database::open_read_only(&dir.path().join("missing.duckdb")).is_err());

@@ -2,6 +2,8 @@
 
 # Tempest
 
+[![CI](https://github.com/gregorybchris/tempest/actions/workflows/ci.yml/badge.svg)](https://github.com/gregorybchris/tempest/actions/workflows/ci.yml)
+
 Tempest is a peer-to-peer file sharing protocol and client, written in Rust. It is built on BitTorrent's ideas but is not compatible with BitTorrent.
 
 It aims to be easy to understand first, configurable and measurable second, fast third, and pleasant to use throughout.

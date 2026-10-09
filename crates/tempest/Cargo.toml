@@ -8,6 +8,11 @@ repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+publish = false
+
+# Released by dist despite `publish = false`, which only keeps it off crates.io.
+[package.metadata.dist]
+dist = true
 
 [package.metadata.wix]
 upgrade-guid = "ACF1CC25-897A-4D20-931A-8641B989B273"

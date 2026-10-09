@@ -6,8 +6,8 @@ use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
-use tempest_engine::inspect::{FileInfo, PeerInfo};
-use tempest_engine::{Kind, Status, TransferInfo};
+use tempest_api::inspect::{FileInfo, PeerInfo};
+use tempest_api::{Kind, Status, TransferInfo};
 
 use super::transfers::{fix_hint, summary_color};
 use super::{fit, pad, status_color};

@@ -32,15 +32,16 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | --- | --- | --- |
 | `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization, serde for tracker JSON) |
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | (none) |
-| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `core`, `tracker-api` |
+| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `core`, `tracker-api`, `http` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `tracker-api` |
-| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `tracker-api` |
+| `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200); with its `client` feature, the native API client (D-250) | `tracker-api`; `http` for the client |
+| `http` | The HTTPS client setup the tracker client and the API client share: TLS, certificate trust, user agent (D-250) | (none) |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results and the queries the results UI reads (D-204) | `core`, `sim-api` |
 | `sim-api` | The simulation results API's types and query strings, shared by its server and the results UI (D-204) | (none) |
 | `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
 | `ui-gallery` | A gallery of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
 | `web` | Client web UI | `ui-kit`, `api` |
-| `tui` | Terminal UI | `api`, `engine` (its API client) |
+| `tui` | Terminal UI | `api` (its client) |
 | `sim-web` | Simulation results UI, served by `tempest-sim web` | `ui-kit`, `sim-api` |
 | `tracker-api` | The types and text rules of a tracker's listing API, shared by the tracker, the client and the tracker website (D-206, D-234) | (none) |
 | `tracker-web` | The tracker website (D-210, D-234) | `ui-kit`, `tracker-api` |

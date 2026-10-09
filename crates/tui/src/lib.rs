@@ -38,8 +38,8 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 use tempest_api::ApiEvent;
-use tempest_engine::api::QueuePlace;
-use tempest_engine::api::client::ApiClient;
+use tempest_api::client::ApiClient;
+use tempest_api::requests::QueuePlace;
 use tokio::sync::mpsc;
 
 use crate::app::{Action, App, Exit, Look, Origin, Reply, Request};
@@ -263,7 +263,7 @@ pub async fn carry_out(client: &ApiClient, request: &Request) -> Result<Reply, S
 
 /// Every category's save folder, by name.
 fn folders(
-    categories: std::collections::BTreeMap<String, tempest_engine::api::Category>,
+    categories: std::collections::BTreeMap<String, tempest_api::requests::Category>,
 ) -> std::collections::BTreeMap<String, PathBuf> {
     categories
         .into_iter()

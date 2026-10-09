@@ -8,7 +8,7 @@ use std::fs;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tempest_engine::api::client::{ApiClient, ClientError};
+use tempest_api::client::{ApiClient, ClientError};
 use tempest_engine::api::{Access, PublishRequest, router};
 use tempest_engine::{Engine, EngineError, ShareOptions};
 use tempest_net::TrackerError;

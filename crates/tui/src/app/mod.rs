@@ -17,10 +17,10 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use tempest_engine::api::QueueStep;
-use tempest_engine::api::client::ApiEvent;
-use tempest_engine::config::SavedView;
-use tempest_engine::{SettingsView, Status, TransferInfo};
+use tempest_api::ApiEvent;
+use tempest_api::requests::QueueStep;
+use tempest_api::ui::SavedView;
+use tempest_api::{Status, TransferInfo, settings::SettingsInfo};
 use tempest_protocol::BundleId;
 
 pub use self::inside::{Fetched, Inside, Look};
@@ -109,7 +109,7 @@ pub struct App {
     /// Every category's save folder by name, once fetched.
     pub categories: Option<BTreeMap<String, PathBuf>>,
     /// The engine's settings, once fetched.
-    pub settings: Option<SettingsView>,
+    pub settings: Option<SettingsInfo>,
     /// Why the settings couldn't be fetched, if they couldn't.
     pub settings_error: Option<String>,
     /// Whether the settings are being fetched.
@@ -301,7 +301,7 @@ impl App {
     /// Takes in the engine's settings. What the user keeps (D-195) is taken in once, at the
     /// start, and again whenever no change to it is waiting for an answer, so a fetch never
     /// undoes a change just made.
-    fn take_settings(&mut self, view: SettingsView) {
+    fn take_settings(&mut self, view: SettingsInfo) {
         let ui = &view.settings.ui;
         if !self.prefs_loaded {
             // A theme changed before the settings arrived stays.

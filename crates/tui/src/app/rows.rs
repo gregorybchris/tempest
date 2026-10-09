@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
-use tempest_engine::SettingsView;
-use tempest_engine::schedule::{Schedule, TimeOfDay, Weekday};
+use tempest_api::schedule::{Schedule, TimeOfDay, Weekday};
+use tempest_api::settings::SettingsInfo;
 
 use super::modal::{FormKind, Modal, ValueEdit, ValueTarget};
 use super::request::Request;
@@ -160,11 +160,11 @@ fn count(limit: Option<u32>) -> String {
 }
 
 /// The Settings area's sections, in the order of [`text::SECTIONS`].
-pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
+pub fn settings_sections(app: &App, view: &SettingsInfo) -> Vec<Section> {
     let settings = &view.settings;
     let limits = &settings.limits;
     let alternative = &limits.alternative;
-    let sharing = serde_json::to_value(settings.sharing).expect("settings serialize");
+    let sharing = serde_json::to_value(&settings.sharing).expect("settings serialize");
     let shown = |value: &Value| match value {
         Value::Null => "none".to_owned(),
         Value::String(text) => text.clone(),
@@ -248,10 +248,10 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
 
     let mut categories = vec![Row::field(
         text::SAVE_FOLDER,
-        settings.save_folder.as_ref().map_or_else(
-            || text::DEFAULT_FOLDER.to_owned(),
-            |folder| folder.display().to_string(),
-        ),
+        settings
+            .save_folder
+            .as_ref()
+            .map_or_else(|| text::DEFAULT_FOLDER.to_owned(), |folder| folder.clone()),
         Edit::Value(ValueKind::Folder),
     )];
     match &app.categories {
@@ -321,7 +321,7 @@ pub fn settings_sections(app: &App, view: &SettingsView) -> Vec<Section> {
 }
 
 /// The network defaults, each a switch with a sentence on what it shares (D-227).
-fn network_section(settings: &tempest_engine::EngineConfig) -> Section {
+fn network_section(settings: &tempest_api::settings::Settings) -> Section {
     let on = |key: &str| match key {
         keys::PORT_MAPPING => settings.port_mapping.enabled,
         keys::LAN => settings.lan.enabled,
@@ -349,7 +349,7 @@ fn network_section(settings: &tempest_engine::EngineConfig) -> Section {
 }
 
 /// The trackers every transfer announces to, and the relays, as sections of Settings.
-fn peer_finding_sections(view: &SettingsView) -> [Section; 2] {
+fn peer_finding_sections(view: &SettingsInfo) -> [Section; 2] {
     let settings = &view.settings;
     let mut trackers: Vec<Row> = settings
         .trackers
@@ -378,7 +378,7 @@ fn peer_finding_sections(view: &SettingsView) -> [Section; 2] {
 }
 
 /// The known relays as `<key>@host:port`.
-fn relay_identities(view: &SettingsView) -> Vec<String> {
+fn relay_identities(view: &SettingsInfo) -> Vec<String> {
     let relays = serde_json::to_value(&view.settings.relays).expect("settings serialize");
     relays["known"]
         .as_array()
@@ -506,11 +506,7 @@ impl App {
                         limit_input(settings.limits.alternative.download)
                     }
                     "limits.alternative.upload" => limit_input(settings.limits.alternative.upload),
-                    "save_folder" => settings
-                        .save_folder
-                        .as_ref()
-                        .map(|f| f.display().to_string())
-                        .unwrap_or_default(),
+                    "save_folder" => settings.save_folder.as_ref().cloned().unwrap_or_default(),
                     _ if row.value == "none" || row.value == "no limit" => String::new(),
                     _ => row.value.clone(),
                 };
@@ -523,11 +519,8 @@ impl App {
             }
             Edit::Cycle(values) => {
                 let key = row.key?;
-                let current = serde_json::to_value(settings.sharing.action).ok();
-                let index = values
-                    .iter()
-                    .position(|v| current.as_ref().and_then(Value::as_str) == Some(v))
-                    .unwrap_or(0);
+                let current = settings.sharing.action.as_str();
+                let index = values.iter().position(|v| *v == current).unwrap_or(0);
                 let next = values[(index + 1) % values.len()];
                 return Some(self.change_settings([(key, json!(next))], Some(about)));
             }

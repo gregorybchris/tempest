@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use tempest_engine::Kind;
+use tempest_api::Kind;
 
 use super::tests::{app_with, categories, load, press, settings, three, type_keys};
 use super::*;
@@ -453,8 +453,8 @@ fn help_scrolls_only_as_far_as_it_overflows() {
     );
 }
 
-fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
-    tempest_engine::TransferInfo::example(seed, name, position)
+fn transfer(seed: u8, name: &str, position: u32) -> tempest_api::TransferInfo {
+    tempest_api::TransferInfo::example(seed, name, position)
 }
 
 #[test]

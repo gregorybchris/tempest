@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use tempest_engine::api::AddRequest;
+use tempest_api::requests::AddRequest;
 
 use super::request::{Action, Request, Target, parse_tags};
 use super::rows::ValueKind;

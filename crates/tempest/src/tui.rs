@@ -3,7 +3,7 @@
 //! (D-228).
 
 use anyhow::{Context, Result, anyhow};
-use tempest_engine::api::client::ApiClient;
+use tempest_api::client::ApiClient;
 use tempest_engine::api::server::ApiServer;
 use tempest_engine::{Engine, EngineError};
 use tempest_tui::app::{Exit, Origin};

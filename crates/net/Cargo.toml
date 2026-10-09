@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 tempest-tracker-api.workspace = true
 tempest-core.workspace = true
+tempest-http.workspace = true
 tempest-protocol.workspace = true
 
 if-addrs.workspace = true
@@ -20,7 +21,6 @@ quinn.workspace = true
 reqwest.workspace = true
 ring.workspace = true
 rustls.workspace = true
-rustls-platform-verifier.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true

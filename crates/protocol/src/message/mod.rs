@@ -18,6 +18,9 @@ use crate::manifest::MAX_MANIFEST_LEN;
 use crate::tree::CHUNK_SIZE;
 use crate::wire::{Decode, DecodeError, Reader};
 
+/// The ALPN identifier of a peer connection (`protocol/connections.md`).
+pub const PEER_ALPN: &[u8] = b"tempest/1";
+
 /// The largest frame length of any control message: 16 MiB.
 pub const MAX_CONTROL_FRAME: u32 = 16 * 1024 * 1024;
 

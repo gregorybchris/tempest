@@ -4763,8 +4763,10 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "proptest",
+ "reqwest",
  "serde",
  "serde_json",
+ "tempest-http",
  "tempest-protocol",
  "tempest-tracker-api",
  "thiserror 2.0.21",
@@ -4800,10 +4802,8 @@ dependencies = [
  "getrandom 0.3.4",
  "proptest",
  "rcgen",
- "reqwest",
  "rusqlite",
  "rustls",
- "rustls-platform-verifier",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -4824,6 +4824,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-http"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
+ "tempest-protocol",
+]
+
+[[package]]
 name = "tempest-net"
 version = "0.1.0"
 dependencies = [
@@ -4839,11 +4849,11 @@ dependencies = [
  "ring",
  "rustix 1.1.5",
  "rustls",
- "rustls-platform-verifier",
  "serde",
  "serde_json",
  "socket2",
  "tempest-core",
+ "tempest-http",
  "tempest-protocol",
  "tempest-tracker",
  "tempest-tracker-api",

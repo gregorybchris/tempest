@@ -3862,3 +3862,22 @@ This revises D-175, D-182 and D-189.
 - The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
 
 **Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.
+
+---
+
+## D-250: The API client lives in `tempest-api`, and the TUI no longer depends on the engine
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The TUI depended on `tempest-engine`, with SQLite, quinn and axum, only for the API client, `SettingsView` and the typed `EngineConfig`. The user agent was written out in four places, and the tracker client and the API client each built their own reqwest client with rustls and the platform verifier.
+
+**Options:** move `EngineConfig` into `tempest-api`, which would pull in `core` and `net` types; a separate client crate; the client in `tempest-api` behind a feature, with the TUI reading the settings clients already share (chosen).
+
+**Decision:**
+
+- `tempest-api`'s `client` feature adds `client`: `ApiClient`, its event stream and the server-sent events decoder. The web UI builds without it. The discovery file's format and names are in `tempest_api::discovery`, which the engine's server writes and the client reads.
+- `ApiClient`'s settings calls return `SettingsInfo`, the settings view the web UI already reads (D-200). The TUI uses it instead of `SettingsView` and `EngineConfig`. The engine keeps `SettingsView` as what it serves; the TUI's tests turn the engine's defaults into a `SettingsInfo` through JSON, which also checks that it reads what the engine sends.
+- `tempest-http` builds the HTTPS client both clients use: rustls on ring, trusting the platform's verifier or one pinned certificate, with Tempest's user agent. `tempest_protocol::CLIENT` is the one name and version string, sent in Hello and as the user agent.
+- `PEER_ALPN` moved to `tempest_protocol::message`, as `RELAY_ALPN` is in `tempest_protocol::relay`.
+
+**Rationale:** The TUI builds without the engine's dependencies, and every fact about the client's identity and TLS trust has one source.

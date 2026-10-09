@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use tempest_engine::api::AddRequest;
-use tempest_engine::{Kind, TransferInfo};
+use tempest_api::requests::AddRequest;
+use tempest_api::{Kind, TransferInfo};
 use tempest_protocol::BundleId;
 
 use super::request::{Request, parse_tags};

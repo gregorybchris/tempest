@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -27,10 +26,8 @@ use super::{Access, router};
 use crate::Engine;
 use crate::config::ApiSettings;
 
-/// The file in the data directory that says where the API is.
-pub const DISCOVERY_FILE: &str = "api.json";
-/// The file in the data directory that holds the access token for remote access.
-pub const TOKEN_FILE: &str = "api-token";
+pub use tempest_api::discovery::{DISCOVERY_FILE, Discovery, TOKEN_FILE};
+
 /// The self-signed certificate made for remote access when none is configured.
 pub const CERT_FILE: &str = "api-cert.pem";
 /// The self-signed certificate's private key.
@@ -38,30 +35,6 @@ pub const KEY_FILE: &str = "api-key.pem";
 
 /// How long a TLS handshake may take.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Where a running engine's API is, as its discovery file records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Discovery {
-    /// The API's base URL, such as `http://127.0.0.1:4776`.
-    pub url: String,
-    /// The certificate the API presents over HTTPS, which local clients trust exactly.
-    pub cert: Option<PathBuf>,
-    /// The engine's process ID.
-    pub pid: u32,
-}
-
-impl Discovery {
-    /// Reads the discovery file in `data_dir`, if there is one.
-    pub fn read(data_dir: &Path) -> io::Result<Option<Self>> {
-        match std::fs::read(data_dir.join(DISCOVERY_FILE)) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map(Some)
-                .map_err(io::Error::other),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-}
 
 /// Why the API could not start.
 #[derive(Debug, thiserror::Error)]

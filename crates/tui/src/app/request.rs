@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde_json::Value;
-use tempest_engine::api::{AddRequest, QueueStep};
-use tempest_engine::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
-use tempest_engine::{SettingsView, TransferInfo};
+use tempest_api::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
+use tempest_api::requests::{AddRequest, QueueStep};
+use tempest_api::{TransferInfo, settings::SettingsInfo};
 use tempest_protocol::BundleId;
 
 use super::Look;
@@ -118,9 +118,9 @@ pub enum Reply {
     /// Every category's save folder, by name.
     Categories(BTreeMap<String, PathBuf>),
     /// The settings, after a change.
-    Settings(Box<SettingsView>),
+    Settings(Box<SettingsInfo>),
     /// The settings, and every category's save folder.
-    Loaded(Box<SettingsView>, BTreeMap<String, PathBuf>),
+    Loaded(Box<SettingsInfo>, BTreeMap<String, PathBuf>),
     /// A transfer's files.
     Files(Vec<FileInfo>),
     /// A transfer's connections.

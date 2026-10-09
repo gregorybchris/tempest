@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use tempest_engine::inspect::ChunkMapInfo;
+use tempest_api::inspect::ChunkMapInfo;
 
 use super::fit;
 use crate::app::App;

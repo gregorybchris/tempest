@@ -1,33 +1,30 @@
-//! A client for the engine's API.
+//! A client for the engine's API, as the CLI and the TUI use it, with [`sse`] decoding its
+//! event stream. Built with the `client` feature.
+
+pub mod sse;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::{Method, RequestBuilder};
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tempest_http::{CertificateDer, PemObject, Trust};
 use tempest_protocol::BundleId;
-
-use super::server::{Discovery, TOKEN_FILE};
-pub use tempest_api::ApiEvent;
-
-use super::sse::{SseDecoder, SseEvent};
-use super::{
-    AddRequest, ApiError, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
-    PublishRequest, QueuePlace, QueueRequest, RevealInfo, TagsRequest, TrackerSignInRequest,
-};
-use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
-use crate::{SettingsView, TransferInfo};
 use tempest_tracker_api::account::Account;
 use tempest_tracker_api::listing::Listing;
+
+use self::sse::{SseDecoder, SseEvent};
+use crate::discovery::{DISCOVERY_FILE, Discovery, TOKEN_FILE};
+use crate::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
+use crate::requests::{
+    AddRequest, Category, CategoryRequest, EngineInfo, MoveRequest, NameRequest, PREFIX,
+    PublishRequest, QueuePlace, QueueRequest, RevealInfo, TagsRequest, TrackerSignInRequest,
+};
+use crate::settings::SettingsInfo;
+use crate::{ApiError, ApiEvent, TransferInfo};
 
 /// Why a request to the API failed.
 #[derive(Debug, thiserror::Error)]
@@ -72,26 +69,11 @@ impl ApiClient {
         token: Option<String>,
         cert: Option<CertificateDer<'static>>,
     ) -> Result<Self, ClientError> {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
-            .with_safe_default_protocol_versions()
+        let trust = cert.map_or(Trust::Platform, Trust::Pinned);
+        let builder = tempest_http::client_builder(trust)
             .map_err(|error| ClientError::Unexpected(error.to_string()))?;
-        let tls = match cert {
-            Some(cert) => builder
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(Pinned { cert, provider })),
-            None => {
-                use rustls_platform_verifier::BuilderVerifierExt;
-                builder
-                    .with_platform_verifier()
-                    .map_err(|error| ClientError::Unexpected(error.to_string()))?
-            }
-        }
-        .with_no_client_auth();
-        let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
+        let http = builder
             .connect_timeout(Duration::from_secs(5))
-            .user_agent(concat!("tempest/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|source| ClientError::Unreachable {
                 url: url.to_owned(),
@@ -108,7 +90,7 @@ impl ApiClient {
     /// engine has recorded where its API is.
     pub fn for_data_dir(data_dir: &Path) -> Result<Option<Self>, ClientError> {
         let io_error = |path: PathBuf| move |source| ClientError::Io { path, source };
-        let discovery_path = data_dir.join(super::server::DISCOVERY_FILE);
+        let discovery_path = data_dir.join(DISCOVERY_FILE);
         let Some(discovery) = Discovery::read(data_dir).map_err(io_error(discovery_path))? else {
             return Ok(None);
         };
@@ -300,7 +282,7 @@ impl ApiClient {
             .await
     }
 
-    /// Lists a transfer on a tracker (see [`Engine::publish`](crate::Engine::publish)).
+    /// Lists a transfer on a tracker (`POST /v1/transfers/{id}/publish`).
     pub async fn publish(
         &self,
         id: BundleId,
@@ -310,8 +292,7 @@ impl ApiClient {
         self.send(Method::POST, &path, Some(request)).await
     }
 
-    /// Unpublishes a transfer from a tracker (see
-    /// [`Engine::unpublish`](crate::Engine::unpublish)).
+    /// Unpublishes a transfer from a tracker.
     pub async fn unpublish(
         &self,
         id: BundleId,
@@ -344,7 +325,7 @@ impl ApiClient {
     }
 
     /// The engine's settings.
-    pub async fn settings(&self) -> Result<SettingsView, ClientError> {
+    pub async fn settings(&self) -> Result<SettingsInfo, ClientError> {
         self.get("/settings").await
     }
 
@@ -352,13 +333,13 @@ impl ApiClient {
     pub async fn change_settings(
         &self,
         changes: &BTreeMap<String, Value>,
-    ) -> Result<SettingsView, ClientError> {
+    ) -> Result<SettingsInfo, ClientError> {
         self.send(Method::PATCH, "/settings", Some(changes)).await
     }
 
     /// Undoes the change made through the API to the setting at the dotted `key`, so the
     /// config file's value applies again.
-    pub async fn reset_setting(&self, key: &str) -> Result<SettingsView, ClientError> {
+    pub async fn reset_setting(&self, key: &str) -> Result<SettingsInfo, ClientError> {
         self.send(Method::DELETE, &format!("/settings/{key}"), None::<&()>)
             .await
     }
@@ -483,58 +464,5 @@ impl EventStream {
                 .map_err(|error| ClientError::Unexpected(error.to_string()))?;
             self.pending.extend(events);
         }
-    }
-}
-
-/// Trusts exactly one certificate, whatever names it has, as a client that read it from the
-/// engine's data directory may.
-#[derive(Debug)]
-struct Pinned {
-    cert: CertificateDer<'static>,
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for Pinned {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        match end_entity.as_ref() == self.cert.as_ref() {
-            true => Ok(ServerCertVerified::assertion()),
-            false => Err(rustls::Error::General(
-                "the engine presented a certificate other than the one in its data directory"
-                    .to_owned(),
-            )),
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        let algorithms = &self.provider.signature_verification_algorithms;
-        verify_tls12_signature(message, cert, dss, algorithms)
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        let algorithms = &self.provider.signature_verification_algorithms;
-        verify_tls13_signature(message, cert, dss, algorithms)
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
     }
 }

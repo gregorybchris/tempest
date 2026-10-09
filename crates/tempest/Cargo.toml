@@ -16,7 +16,7 @@ license = false
 eula = false
 
 [dependencies]
-tempest-api.workspace = true
+tempest-api = { workspace = true, features = ["client"] }
 tempest-assets.workspace = true
 tempest-tracker-api.workspace = true
 tempest-core.workspace = true

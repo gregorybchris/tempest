@@ -6,7 +6,7 @@ use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
-use tempest_engine::{Status, TransferInfo};
+use tempest_api::{Status, TransferInfo};
 
 use super::{detail, fit, rule, status_color, status_label};
 use crate::app::{App, View};

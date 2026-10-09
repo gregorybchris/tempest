@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use tempest_api::client::{ApiClient, ClientError};
 use tempest_core::event::CloseCause;
 use tempest_core::{Event, EventKind};
 use tempest_engine::api::AddRequest;
-use tempest_engine::api::client::{ApiClient, ClientError};
 use tempest_engine::{Status as TransferStatus, TransferInfo};
 use tempest_net::{BundleHandle, Destination, Status};
 use tempest_protocol::link::ParseLinkError;

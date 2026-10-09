@@ -7,8 +7,9 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::json;
+use tempest_api::ApiEvent;
+use tempest_api::settings::SettingsInfo;
 use tempest_engine::api::DecisionInfo;
-use tempest_engine::api::client::ApiEvent;
 use tempest_engine::inspect::{CellInfo, ChunkMapInfo, FileInfo, PeerInfo};
 use tempest_engine::{EngineConfig, Kind, SettingsView, Status, TransferInfo};
 use tempest_protocol::Hash;
@@ -204,7 +205,7 @@ fn help_lists_the_keys_of_the_screen() {
 
 /// Settings changed from the defaults in most groups, two categories, and a change that
 /// awaits a restart.
-fn settings() -> SettingsView {
+fn settings() -> SettingsInfo {
     let mut config = EngineConfig::default();
     let key = "ab".repeat(32);
     let changes = [
@@ -235,7 +236,7 @@ fn settings() -> SettingsView {
     for (key, value) in &changes {
         config.set(key, value.clone()).unwrap();
     }
-    SettingsView {
+    let view = SettingsView {
         settings: config,
         changed: changes
             .iter()
@@ -244,7 +245,8 @@ fn settings() -> SettingsView {
             .collect(),
         restart_required: vec!["peers".to_owned()],
         alternative_limits_active: true,
-    }
+    };
+    serde_json::from_value(serde_json::to_value(view).unwrap()).unwrap()
 }
 
 /// `app` with the settings and two categories loaded.

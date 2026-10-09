@@ -79,6 +79,7 @@ Traffic through a relay remains end-to-end encrypted between the two peers. A re
 - Keep a configurable list of known relays and pick the home relay with the lowest latency.
 - Try direct addresses and the relay in parallel. Use whichever connects first, then upgrade.
 - Tell the user when a connection is relayed, since it will usually be slower.
+- A peer MAY refuse new connections before the handshake when too many are still opening, in total or from one source. The dialer sees a failed connection, not a Goodbye.
 
 The relay protocol and the hole-punching procedure are defined in [relays.md](relays.md).
 

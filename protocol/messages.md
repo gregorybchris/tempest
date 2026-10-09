@@ -117,6 +117,8 @@ Each connection has one **control stream** and any number of **request streams**
 
 On the control stream, the first two messages each peer sends MUST be Hello and Have, in that order. A peer that receives anything else first on the control stream MUST close the connection with `protocol_violation`.
 
+A peer SHOULD close with `protocol_violation` a connection whose opening hasn't completed within a time it chooses.
+
 Because QUIC doesn't order different streams relative to each other, a request stream can arrive before the opening is complete. A peer MUST hold such a stream and handle it once the opening is complete. It MUST NOT treat the stream as a violation.
 
 **Rationale.** The accepting peer can't describe its holdings until it knows which bundle the connection is for, so the dialing peer, who chose the bundle, speaks first.
@@ -219,6 +221,7 @@ PeerRecord {
 - A leaving peer SHOULD send that last Peers on each connection, listing peers it is connected to first, then others it knows. A peer that knew the swarm only through the leaver would otherwise have no one left to find.
 - A PeerRecord's `addresses` MAY include the addresses that peer advertised in its Hello, and the source address of a direct connection with it. They MUST NOT include a relay address: relay addresses go only in `relay`.
 - A PeerRecord's `relay` MUST contain at most one address.
+- A PeerRecord SHOULD list at most 16 addresses in `addresses`. A receiver MAY keep only some of them.
 
 **Rationale.** Peer exchange is the cheapest way to grow from one known peer to many. The limits bound how much a peer can flood its neighbors with addresses.
 

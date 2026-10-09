@@ -57,6 +57,7 @@ POST /tempest/v1/announce
 **Tracker:**
 
 - The tracker MUST add the request's observed source IP, combined with `port`, to the peer's addresses. This is a best guess: it works when the peer's router keeps the same port, or when the peer has a port mapping.
+- The tracker MAY refuse with `invalid_request` an announce with `port` 0 or with more `addrs` than it accepts.
 - The tracker MUST NOT include the requesting peer in `peers`. It SHOULD return at most `num_want` peers (and MAY cap `num_want`), chosen at random.
 - On `stopped`, the tracker SHOULD remove the peer immediately and MAY return an empty `peers` list.
 - The tracker SHOULD forget a peer that hasn't announced for twice the most recent `interval_secs` it gave that peer.
@@ -155,6 +156,6 @@ An error is an HTTP status code (4xx or 5xx) with a JSON body:
 | `bundle_not_allowed` | 403 | This tracker doesn't serve this bundle (e.g. a private tracker) |
 | `unavailable` | 503 | The tracker is temporarily unable to serve requests |
 
-A client MUST honor `retry_after_secs` when present.
+A client MUST honor `retry_after_secs` when present. A client MAY cap the wait a tracker asks for, in `retry_after_secs` or `interval_secs`, at a day.
 
 **Rationale.** Explicit retry guidance (as in BitTorrent's BEP 31) prevents clients from hammering a struggling tracker.

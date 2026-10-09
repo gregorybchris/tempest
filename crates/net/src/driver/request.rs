@@ -5,7 +5,7 @@ use tempest_core::io::OutRequest;
 use tempest_core::{ConnId, RequestId, Response, StreamId};
 use tempest_protocol::Message;
 use tempest_protocol::message::{MessageType, Reject, RejectReason, max_data_frame_length};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use super::bundle::Report;
 use super::conn::LEAVE_GRACE;
@@ -35,8 +35,8 @@ pub(super) struct Outgoing {
     pub request: RequestId,
     pub message: OutRequest,
     pub connection: Connection,
-    /// Where verified chunks go. Present whenever the session requests chunks.
-    pub storage: Option<Storage>,
+    /// Where verified chunks go, once storage is laid out.
+    pub storage: watch::Receiver<Option<Storage>>,
     /// What Data received draws from.
     pub throttle: Throttle,
     pub inbox: mpsc::Sender<Report>,
@@ -117,9 +117,14 @@ impl Outgoing {
     async fn response(&self, message: Message) -> Result<Response, StorageError> {
         Ok(match (self.message, message) {
             (OutRequest::Chunks { start, count }, Message::Data(data)) => {
-                let Some(storage) = &self.storage else {
-                    return Err(StorageError::Stopped);
-                };
+                // A download's storage may still be being laid out.
+                let mut laid_out = self.storage.clone();
+                let storage = laid_out
+                    .wait_for(Option::is_some)
+                    .await
+                    .map_err(|_| StorageError::Stopped)?
+                    .clone()
+                    .expect("waited for");
                 self.throttle.download(data.chunks.len() as u64).await;
                 match storage.write(start, count, data).await {
                     Ok(_) => Response::Data(Ok(())),

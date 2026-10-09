@@ -14,7 +14,6 @@ use tempest_ui_kit::theme::bool_attr;
 
 use crate::api;
 use crate::browse::Purpose;
-use crate::config::Config;
 use crate::controls::Controls;
 use crate::edits::ShareForm;
 use crate::list::Move;
@@ -75,13 +74,11 @@ pub fn Share() -> impl IntoView {
 #[component]
 fn NewShare() -> impl IntoView {
     let controls = expect_context::<Controls>();
-    let config = expect_context::<Config>();
     let ui = expect_context::<Ui>();
     let SharePath(path_ref) = expect_context::<SharePath>();
     let path = RwSignal::new(String::new());
     let name = RwSignal::new(String::new());
     let comment = RwSignal::new(String::new());
-    let category = RwSignal::new(String::new());
     let tags = RwSignal::new(String::new());
     let problem = RwSignal::new(None::<String>);
     let building = RwSignal::new(Progress::Idle);
@@ -111,7 +108,6 @@ fn NewShare() -> impl IntoView {
             path: path.get_untracked(),
             name: name.get_untracked(),
             comment: comment.get_untracked(),
-            category: category.get_untracked(),
             tags: tags.get_untracked(),
         };
         let request = match form.request() {
@@ -163,11 +159,6 @@ fn NewShare() -> impl IntoView {
         }
         false => "On the engine's machine. It is shared from where it is; nothing is copied.",
     };
-    let categories = Signal::derive(move || {
-        let mut options = vec![(String::new(), "none".to_owned())];
-        options.extend(config.category_names().into_iter().map(|c| (c.clone(), c)));
-        options
-    });
     let text_field = move |label: &'static str,
                            value: RwSignal<String>,
                            placeholder: &'static str,
@@ -205,7 +196,6 @@ fn NewShare() -> impl IntoView {
                     <span class="field__help">{help}</span>
                 </div>
                 {text_field("Name", name, "the file or folder's name", "")}
-                <SelectField label="Category" options=categories value=category />
                 {text_field("Tags", tags, "comma-separated", "")}
                 {text_field("Comment", comment, "optional description", "share-form__wide")}
                 <div class="share-form__actions">

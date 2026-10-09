@@ -122,8 +122,6 @@ pub struct ShareForm {
     pub name: String,
     /// A description.
     pub comment: String,
-    /// The category; empty for none.
-    pub category: String,
     /// Tags, separated by commas.
     pub tags: String,
 }
@@ -143,7 +141,6 @@ impl ShareForm {
             path: Some(PathBuf::from(path)),
             name: text(&self.name),
             comment: self.comment.trim().to_owned(),
-            category: text(&self.category),
             tags: parse_tags(&self.tags),
             ..AddRequest::default()
         })
@@ -231,11 +228,9 @@ mod tests {
         assert!(form.request().is_err());
         form.path = " /srv/films/one ".to_owned();
         form.tags = "film, #2026".to_owned();
-        form.category = "films".to_owned();
         let request = form.request().unwrap();
         assert_eq!(request.path, Some(PathBuf::from("/srv/films/one")));
         assert_eq!(request.name, None);
-        assert_eq!(request.category.as_deref(), Some("films"));
         assert_eq!(request.tags.len(), 2);
         assert_eq!(folder_problem("/srv"), None);
         assert!(folder_problem("srv").is_some());

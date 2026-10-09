@@ -608,14 +608,14 @@ fn downloads_count_by_day_and_trend() {
 }
 
 #[test]
-fn seeders_sort_uses_the_live_swarms() {
+fn availability_sort_uses_the_live_swarms() {
     let mut catalog = catalog(false);
     let alice = Key::new(1);
     for n in 1..=3 {
         publish(&mut catalog, &alice, n, u64::from(n));
     }
     let query = ListingQuery {
-        sort: Sort::Seeders,
+        sort: Sort::Availability,
         ..ListingQuery::default()
     };
     let swarm = |id: &BundleId| BundleStats {

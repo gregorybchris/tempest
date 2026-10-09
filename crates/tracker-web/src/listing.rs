@@ -201,7 +201,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                             }
                         }}
                         <Stats>
-                            <Stat label="seeders" value=Signal::derive(move || format::count(swarm().complete)) />
+                            <Stat label="sharing" value=Signal::derive(move || format::count(swarm().complete)) />
                             <Stat label="downloading" value=Signal::derive(move || format::count(swarm().incomplete)) />
                             <Stat label="downloads" value=Signal::derive(move || format::count(listing.with(|l| l.downloads))) />
                         </Stats>

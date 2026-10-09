@@ -45,7 +45,7 @@ pub fn sort_label(sort: Sort) -> &'static str {
     match sort {
         Sort::Relevance => "best match",
         Sort::Newest => "newest",
-        Sort::Seeders => "seeders",
+        Sort::Availability => "availability",
         Sort::Votes => "votes",
         Sort::Trending => "trending",
     }

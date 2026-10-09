@@ -4145,3 +4145,15 @@ This revises D-175, D-182 and D-189.
 
 **Rationale:** One peer ID per running process, which peers, trackers and LAN discovery assume, without breaking links a share has printed. Scripts can tell giving up from failing.
 
+
+---
+
+## D-254: The tracker website counts peers as sharing and downloading
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The tracker website labelled a swarm's counts "seeders", "getting" and "got it" in search results, and "seeders", "downloading" and "downloads" on a listing. "Seeder" is the BitTorrent term D-016 set aside, and the rest were improvised to fit narrow columns.
+
+**Decision:** The website uses the words the client UIs use for a transfer's status: **sharing** (peers with the whole bundle, the glossary's complete peers), **downloading** (incomplete peers) and **downloads** (completed downloads), in both places. The sort by complete peers is **availability**, `sort=availability` in queries, replacing `seeders`.
+
+**Rationale:** One word per count, the same on every screen, and the same as what people see their own transfers called.

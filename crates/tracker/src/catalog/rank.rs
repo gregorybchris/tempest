@@ -95,7 +95,7 @@ impl Keyed {
         let key = match sort {
             Sort::Relevance => [relevance(ranked.text_score, s), 0.0],
             Sort::Newest => [0.0, 0.0],
-            Sort::Seeders => [s.swarm.complete as f64, s.swarm.incomplete as f64],
+            Sort::Availability => [s.swarm.complete as f64, s.swarm.incomplete as f64],
             Sort::Votes => [net_votes(&s.votes) as f64, s.votes.up as f64],
             Sort::Trending => [s.trending, health(&s.swarm)],
         };
@@ -253,7 +253,7 @@ mod tests {
             ),
         ];
         assert_eq!(order(listings.clone(), Sort::Newest), [4, 3, 2, 1]);
-        assert_eq!(order(listings.clone(), Sort::Seeders), [2, 1, 4, 3]);
+        assert_eq!(order(listings.clone(), Sort::Availability), [2, 1, 4, 3]);
         assert_eq!(order(listings.clone(), Sort::Votes), [3, 4, 2, 1]);
         // Swarm health breaks trending's ties: 1 + 9/4 beats 3.
         assert_eq!(order(listings.clone(), Sort::Trending), [4, 1, 2, 3]);

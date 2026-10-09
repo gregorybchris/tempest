@@ -27,7 +27,7 @@ pub enum Sort {
     /// The most recently listed first.
     Newest,
     /// The healthiest swarm first: the most complete peers, then the most peers.
-    Seeders,
+    Availability,
     /// The most votes up, less votes down, first.
     Votes,
     /// The most downloads lately first, recent days counting most.
@@ -39,7 +39,7 @@ impl Sort {
     pub const ALL: [Sort; 5] = [
         Sort::Relevance,
         Sort::Newest,
-        Sort::Seeders,
+        Sort::Availability,
         Sort::Votes,
         Sort::Trending,
     ];
@@ -49,7 +49,7 @@ impl Sort {
         match self {
             Sort::Relevance => "relevance",
             Sort::Newest => "newest",
-            Sort::Seeders => "seeders",
+            Sort::Availability => "availability",
             Sort::Votes => "votes",
             Sort::Trending => "trending",
         }

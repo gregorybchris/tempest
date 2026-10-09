@@ -756,7 +756,7 @@ async fn sorts_rank_by_swarm_votes_and_downloads() {
     let (_tracker, router) = weather_and_models().await;
     let (b1, b2, b3) = (bundle(1), bundle(2), bundle(3));
     // Every bundle has its publisher as a complete peer. Completing peers count as downloads,
-    // once each; peers that start complete add seeders only.
+    // once each; peers that start complete count as complete only.
     announce(&router, &Key::new(20), &b1, "completed", true).await;
     for n in [21, 22] {
         announce(&router, &Key::new(n), &b2, "started", false).await;
@@ -786,8 +786,8 @@ async fn sorts_rank_by_swarm_votes_and_downloads() {
         assert_eq!(voted.status, StatusCode::OK, "{}", voted.body);
     }
 
-    let (seeders, page) = search(&router, "sort=seeders").await;
-    assert_eq!(seeders, [3, 2, 1]);
+    let (available, page) = search(&router, "sort=availability").await;
+    assert_eq!(available, [3, 2, 1]);
     assert_eq!(page["listings"][0]["swarm"]["complete"], 4);
     let (trending, page) = search(&router, "sort=trending").await;
     assert_eq!(trending, [2, 1, 3]);
@@ -797,8 +797,11 @@ async fn sorts_rank_by_swarm_votes_and_downloads() {
     // Relevance without text is popularity: health, net votes and trending together.
     assert_eq!(search(&router, "").await.0, [1, 2, 3]);
     assert_eq!(search(&router, "sort=votes&q=climate").await.0, [1, 2]);
-    assert_eq!(search(&router, "sort=seeders&q=climate").await.0, [2, 1]);
-    let (paged, page) = search(&router, "sort=seeders&offset=1&limit=1").await;
+    assert_eq!(
+        search(&router, "sort=availability&q=climate").await.0,
+        [2, 1]
+    );
+    let (paged, page) = search(&router, "sort=availability&offset=1&limit=1").await;
     assert_eq!(paged, [2]);
     assert_eq!(page["total"], 3);
 }

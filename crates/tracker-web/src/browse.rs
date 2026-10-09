@@ -478,11 +478,11 @@ fn ResultCard(
                     <dd><HealthBars swarm /></dd>
                 </div>
                 <div title="Peers with the whole bundle">
-                    <dt>"seeders"</dt>
+                    <dt>"sharing"</dt>
                     <dd class="num tone--up">{format::count(swarm.complete)}</dd>
                 </div>
-                <div title="Peers downloading it">
-                    <dt>"getting"</dt>
+                <div title="Peers still downloading it">
+                    <dt>"downloading"</dt>
                     <dd class="num tone--down">{format::count(swarm.incomplete)}</dd>
                 </div>
                 <div title="Votes up less votes down">
@@ -490,7 +490,7 @@ fn ResultCard(
                     <dd class="num">{present::score(listing.votes)}</dd>
                 </div>
                 <div title="Completed downloads">
-                    <dt>"got it"</dt>
+                    <dt>"downloads"</dt>
                     <dd class="num">{format::count(listing.downloads)}</dd>
                 </div>
             </dl>

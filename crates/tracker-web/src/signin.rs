@@ -164,12 +164,11 @@ fn SignIn() -> impl IntoView {
             view! {
                 <div class="signin__code" aria-label="Your sign-in code">{code}</div>
                 <ol class="signin__steps">
-                    <li>
-                        <p>"On the computer where you use Tempest, run:"</p>
-                        <crate::views::Copyable text=command what="command" />
-                        <Show when=invites>
+                    <Show when=invites>
+                        <li>
+                            <p>"This tracker needs an invite the first time you sign in. Enter yours, or skip this if you've signed in here before."</p>
                             <label class="field signin__invite">
-                                <span class="field__label">"Invite (needed the first time)"</span>
+                                <span class="field__label">"Invite"</span>
                                 <input
                                     class="input"
                                     type="text"
@@ -179,7 +178,11 @@ fn SignIn() -> impl IntoView {
                                     on:input=move |e| invite.set(event_target_value(&e))
                                 />
                             </label>
-                        </Show>
+                        </li>
+                    </Show>
+                    <li>
+                        <p>"On the computer where you use Tempest, run:"</p>
+                        <crate::views::Copyable text=command what="command" />
                     </li>
                     <li>
                         <p class="signin__waiting">

@@ -60,7 +60,7 @@ pub struct SimWebArgs {
     no_open: bool,
 }
 
-/// `tempest-sim web`: serves the results UI and its API until Ctrl-C.
+/// `tempest-sim web`: serves the results UI and its API until Ctrl-C or SIGTERM.
 pub fn web(args: SimWebArgs) -> Result<()> {
     if ASSETS.is_empty() {
         eprintln!(
@@ -92,12 +92,29 @@ pub fn web(args: SimWebArgs) -> Result<()> {
         let address = listener.local_addr()?;
         show(&format!("http://{address}/"), !args.no_open);
         axum::serve(listener, router(sources))
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
+            .with_graceful_shutdown(interrupted())
             .await
             .context("serving the results UI")
     })
+}
+
+/// Waits for Ctrl-C, or on Unix for SIGTERM too, which service managers and containers send.
+///
+/// `tempest_net::signal::interrupted` does the same for the client and the servers; the
+/// simulator doesn't depend on the network stack for it.
+async fn interrupted() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 /// Where the answers come from.

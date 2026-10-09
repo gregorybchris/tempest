@@ -11,7 +11,7 @@ use reqwest::{Method, RequestBuilder};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tempest_http::{CertificateDer, PemObject, Trust};
+use tempest_http_client::{CertificateDer, PemObject, Trust};
 use tempest_protocol::BundleId;
 use tempest_tracker_api::account::Account;
 use tempest_tracker_api::listing::Listing;
@@ -70,7 +70,7 @@ impl ApiClient {
         cert: Option<CertificateDer<'static>>,
     ) -> Result<Self, ClientError> {
         let trust = cert.map_or(Trust::Platform, Trust::Pinned);
-        let builder = tempest_http::client_builder(trust)
+        let builder = tempest_http_client::client_builder(trust)
             .map_err(|error| ClientError::Unexpected(error.to_string()))?;
         let http = builder
             .connect_timeout(Duration::from_secs(5))

@@ -5,7 +5,7 @@
 //! their two latencies added, and a message between them is lost if either link loses it.
 //!
 //! **Bulk transfers** (Data and Manifest responses) are flows that share capacity max-min
-//! fairly (D-238): each flow gets as much as it can without taking from a flow that has less.
+//! fairly (D-245): each flow gets as much as it can without taking from a flow that has less.
 //! A flow uses its sender's upload and its receiver's download, and a relayed flow also its
 //! relay's [`Limit`]. Each of these is a *resource* with a capacity. A saturated resource has a
 //! *level*, the rate its flows get unless another resource holds them lower; an unsaturated one

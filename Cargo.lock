@@ -4767,7 +4767,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tempest-http",
+ "tempest-http-client",
  "tempest-protocol",
  "tempest-tracker-api",
  "thiserror 2.0.21",
@@ -4825,7 +4825,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tempest-http"
+name = "tempest-http-client"
 version = "0.1.0"
 dependencies = [
  "reqwest",
@@ -4854,7 +4854,7 @@ dependencies = [
  "serde_json",
  "socket2",
  "tempest-core",
- "tempest-http",
+ "tempest-http-client",
  "tempest-protocol",
  "tempest-tracker",
  "tempest-tracker-api",

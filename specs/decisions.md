@@ -2362,7 +2362,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-158: Simulated network details
 
-**Date:** 2026-10-07 · **Status:** Decided; how capacity is shared is superseded by D-238
+**Date:** 2026-10-07 · **Status:** Decided; how capacity is shared is superseded by D-245
 
 **Context:** D-069 sets a message-level network with fair sharing, but not how capacity is shared, how loss and ordering work, or what counts as a message.
 
@@ -3865,7 +3865,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-238: The simulated network shares capacity max-min fairly
+## D-245: The simulated network shares capacity max-min fairly
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3880,13 +3880,13 @@ This revises D-175, D-182 and D-189.
 - If a change hasn't settled after a bounded amount of work, every level is filled from scratch. The property test checks every rate against filling from scratch.
 - The network keeps one finish time per running flow, so the run loop no longer queues an event for every rate change and skips the stale ones.
 
-**Consequences:** the golden baselines were saved again (D-239 changed them too). Medians over 20 seeds moved by up to about 10%: `mixed` completes 10% sooner at the median, `routers` and `sessions` 6–7%, `crowd` 2% later; `crowd`'s rarest-chunk count fell from 10 to 8.5 and `strategic`'s fairness from 0.61 to 0.55. Strategic clients (D-166) now finish about 5% sooner than BitTorrent peers on the same seeds, down from the 15% recorded there, and the difference is no longer meaningful at 20 seeds (95% interval −26 s to +3 s), so `strategic::strategic_clients_download_faster_among_bittorrent_peers` fails: fast peers' spare upload now reaches everyone, which leaves less to gain by gaming them. **Open question for the owner:** whether to keep that test's claim, for example with more seeds or a more uneven swarm, or record the new result. Two validation tests (`rarest_first_keeps_every_chunk_when_the_origin_leaves` and `a_flash_crowd_finishes_near_the_bound`) already failed before this change.
+**Consequences:** the golden baselines were saved again (D-246 changed them too). Medians over 20 seeds moved by up to about 10%: `mixed` completes 10% sooner at the median, `routers` and `sessions` 6–7%, `crowd` 2% later; `crowd`'s rarest-chunk count fell from 10 to 8.5 and `strategic`'s fairness from 0.61 to 0.55. Strategic clients (D-166) now finish about 5% sooner than BitTorrent peers on the same seeds, down from the 15% recorded there, and the difference is no longer meaningful at 20 seeds (95% interval −26 s to +3 s), so `strategic::strategic_clients_download_faster_among_bittorrent_peers` fails: fast peers' spare upload now reaches everyone, which leaves less to gain by gaming them. **Open question for the owner:** whether to keep that test's claim, for example with more seeds or a more uneven swarm, or record the new result. Two validation tests (`rarest_first_keeps_every_chunk_when_the_origin_leaves` and `a_flash_crowd_finishes_near_the_bound`) already failed before this change.
 
 **Rationale:** Max-min fairness is what "share capacity fairly" means for flows, and what TCP and QUIC flows approach on access links. Working levels out only where they change keeps a change's cost near D-158's in large swarms.
 
 ---
 
-## D-239: Golden baselines name their scenario file, and draws are the same everywhere
+## D-246: Golden baselines name their scenario file, and draws are the same everywhere
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3901,7 +3901,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-240: The transfers list draws only the rows in view
+## D-247: The transfers list draws only the rows in view
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3920,7 +3920,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-241: Charts take the keyboard and touch
+## D-248: Charts take the keyboard and touch
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3938,7 +3938,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-242: Errors are announced at once
+## D-249: Errors are announced at once
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3950,7 +3950,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-243: The web UIs share their request layer and app shell through the UI kit
+## D-250: The web UIs share their request layer and app shell through the UI kit
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3967,7 +3967,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-244: The kit's stylesheet is one sheet per kind of component
+## D-251: The kit's stylesheet is one sheet per kind of component
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3981,7 +3981,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-245: The API client lives in `tempest-api`, and the TUI no longer depends on the engine
+## D-252: The API client lives in `tempest-api`, and the TUI no longer depends on the engine
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3993,14 +3993,14 @@ This revises D-175, D-182 and D-189.
 
 - `tempest-api`'s `client` feature adds `client`: `ApiClient`, its event stream and the server-sent events decoder. The web UI builds without it. The discovery file's format and names are in `tempest_api::discovery`, which the engine's server writes and the client reads.
 - `ApiClient`'s settings calls return `SettingsInfo`, the settings view the web UI already reads (D-200). The TUI uses it instead of `SettingsView` and `EngineConfig`. The engine keeps `SettingsView` as what it serves; the TUI's tests turn the engine's defaults into a `SettingsInfo` through JSON, which also checks that it reads what the engine sends.
-- `tempest-http` builds the HTTPS client both clients use: rustls on ring, trusting the platform's verifier or one pinned certificate, with Tempest's user agent. `tempest_protocol::CLIENT` is the one name and version string, sent in Hello and as the user agent.
+- `tempest-http-client` builds the HTTPS client both clients use: rustls on ring, trusting the platform's verifier or one pinned certificate, with Tempest's user agent. `tempest_protocol::CLIENT` is the one name and version string, sent in Hello and as the user agent.
 - `PEER_ALPN` moved to `tempest_protocol::message`, as `RELAY_ALPN` is in `tempest_protocol::relay`.
 
 **Rationale:** The TUI builds without the engine's dependencies, and every fact about the client's identity and TLS trust has one source.
 
 ---
 
-## D-246: Standalone runs have keys of their own; `get` has a timed-out exit code
+## D-253: Standalone runs have keys of their own; `get` has a timed-out exit code
 
 **Date:** 2026-10-08 · **Status:** Decided
 

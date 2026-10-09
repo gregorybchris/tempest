@@ -12,7 +12,7 @@ publish = false
 # Lets the engine send `ApiError` as an axum response.
 axum = ["dep:axum"]
 # The engine API's client, for native clients such as the CLI and the TUI.
-client = ["dep:reqwest", "dep:tempest-http"]
+client = ["dep:reqwest", "dep:tempest-http-client"]
 # Constructors for tests in other crates.
 testing = []
 
@@ -22,7 +22,7 @@ tempest-protocol.workspace = true
 
 axum = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
-tempest-http = { workspace = true, optional = true }
+tempest-http-client = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

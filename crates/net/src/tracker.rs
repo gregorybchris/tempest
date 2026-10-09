@@ -92,7 +92,7 @@ impl TrackerClient {
     /// A client whose requests give up after `timeout`. HTTPS certificates are checked against
     /// the platform's trust store.
     pub fn new(timeout: Duration) -> Result<Self, TrackerError> {
-        let http = tempest_http::client_builder(tempest_http::Trust::Platform)?
+        let http = tempest_http_client::client_builder(tempest_http_client::Trust::Platform)?
             .timeout(timeout)
             .build()?;
         Ok(Self { http })

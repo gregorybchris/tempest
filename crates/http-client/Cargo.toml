@@ -1,5 +1,5 @@
 [package]
-name = "tempest-http"
+name = "tempest-http-client"
 description = "The HTTPS client setup Tempest's tracker and engine API clients share"
 version.workspace = true
 edition.workspace = true

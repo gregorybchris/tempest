@@ -18,7 +18,7 @@ tempest-api = { path = "crates/api" }
 tempest-sim-api = { path = "crates/sim-api" }
 tempest-tracker-api = { path = "crates/tracker-api" }
 tempest-core = { path = "crates/core" }
-tempest-http = { path = "crates/http" }
+tempest-http-client = { path = "crates/http-client" }
 tempest-sim = { path = "crates/sim" }
 tempest-assets = { path = "crates/assets" }
 tempest-net = { path = "crates/net" }

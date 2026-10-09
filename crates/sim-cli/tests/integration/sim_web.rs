@@ -9,6 +9,20 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// The first line `stdout` prints, read on another thread so a server that prints nothing fails
+/// the test instead of hanging it.
+fn first_line(stdout: impl Read + Send + 'static) -> String {
+    let (sent, printed) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = sent.send(line);
+    });
+    printed
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the server prints its address")
+}
+
 /// Stops the server when the test ends, however it ends.
 struct Server(Child);
 
@@ -63,8 +77,7 @@ fn serves_the_api_and_the_page() {
         .unwrap();
     let stdout = child.stdout.take().unwrap();
     let _server = Server(child);
-    let mut url = String::new();
-    BufReader::new(stdout).read_line(&mut url).unwrap();
+    let url = first_line(stdout);
     let address = url
         .trim()
         .strip_prefix("http://")
@@ -99,14 +112,8 @@ fn stops_on_sigterm() {
         .unwrap();
     // The address is printed once the server listens, after the signal handler is set.
     let stdout = child.stdout.take().unwrap();
-    let (sent, printed) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut line = String::new();
-        let _ = BufReader::new(stdout).read_line(&mut line);
-        let _ = sent.send(line);
-    });
     let mut server = Server(child);
-    let line = printed.recv_timeout(Duration::from_secs(60)).unwrap();
+    let line = first_line(stdout);
     assert!(line.starts_with("http://"), "{line:?}");
 
     let pid = server.0.id().to_string();

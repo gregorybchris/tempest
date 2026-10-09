@@ -246,6 +246,19 @@ a {
   color: var(--dim);
 }
 
+/* Read by screen readers, never shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .num {
   text-align: right;
   white-space: nowrap;
@@ -1643,10 +1656,39 @@ kbd {
   color: var(--hot);
 }
 
+.chart__body:focus-visible {
+  outline-offset: 4px;
+}
+
+/* The hint names the gestures of the pointer in use, and the keys while the chart has focus. */
 .chart__hint {
   margin-top: 6px;
   color: var(--dim);
   font-size: var(--text-xs);
+}
+
+.chart__hint-touch,
+.chart__hint-keys {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .chart__hint-pointer {
+    display: none;
+  }
+
+  .chart__hint-touch {
+    display: inline;
+  }
+}
+
+.chart:has(.chart__body:focus-visible) .chart__hint > span {
+  display: none;
+}
+
+.chart:has(.chart__body:focus-visible) .chart__hint > .chart__hint-keys {
+  display: inline;
+  color: var(--fg);
 }
 
 /* ---------- Chunk map ---------- */

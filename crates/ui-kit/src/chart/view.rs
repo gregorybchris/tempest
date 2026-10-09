@@ -1,9 +1,11 @@
-//! The chart components: line charts with hover, drag-to-zoom and series toggles, bar charts
-//! with confidence intervals, and sparklines.
+//! The chart components: line charts with a readout, zoom and series toggles, bar charts with
+//! confidence intervals, and sparklines. Both charts take the keyboard and touch as well as the
+//! mouse.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use leptos::ev;
 use leptos::html::Div;
 use leptos::prelude::*;
 use send_wrapper::SendWrapper;
@@ -11,16 +13,53 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
 use super::bars::{self, Bar};
-use super::line::{self, Color, LineData, Unit};
+use super::line::{self, Color, Hover, LineData, Unit};
+use super::navigate::{Step, step};
 use super::scale::Layout;
 use crate::theme::bool_attr;
 
 /// The width charts assume until they are measured.
 const DEFAULT_WIDTH: f64 = 720.0;
 
+/// How far a touch may move, in pixels, and still be a tap.
+const TAP_SLOP: f64 = 8.0;
+
+/// Where a line chart's readout is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Readout {
+    /// Under the mouse, at this pixel x.
+    Pointer(f64),
+    /// On the sample at this x value, chosen by a key or a tap.
+    Sample(f64),
+}
+
+/// The fingers on a line chart, and the gesture they make.
+#[derive(Clone, Debug, Default)]
+struct Touches {
+    /// Each finger's pointer ID and pixel x.
+    fingers: Vec<(i32, f64)>,
+    /// Where a lone finger came down.
+    start: Option<f64>,
+    /// Whether the lone finger has moved too far to be a tap, or a pinch has begun.
+    moved: bool,
+    /// For a pinch, each finger's pointer ID and the x value it came down on.
+    pinch: Option<[(i32, f64); 2]>,
+}
+
+impl Touches {
+    fn at(&self, id: i32) -> Option<f64> {
+        self.fingers.iter().find(|f| f.0 == id).map(|f| f.1)
+    }
+}
+
 /// A line chart. Hovering shows each series' value at the nearest sample; dragging across the
 /// plot zooms to that span, and a double click or "reset zoom" zooms back out; the legend's
 /// buttons hide and show series.
+///
+/// Focused, the arrow keys step the readout from sample to sample (ten with `shift`), `home`
+/// and `end` jump to either end, `+` and `-` zoom about the readout, `0` shows everything and
+/// `esc` hides the readout; each value is announced. On a touch screen a tap shows the readout,
+/// two fingers pinch to zoom, and one finger pans a zoomed chart.
 #[component]
 pub fn LineChart(
     /// The series and units, which may change at any time.
@@ -42,34 +81,159 @@ pub fn LineChart(
         data.with(|d| hidden.with(|h| d.plot(layout, window.get(), h)))
     });
 
-    // The pointer's x in the chart's pixels, and where a drag started.
-    let pointer = RwSignal::new(None::<f64>);
+    let readout = RwSignal::new(None::<Readout>);
+    // Where a mouse drag started, in pixels.
     let drag_from = RwSignal::new(None::<f64>);
-    let hover = Memo::new(move |_| {
-        let px = pointer.get()?;
-        data.with(|d| plot.with(|p| hidden.with(|h| d.hover(p, h, px))))
+    let touches = StoredValue::new(Touches::default());
+    let hover_at = move |px: f64| data.with(|d| plot.with(|p| hidden.with(|h| d.hover(p, h, px))));
+    let hover = Memo::new(move |_| match readout.get()? {
+        Readout::Pointer(px) => hover_at(px),
+        Readout::Sample(x) => hover_at(plot.with(|p| p.x.map(x))),
     });
     let to_x = move |client_x: i32| {
         let rect = container.get_untracked()?.get_bounding_client_rect();
         Some(client_x as f64 - rect.left())
     };
+
     let on_down = move |e: web_sys::PointerEvent| {
-        if e.button() == 0 && e.pointer_type() == "mouse" {
-            drag_from.set(to_x(e.client_x()));
+        let Some(px) = to_x(e.client_x()) else {
+            return;
+        };
+        if e.pointer_type() != "touch" {
+            if e.button() == 0 {
+                drag_from.set(Some(px));
+            }
+            return;
+        }
+        let id = e.pointer_id();
+        touches.update_value(|t| {
+            t.fingers.push((id, px));
+            match t.fingers[..] {
+                [_] => {
+                    t.start = Some(px);
+                    t.moved = false;
+                }
+                [(a, pa), (b, pb)] => {
+                    let x = |px| plot.with_untracked(|p| p.x.invert(px));
+                    t.pinch = Some([(a, x(pa)), (b, x(pb))]);
+                    t.moved = true;
+                }
+                _ => {}
+            }
+        });
+    };
+    let on_move = move |e: web_sys::PointerEvent| {
+        let Some(px) = to_x(e.client_x()) else {
+            return;
+        };
+        if e.pointer_type() != "touch" {
+            readout.set(Some(Readout::Pointer(px)));
+            return;
+        }
+        let id = e.pointer_id();
+        let next = touches.try_update_value(|t| {
+            let last = t.at(id)?;
+            if let Some(finger) = t.fingers.iter_mut().find(|f| f.0 == id) {
+                finger.1 = px;
+            }
+            if let Some([(a, xa), (b, xb)]) = t.pinch {
+                let fingers = (t.at(a)?, t.at(b)?);
+                return Some(plot.with_untracked(|p| p.pinched((xa, xb), fingers)));
+            }
+            t.moved |= t.start.is_some_and(|start| (px - start).abs() > TAP_SLOP);
+            let zoomed = plot.with_untracked(|p| p.zoomed);
+            (t.moved && zoomed).then(|| plot.with_untracked(|p| p.panned(px - last)))
+        });
+        if let Some(Some(next)) = next {
+            window.set(next);
         }
     };
     let on_up = move |e: web_sys::PointerEvent| {
-        let (Some(from), Some(to)) = (drag_from.get_untracked(), to_x(e.client_x())) else {
+        let px = to_x(e.client_x());
+        if e.pointer_type() != "touch" {
+            let (Some(from), Some(to)) = (drag_from.get_untracked(), px) else {
+                return;
+            };
+            drag_from.set(None);
+            if let Some(span) = plot.with_untracked(|p| line::zoom(p, from, to)) {
+                window.set(Some(span));
+            }
             return;
-        };
-        drag_from.set(None);
-        if let Some(span) = plot.with_untracked(|p| line::zoom(p, from, to)) {
-            window.set(Some(span));
         }
+        let id = e.pointer_id();
+        let tapped = touches.try_update_value(|t| {
+            let tapped = t.fingers.len() == 1 && !t.moved;
+            t.fingers.retain(|f| f.0 != id);
+            if t.fingers.len() < 2 {
+                t.pinch = None;
+            }
+            if t.fingers.is_empty() {
+                t.start = None;
+            }
+            tapped
+        });
+        if tapped == Some(true)
+            && let Some(h) = px.and_then(|px| untrack(|| hover_at(px)))
+        {
+            readout.set(Some(Readout::Sample(h.at)));
+        }
+    };
+    let on_cancel = move |_| {
+        drag_from.set(None);
+        touches.set_value(Touches::default());
+    };
+    // A finger lifting also leaves, and its readout stays.
+    let on_leave = move |e: web_sys::PointerEvent| {
+        if e.pointer_type() != "touch" {
+            readout.set(None);
+            drag_from.set(None);
+        }
+    };
+
+    let on_key = move |e: ev::KeyboardEvent| {
+        if e.ctrl_key() || e.meta_key() || e.alt_key() {
+            return;
+        }
+        let p = plot.get_untracked();
+        let current = hover.get_untracked().map(|h| h.at);
+        let by = if e.shift_key() { 10 } else { 1 };
+        let to = match e.key().as_str() {
+            "ArrowRight" => Some(Step::By(by)),
+            "ArrowLeft" => Some(Step::By(-by)),
+            "Home" => Some(Step::First),
+            "End" => Some(Step::Last),
+            _ => None,
+        };
+        if let Some(to) = to {
+            let samples = data.with_untracked(|d| hidden.with_untracked(|h| d.samples(h)));
+            if let Some(x) = step(&samples, current, to) {
+                if x < p.window.0 || x > p.window.1 {
+                    window.set(p.showing(x));
+                }
+                readout.set(Some(Readout::Sample(x)));
+            }
+        } else {
+            let center = current.unwrap_or((p.window.0 + p.window.1) / 2.0);
+            match e.key().as_str() {
+                "+" | "=" => window.set(p.zoomed_by(center, 0.5)),
+                "-" | "_" => window.set(p.zoomed_by(center, 2.0)),
+                "0" => window.set(None),
+                "Escape" if readout.get_untracked().is_some() => readout.set(None),
+                _ => return,
+            }
+        }
+        e.prevent_default();
+    };
+    // What a key or a tap moved the readout to, for screen readers.
+    let announced = move || {
+        matches!(readout.get(), Some(Readout::Sample(_)))
+            .then(|| hover.get().map(|h| announcement(&h)))
+            .flatten()
     };
 
     let clip = format!("chart-clip-{}", next_id());
     let clip_url = format!("url(#{clip})");
+    let hint = format!("chart-hint-{}", next_id());
     let legend = Memo::new(move |_| {
         data.with(|d| {
             d.series
@@ -94,7 +258,9 @@ pub fn LineChart(
     };
 
     let selection = move || {
-        let (a, b) = (drag_from.get()?, pointer.get()?);
+        let (Some(a), Some(Readout::Pointer(b))) = (drag_from.get(), readout.get()) else {
+            return None;
+        };
         let p = plot.get();
         let x0 = a.min(b).max(p.layout.plot_left());
         let x1 = a.max(b).min(p.layout.plot_right());
@@ -125,7 +291,7 @@ pub fn LineChart(
             "chart__tooltip"
         };
         Some(view! {
-            <div class=class style=format!("left:{:.1}px", h.x)>
+            <div class=class style=format!("left:{:.1}px", h.x) aria-hidden="true">
                 <div class="chart__tooltip-title">{h.title}</div>
                 {h
                     .rows
@@ -175,21 +341,33 @@ pub fn LineChart(
                     }
                 />
             </div>
-            <div node_ref=container class="chart__body" style="position:relative">
+            <div
+                node_ref=container
+                class="chart__body"
+                style="position:relative"
+                tabindex="0"
+                role="group"
+                aria-roledescription="chart"
+                aria-label=label
+                aria-describedby=hint.clone()
+                aria-keyshortcuts="ArrowLeft ArrowRight Home End + - 0"
+                on:keydown=on_key
+                on:focusout=move |_| {
+                    if matches!(readout.get_untracked(), Some(Readout::Sample(_))) {
+                        readout.set(None);
+                    }
+                }
+            >
                 <svg
                     class="chart__svg"
-                    role="img"
-                    aria-label=label
+                    aria-hidden="true"
                     style=format!("height:{height}px")
                     viewBox=move || format!("0 0 {:.0} {height}", width.get())
                     on:pointerdown=on_down
-                    on:pointermove=move |e: web_sys::PointerEvent| pointer.set(to_x(e.client_x()))
+                    on:pointermove=on_move
                     on:pointerup=on_up
-                    on:pointercancel=move |_| drag_from.set(None)
-                    on:pointerleave=move |_| {
-                        pointer.set(None);
-                        drag_from.set(None);
-                    }
+                    on:pointercancel=on_cancel
+                    on:pointerleave=on_leave
                     on:dblclick=move |_| window.set(None)
                 >
                     <defs>
@@ -245,10 +423,25 @@ pub fn LineChart(
                     {selection}
                 </svg>
                 {tooltip}
+                <p class="sr-only" aria-live="polite">{announced}</p>
             </div>
-            <p class="chart__hint">"drag to zoom · double-click to reset"</p>
+            <p class="chart__hint" id=hint>
+                <span class="chart__hint-pointer">"drag to zoom · double-click to reset"</span>
+                <span class="chart__hint-touch">"tap for values · pinch to zoom · drag to pan"</span>
+                <span class="chart__hint-keys">"← → values · + − zoom · 0 shows all"</span>
+            </p>
         </div>
     }
+}
+
+/// A readout as one sentence: the sample, then each series' value.
+fn announcement(hover: &Hover) -> String {
+    let values: Vec<String> = hover
+        .rows
+        .iter()
+        .map(|row| format!("{} {}", row.label, row.value))
+        .collect();
+    format!("{}: {}", hover.title, values.join(", "))
 }
 
 /// A series line's classes.
@@ -263,8 +456,9 @@ fn line_class(series: &line::SeriesPaths) -> String {
     class
 }
 
-/// A bar chart with optional confidence intervals as whiskers. Hovering a bar shows its value,
-/// interval and note.
+/// A bar chart with optional confidence intervals as whiskers. Hovering or tapping a bar shows
+/// its value, interval and note; focused, the arrow keys, `home` and `end` move between bars
+/// and announce each.
 #[component]
 pub fn BarChart(
     /// The bars.
@@ -284,6 +478,37 @@ pub fn BarChart(
     let plot =
         Memo::new(move |_| bars.with(|b| bars::plot(b, unit, Layout::new(width.get(), height))));
     let active = RwSignal::new(None::<usize>);
+    // Whether the keyboard chose the bar, so it is announced.
+    let keyed = RwSignal::new(false);
+
+    let on_key = move |e: ev::KeyboardEvent| {
+        if e.ctrl_key() || e.meta_key() || e.alt_key() {
+            return;
+        }
+        let Some(last) = plot.with_untracked(|p| p.bars.len()).checked_sub(1) else {
+            return;
+        };
+        let now = active.get_untracked();
+        let next = match (e.key().as_str(), now) {
+            ("ArrowRight", None) | ("Home", _) => 0,
+            ("ArrowLeft", None) | ("End", _) => last,
+            ("ArrowRight", Some(i)) => (i + 1).min(last),
+            ("ArrowLeft", Some(i)) => i.saturating_sub(1),
+            ("Escape", Some(_)) => {
+                active.set(None);
+                e.prevent_default();
+                return;
+            }
+            _ => return,
+        };
+        e.prevent_default();
+        keyed.set(true);
+        active.set(Some(next));
+    };
+    let announced = move || {
+        let i = active.get().filter(|_| keyed.get())?;
+        plot.with(|p| p.bars.get(i).map(|bar| bar.tooltip.join(", ")))
+    };
 
     let tooltip = move || {
         let i = active.get()?;
@@ -295,7 +520,7 @@ pub fn BarChart(
         };
         let mut lines = bar.tooltip.into_iter();
         Some(view! {
-            <div class=class style=format!("left:{:.1}px", bar.x + bar.width)>
+            <div class=class style=format!("left:{:.1}px", bar.x + bar.width) aria-hidden="true">
                 <div class="chart__tooltip-title">{lines.next()}</div>
                 {lines.map(|l| view! { <div>{l}</div> }).collect_view()}
             </div>
@@ -304,14 +529,33 @@ pub fn BarChart(
 
     view! {
         <div class="chart">
-            <div node_ref=container style="position:relative">
+            <div
+                node_ref=container
+                class="chart__body"
+                style="position:relative"
+                tabindex="0"
+                role="group"
+                aria-roledescription="chart"
+                aria-label=label
+                on:keydown=on_key
+                on:focusout=move |_| {
+                    if keyed.get_untracked() {
+                        keyed.set(false);
+                        active.set(None);
+                    }
+                }
+            >
                 <svg
                     class="chart__svg"
-                    role="img"
-                    aria-label=label
+                    aria-hidden="true"
                     style=format!("height:{height}px;cursor:default")
                     viewBox=move || format!("0 0 {:.0} {height}", width.get())
-                    on:pointerleave=move |_| active.set(None)
+                    on:pointerleave=move |e: web_sys::PointerEvent| {
+                        // A finger lifting also leaves, and its bar stays shown.
+                        if e.pointer_type() != "touch" {
+                            active.set(None);
+                        }
+                    }
                 >
                     {move || plot.with(|p| {
                         let (x1, x2) = (p.layout.plot_left(), p.layout.plot_right());
@@ -350,7 +594,10 @@ pub fn BarChart(
                                         class="chart__bar-group"
                                         style=bar.color.style()
                                         data-active=move || (active.get() == Some(i)).then_some("")
-                                        on:pointerenter=move |_| active.set(Some(i))
+                                        on:pointerenter=move |_| {
+                                            keyed.set(false);
+                                            active.set(Some(i));
+                                        }
                                     >
                                         <rect class="chart__bar" x=bar.x y=bar.top width=bar.width height=bar.height.max(1.0) />
                                         {whisker}
@@ -367,6 +614,7 @@ pub fn BarChart(
                     })}
                 </svg>
                 {tooltip}
+                <p class="sr-only" aria-live="polite">{announced}</p>
             </div>
         </div>
     }

@@ -586,15 +586,14 @@ impl BundleTask {
     fn answer(&self, reply: Reply) -> Answer {
         match (reply, &self.storage) {
             (Reply::Data { start, count }, Some(storage)) => Answer::Data {
+                bytes: self.session.data_len(start, count).unwrap_or(0),
                 storage: storage.clone(),
                 start,
                 count,
             },
-            (Reply::Manifest, Some(storage)) => {
-                Answer::Message(Message::Manifest(ManifestMessage {
-                    manifest: storage.manifest_bytes().to_vec(),
-                }))
-            }
+            (Reply::Manifest, Some(storage)) => Answer::Manifest(ManifestMessage {
+                manifest: storage.manifest_bytes().to_vec(),
+            }),
             (Reply::Reject(reject), _) => Answer::Message(Message::Reject(reject)),
             // The session answers with Data or the manifest only once it has the manifest, by
             // which time storage exists, unless laying it out failed.

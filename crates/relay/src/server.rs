@@ -43,6 +43,11 @@ const MAX_PERMISSIONS_PER_SOURCE: usize = 64;
 /// Larger than any UDP payload, so no datagram is cut short.
 const MAX_UDP_PAYLOAD: usize = 65_535;
 
+/// The default limit on what a relay forwards for each registered peer in each direction, in
+/// bytes per second: 1 MiB/s. Relayed connections carry traffic only until the peers connect
+/// directly, and the limit keeps a few peers from taking a relay's whole bandwidth.
+pub const DEFAULT_RATE_LIMIT: u64 = 1 << 20;
+
 /// How a [`Relay`] binds and whom it serves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayConfig {
@@ -60,7 +65,8 @@ pub struct RelayConfig {
     /// The most peers registered at once from one IP address, or one IPv6 /64.
     pub max_per_ip: usize,
     /// The most bytes per second forwarded for each registered peer in each direction, or
-    /// `None` for no limit. Datagrams over the limit are dropped.
+    /// `None` for no limit. Datagrams over the limit are dropped. Defaults to
+    /// [`DEFAULT_RATE_LIMIT`].
     pub rate_limit: Option<u64>,
     /// How long a relay connection may go without hearing from its peer before it is lost.
     pub idle_timeout: Duration,
@@ -76,7 +82,7 @@ impl RelayConfig {
             allowlist: None,
             max_registrations: 1000,
             max_per_ip: 8,
-            rate_limit: None,
+            rate_limit: Some(DEFAULT_RATE_LIMIT),
             idle_timeout: Duration::from_secs(60),
         }
     }
@@ -210,13 +216,24 @@ impl Shared {
         };
 
         let observed = conn.remote_address();
-        let admitted = self.registry().admit(
-            peer,
-            Address::from(observed).ip(),
-            conn.clone(),
-            Instant::now(),
-            || self.lend_socket(),
-        );
+        let ip = Address::from(observed).ip();
+        // A new socket is bound outside the registry's lock, since that may try many ports.
+        let checked = self.registry().check(peer, ip, Instant::now());
+        let fresh = match checked {
+            Ok(false) => None,
+            Ok(true) => match self.lend_socket().await {
+                Ok(socket) => Some(socket),
+                Err(_) => {
+                    let reject = RelayReject {
+                        reason: RelayRejectReason::Full,
+                        message: "the relay has no port to lend".into(),
+                    };
+                    return refuse(&conn, send, reject).await;
+                }
+            },
+            Err(reject) => return refuse(&conn, send, reject).await,
+        };
+        let admitted = (self.registry()).admit(peer, ip, conn.clone(), Instant::now(), fresh);
         let admitted = match admitted {
             Ok(admitted) => admitted,
             Err(reject) => return refuse(&conn, send, reject).await,
@@ -236,16 +253,21 @@ impl Shared {
             .release(peer, admitted.generation, Instant::now());
     }
 
-    /// Binds a socket to lend, on the relay's IP.
-    fn lend_socket(&self) -> io::Result<Arc<UdpSocket>> {
+    /// Binds a socket to lend, on the relay's IP, on a blocking thread: trying a range of ports
+    /// may take many system calls.
+    async fn lend_socket(&self) -> io::Result<Arc<UdpSocket>> {
         let ip = self.config.bind.ip();
-        let socket = match &self.config.ports {
-            None => udp_socket(SocketAddr::new(ip, 0))?,
+        let ports = self.config.ports.clone();
+        let bind = move || match ports {
+            None => udp_socket(SocketAddr::new(ip, 0)),
             Some(ports) => ports
-                .clone()
+                .into_iter()
                 .find_map(|port| udp_socket(SocketAddr::new(ip, port)).ok())
-                .ok_or_else(|| io::Error::from(io::ErrorKind::AddrInUse))?,
+                .ok_or_else(|| io::Error::from(io::ErrorKind::AddrInUse)),
         };
+        let socket = tokio::task::spawn_blocking(bind)
+            .await
+            .map_err(io::Error::other)??;
         socket.set_nonblocking(true)?;
         Ok(Arc::new(UdpSocket::from_std(socket)?))
     }
@@ -395,8 +417,7 @@ impl<'a> Forwarder<'a> {
             return;
         };
         let now = Instant::now();
-        if !self.permissions.allows(to, now)
-            || self.outbound.take(packet.len() as u64, now).is_some()
+        if !self.permissions.send(to, now) || self.outbound.take(packet.len() as u64, now).is_some()
         {
             return;
         }

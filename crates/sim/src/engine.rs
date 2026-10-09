@@ -916,6 +916,15 @@ impl<'a, 's> Simulation<'a, 's> {
                 self.queue.push(arrive, event);
             }
             TransferKind::Manifest => {
+                // The sender's session counts the manifest as open until it is sent.
+                let sent = Inbound::DataSent { stream };
+                self.queue.push(
+                    now,
+                    Event::Inbound {
+                        conn,
+                        inbound: sent,
+                    },
+                );
                 let response = Response::Manifest(ManifestMessage {
                     manifest: self.manifest_bytes.clone(),
                 });

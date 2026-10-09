@@ -122,6 +122,7 @@ Forwarded {                    // relay → peer
 **Implementer notes.**
 
 - The registered peer's networking layer unwraps Forwarded datagrams and hands each `packet` to its QUIC endpoint as if it had arrived from the relay path, and wraps replies on that path in Forward. QUIC stacks route by address, so a simple way to keep relayed and direct paths to the same remote distinct is to map each relayed remote to a made-up local address inside the wrapping layer.
+- A relay has to bound how many forwarding permissions it keeps per registered peer. Datagrams with forged sources can each grant one, so when the table is full, replace the oldest permission the registered peer has never sent to rather than refusing new ones: forged sources never get answers, so they can't crowd out the addresses the peer is talking with. Also limit the permissions per source address, so one host's ports can't fill the table.
 - The relay connection's own path must carry UDP payloads of about 1,300 bytes, enough for a 1,200-byte peer packet plus the wrapper and the relay connection's QUIC overhead.
 - Tell the user when a connection is relayed, since it will usually be slower.
 

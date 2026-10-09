@@ -46,6 +46,10 @@ const DAY: u64 = 24 * 60 * 60;
 /// How long a sign-in code can be signed and its session collected.
 const CHALLENGE_LIFETIME: u64 = 10 * 60;
 
+/// How deep into a search's ranked matches pages reach: a page's offset and limit together.
+/// Ranking keeps this many of the best matches as they are found, rather than all of them.
+pub const MAX_DEPTH: u64 = 10_000;
+
 /// The most sign-in challenges outstanding at once, which bounds their memory.
 const MAX_CHALLENGES: usize = 10_000;
 
@@ -305,8 +309,8 @@ impl Catalog {
         })
     }
 
-    /// Signs in with a signed challenge that reached the tracker at `authority` (see
-    /// [`tempest_tracker_api::account::normalize_authority`]).
+    /// Signs in with a challenge signed for the tracker at `authority`, its public URL's (see
+    /// [`crate::Tracker::public_url`]).
     pub fn sign_in(
         &mut self,
         now: u64,
@@ -323,9 +327,9 @@ impl Catalog {
         }
         let message = sign_in_message(authority, &code);
         if !verify(&request.key, &message, &request.sig) {
-            return Err(failed(
-                "the signature doesn't verify for this key, code and tracker address",
-            ));
+            return Err(failed(&format!(
+                "the signature doesn't verify for this key, code and the tracker address {authority}"
+            )));
         }
         let account = match self.store.account(&request.key)? {
             Some(_) => self.account(&request.key)?,
@@ -532,6 +536,14 @@ impl Catalog {
         self.store.record_download(bundle, now / DAY)
     }
 
+    /// Drops the listings that have waited for their manifests for `lifetime` since they were
+    /// made or last edited, and returns how many. Nobody serves those bundles, or nobody the
+    /// tracker can reach; a sharer's next announce asks again.
+    pub fn drop_pending(&mut self, now: u64, lifetime: Duration) -> Result<usize, StoreError> {
+        self.store
+            .delete_pending_before(now.saturating_sub(lifetime.as_secs()))
+    }
+
     /// The bundles whose listings wait for their manifests, with their publishers, oldest
     /// first.
     pub fn pending(&self) -> Result<Vec<(BundleId, PeerId)>, StoreError> {
@@ -577,39 +589,38 @@ impl Catalog {
         swarm: impl Fn(&BundleId) -> BundleStats,
     ) -> Result<ListingPage, Refusal> {
         self.sync_blocked()?;
-        let found = self
-            .search
-            .search(&query.q, query.category.as_deref(), &query.tags)
-            .map_err(StoreError::from)?;
         let today = now / DAY;
         let mut votes = self.store.vote_counts()?;
         let mut downloads = self
             .store
             .downloads_since(today.saturating_sub(rank::TRENDING_DAYS))?;
-        let mut ranked: Vec<rank::Ranked> = found
-            .matches
-            .into_iter()
-            .map(|found| rank::Ranked {
-                bundle: found.bundle,
-                text_score: found.score,
-                signals: rank::Signals {
-                    created: found.created,
-                    swarm: swarm(&found.bundle),
-                    votes: votes.remove(&found.bundle).unwrap_or_default(),
-                    trending: rank::trending(
-                        downloads.remove(&found.bundle).unwrap_or_default(),
-                        today,
-                    ),
-                },
+        let limit = query.limit.min(MAX_PAGE);
+        let depth = query.offset.saturating_add(u64::from(limit)).min(MAX_DEPTH);
+        let mut top = rank::Top::new(query.sort, depth as usize);
+        let mut total = 0;
+        let facets = self
+            .search
+            .search(&query.q, query.category.as_deref(), &query.tags, |found| {
+                total += 1;
+                top.push(rank::Ranked {
+                    bundle: found.bundle,
+                    text_score: found.score,
+                    signals: rank::Signals {
+                        created: found.created,
+                        swarm: swarm(&found.bundle),
+                        votes: votes.remove(&found.bundle).unwrap_or_default(),
+                        trending: rank::trending(
+                            downloads.remove(&found.bundle).unwrap_or_default(),
+                            today,
+                        ),
+                    },
+                });
             })
-            .collect();
-        rank::sort(&mut ranked, query.sort);
+            .map_err(StoreError::from)?;
 
-        let total = ranked.len() as u64;
         let start = usize::try_from(query.offset).unwrap_or(usize::MAX);
-        let limit = query.limit.min(MAX_PAGE) as usize;
         let mut listings = Vec::new();
-        for ranked in ranked.iter().skip(start).take(limit) {
+        for ranked in top.into_sorted().iter().skip(start) {
             // The store and the index change together under the catalog's lock.
             if let Some(mut listing) = self.store.listing(&ranked.bundle, viewer)? {
                 listing.swarm = ranked.signals.swarm;
@@ -619,7 +630,7 @@ impl Catalog {
         Ok(ListingPage {
             listings,
             total,
-            facets: found.facets,
+            facets,
         })
     }
 
@@ -653,14 +664,17 @@ impl Catalog {
         self.listing(bundle, Some(key))
     }
 
-    /// The comments on `bundle`'s listing, oldest first, if `viewer` can see it.
+    /// Up to `limit` of the comments on `bundle`'s listing after the comment `after`, oldest
+    /// first, if `viewer` can see the listing. At most [`MAX_PAGE`] are returned.
     pub fn comments(
         &self,
         bundle: &BundleId,
         viewer: Option<&PeerId>,
+        after: u64,
+        limit: u32,
     ) -> Result<Vec<Comment>, Refusal> {
         self.listing(bundle, viewer)?;
-        Ok(self.store.comments(bundle)?)
+        Ok(self.store.comments(bundle, after, limit.min(MAX_PAGE))?)
     }
 
     /// Adds `key`'s comment to `bundle`'s listing.

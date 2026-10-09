@@ -15,6 +15,8 @@ use tempest_protocol::tracker::{
 };
 use tempest_protocol::{Address, BundleId, PeerId, RelayIdentity};
 
+use crate::limits::client_key;
+
 /// How a tracker treats announces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackerConfig {
@@ -28,6 +30,14 @@ pub struct TrackerConfig {
     /// The most peers listed across all swarms. New peers are refused with `unavailable` beyond
     /// it, which bounds the tracker's memory.
     pub max_peers: usize,
+    /// The most peers listed across all swarms from one IP address, or one IPv6 /64, so no one
+    /// client can fill the tracker with made-up peer IDs. New peers from it are refused with
+    /// `rate_limited` beyond it.
+    pub max_peers_per_ip: usize,
+    /// The most peers listed in one swarm from one IP address, or one IPv6 /64, so no one client
+    /// can crowd a swarm's responses with made-up peer IDs. Generous enough for many people
+    /// behind one carrier-grade NAT.
+    pub max_swarm_peers_per_ip: usize,
     /// The most addresses an announce may carry in `addrs`.
     pub max_addrs: usize,
     /// The only bundles served, for a private tracker; `None` serves every bundle.
@@ -43,6 +53,8 @@ impl Default for TrackerConfig {
             min_interval: Duration::from_secs(60),
             max_num_want: 200,
             max_peers: 1_000_000,
+            max_peers_per_ip: 10_000,
+            max_swarm_peers_per_ip: 100,
             max_addrs: 16,
             allowed: None,
             relays: Vec::new(),
@@ -89,11 +101,36 @@ impl Refusal {
     }
 }
 
+/// How many peers each client lists, by the address [`client_key`] groups clients by.
+#[derive(Debug, Default)]
+struct PerClient(HashMap<IpAddr, usize>);
+
+impl PerClient {
+    fn get(&self, client: &IpAddr) -> usize {
+        self.0.get(client).copied().unwrap_or(0)
+    }
+
+    fn add(&mut self, client: IpAddr) {
+        *self.0.entry(client).or_default() += 1;
+    }
+
+    fn remove(&mut self, client: IpAddr) {
+        if let Some(count) = self.0.get_mut(&client) {
+            *count -= 1;
+            if *count == 0 {
+                self.0.remove(&client);
+            }
+        }
+    }
+}
+
 /// One peer in a swarm.
 #[derive(Debug, Clone)]
 struct Listing {
     /// Where to reach it: the observed address first, then the ones it announced.
     addrs: Vec<Address>,
+    /// The client that last announced it, as [`client_key`] groups them.
+    client: IpAddr,
     relay: Option<Address>,
     complete: bool,
     last_announce: Instant,
@@ -110,6 +147,8 @@ struct Swarm {
     peers: Vec<(PeerId, Listing)>,
     index: HashMap<PeerId, usize>,
     complete: u64,
+    /// How many of its peers each client lists.
+    per_client: PerClient,
     /// No peer expires before this, so until then the swarm needs no expiry pass and its
     /// counts are exact. Re-announces only move expiries later, so it stays a lower bound.
     earliest_expiry: Instant,
@@ -121,6 +160,7 @@ impl Swarm {
             peers: Vec::new(),
             index: HashMap::new(),
             complete: 0,
+            per_client: PerClient::default(),
             earliest_expiry: later(now, Duration::MAX),
         }
     }
@@ -140,13 +180,19 @@ impl Swarm {
         }
     }
 
-    fn insert(&mut self, peer: PeerId, listing: Listing) {
+    /// Lists `peer`, or updates its listing, counting it for its client here and in `all`, the
+    /// counts across all swarms.
+    fn insert(&mut self, peer: PeerId, listing: Listing, all: &mut PerClient) {
         self.complete += u64::from(listing.complete);
         self.earliest_expiry = self.earliest_expiry.min(listing.expires);
+        self.per_client.add(listing.client);
+        all.add(listing.client);
         match self.index.get(&peer) {
             Some(&i) => {
                 let old = std::mem::replace(&mut self.peers[i].1, listing);
                 self.complete -= u64::from(old.complete);
+                self.per_client.remove(old.client);
+                all.remove(old.client);
             }
             None => {
                 self.index.insert(peer, self.peers.len());
@@ -155,7 +201,7 @@ impl Swarm {
         }
     }
 
-    fn remove(&mut self, peer: &PeerId) -> bool {
+    fn remove(&mut self, peer: &PeerId, all: &mut PerClient) -> bool {
         let Some(i) = self.index.remove(peer) else {
             return false;
         };
@@ -164,16 +210,26 @@ impl Swarm {
             self.index.insert(*moved, i);
         }
         self.complete -= u64::from(old.complete);
+        self.per_client.remove(old.client);
+        all.remove(old.client);
         true
     }
 
     /// Forgets the peers that expired by `now`, and returns how many.
-    fn expire(&mut self, now: Instant) -> usize {
+    fn expire(&mut self, now: Instant, all: &mut PerClient) -> usize {
         if now < self.earliest_expiry {
             return 0;
         }
         let before = self.peers.len();
-        self.peers.retain(|(_, listing)| listing.expires > now);
+        let per_client = &mut self.per_client;
+        self.peers.retain(|(_, listing)| {
+            let live = listing.expires > now;
+            if !live {
+                per_client.remove(listing.client);
+                all.remove(listing.client);
+            }
+            live
+        });
         self.index = (self.peers.iter().enumerate())
             .map(|(i, (peer, _))| (*peer, i))
             .collect();
@@ -211,6 +267,8 @@ pub struct Swarms {
     swarms: HashMap<BundleId, Swarm>,
     /// The number of peers listed across all swarms.
     listed: usize,
+    /// How many peers each client lists across all swarms.
+    per_client: PerClient,
     rng: ChaCha8Rng,
 }
 
@@ -221,6 +279,7 @@ impl Swarms {
             config,
             swarms: HashMap::new(),
             listed: 0,
+            per_client: PerClient::default(),
             rng: ChaCha8Rng::seed_from_u64(seed),
         }
     }
@@ -267,9 +326,10 @@ impl Swarms {
         }
         // Canonical, so an IPv4 client seen through a dual-stack socket reads as IPv4.
         let observed = Address::new(observed_ip, request.port);
+        let client = client_key(observed_ip);
 
         let swarm = (self.swarms.entry(request.bundle)).or_insert_with(|| Swarm::new(now));
-        self.listed -= swarm.expire(now);
+        self.listed -= swarm.expire(now, &mut self.per_client);
         let known = swarm.get(&request.peer);
         if let Some(listing) = known
             && request.event == AnnounceEvent::Update
@@ -282,19 +342,33 @@ impl Swarms {
         }
 
         let peers = if request.event == AnnounceEvent::Stopped {
-            if swarm.remove(&request.peer) {
+            if swarm.remove(&request.peer, &mut self.per_client) {
                 self.listed -= 1;
             }
             Vec::new()
         } else {
-            if known.is_none() {
-                if self.listed >= config.max_peers {
-                    if swarm.is_empty() {
-                        self.swarms.remove(&request.bundle);
-                    }
-                    let refusal = Refusal::new(ErrorCode::Unavailable, "the tracker is full");
-                    return Err(refusal.retry_after(FULL_RETRY));
+            // A peer new to the swarm, or announcing from another client, counts against that
+            // client's limits.
+            let refusal = if known.is_none() && self.listed >= config.max_peers {
+                let refusal = Refusal::new(ErrorCode::Unavailable, "the tracker is full");
+                Some(refusal.retry_after(FULL_RETRY))
+            } else if known.is_none_or(|listing| listing.client != client)
+                && (swarm.per_client.get(&client) >= config.max_swarm_peers_per_ip
+                    || self.per_client.get(&client) >= config.max_peers_per_ip)
+            {
+                let message = "too many peers from this address";
+                let refusal = Refusal::new(ErrorCode::RateLimited, message);
+                Some(refusal.retry_after(config.interval))
+            } else {
+                None
+            };
+            if let Some(refusal) = refusal {
+                if swarm.is_empty() {
+                    self.swarms.remove(&request.bundle);
                 }
+                return Err(refusal);
+            }
+            if known.is_none() {
                 self.listed += 1;
             }
             let mut addrs = vec![observed];
@@ -305,12 +379,13 @@ impl Swarms {
             }
             let listing = Listing {
                 addrs,
+                client,
                 relay: request.relay,
                 complete: request.complete,
                 last_announce: now,
                 expires: later(now, config.interval.saturating_mul(2)),
             };
-            swarm.insert(request.peer, listing);
+            swarm.insert(request.peer, listing, &mut self.per_client);
             let wanted = request.num_want.min(config.max_num_want) as usize;
             swarm.sample(&mut self.rng, wanted, &request.peer)
         };
@@ -382,8 +457,9 @@ impl Swarms {
     /// Forgets every peer that expired by `now`, and the swarms left empty.
     pub fn sweep(&mut self, now: Instant) {
         let mut forgotten = 0;
+        let per_client = &mut self.per_client;
         self.swarms.retain(|_, swarm| {
-            forgotten += swarm.expire(now);
+            forgotten += swarm.expire(now, per_client);
             !swarm.is_empty()
         });
         self.listed -= forgotten;
@@ -651,10 +727,63 @@ mod tests {
         assert_eq!(s.listed(), 0);
     }
 
+    #[test]
+    fn one_client_lists_a_limited_number_of_peers() {
+        let config = TrackerConfig {
+            max_swarm_peers_per_ip: 2,
+            max_peers_per_ip: 3,
+            min_interval: Duration::ZERO,
+            ..TrackerConfig::default()
+        };
+        let mut s = Swarms::new(config, 1);
+        let t = Instant::now();
+        let other: IpAddr = "203.0.113.2".parse().unwrap();
+        let announce = |s: &mut Swarms, b: u8, p: u8, from: IpAddr| {
+            let mut announce = request(p, AnnounceEvent::Started);
+            announce.bundle = bundle(b);
+            s.announce(t, &announce, from)
+        };
+        announce(&mut s, 1, 1, ip()).unwrap();
+        announce(&mut s, 1, 2, ip()).unwrap();
+        let refusal = announce(&mut s, 1, 3, ip()).unwrap_err();
+        assert_eq!(refusal.status, 429);
+        assert_eq!(refusal.body.error, ErrorCode::RateLimited);
+        assert_eq!(refusal.body.retry_after_secs, Some(300));
+        // Peers already listed still announce, and other clients still join.
+        announce(&mut s, 1, 1, ip()).unwrap();
+        announce(&mut s, 1, 3, other).unwrap();
+
+        // Across swarms, the client's total is limited too.
+        announce(&mut s, 2, 4, ip()).unwrap();
+        assert!(announce(&mut s, 3, 5, ip()).is_err());
+        assert!(!s.swarms.contains_key(&bundle(3)));
+
+        // A peer that leaves frees its place.
+        let mut stopped = request(4, AnnounceEvent::Stopped);
+        stopped.bundle = bundle(2);
+        s.announce(t, &stopped, ip()).unwrap();
+        announce(&mut s, 3, 5, ip()).unwrap();
+
+        // An IPv6 /64 is one client.
+        for n in 6..8 {
+            let from = format!("2001:db8::{n}").parse().unwrap();
+            announce(&mut s, 4, n, from).unwrap();
+        }
+        assert!(announce(&mut s, 4, 8, "2001:db8::8".parse().unwrap()).is_err());
+        assert!(announce(&mut s, 4, 8, "2001:db8:0:1::8".parse().unwrap()).is_ok());
+    }
+
     /// Every swarm's counts and the total match its listings, whatever the announces.
     fn check_counts(s: &Swarms) {
         let mut listed = 0;
+        let mut all = HashMap::new();
         for swarm in s.swarms.values() {
+            let mut mine = HashMap::new();
+            for (_, listing) in &swarm.peers {
+                *mine.entry(listing.client).or_insert(0) += 1;
+                *all.entry(listing.client).or_insert(0) += 1;
+            }
+            assert_eq!(swarm.per_client.0, mine);
             assert!(!swarm.peers.is_empty());
             let complete = swarm.peers.iter().filter(|(_, l)| l.complete).count();
             assert_eq!(swarm.complete, complete as u64);
@@ -666,20 +795,24 @@ mod tests {
             listed += swarm.peers.len();
         }
         assert_eq!(s.listed, listed);
+        assert_eq!(s.per_client.0, all);
     }
 
     proptest::proptest! {
         #[test]
         fn counts_stay_consistent(
-            steps in proptest::collection::vec((0u8..3, 0u8..6, 0u8..4, proptest::bool::ANY, 0u64..400), 1..200)
+            steps in proptest::collection::vec((0u8..3, 0u8..6, 0u8..4, proptest::bool::ANY, 0u64..400, 0u8..3), 1..200)
         ) {
             let config = TrackerConfig {
                 max_peers: 10,
+                max_peers_per_ip: 5,
+                max_swarm_peers_per_ip: 3,
                 ..TrackerConfig::default()
             };
             let mut s = Swarms::new(config, 3);
             let mut t = Instant::now();
-            for (b, p, event, complete, wait) in steps {
+            for (b, p, event, complete, wait, from) in steps {
+                let from = IpAddr::from([198, 51, 100, from]);
                 t += Duration::from_secs(wait);
                 let event = [
                     AnnounceEvent::Started,
@@ -690,7 +823,7 @@ mod tests {
                 let mut announce = request(p, event);
                 announce.bundle = bundle(b);
                 announce.complete = complete;
-                if let Ok(response) = s.announce(t, &announce, ip()) {
+                if let Ok(response) = s.announce(t, &announce, from) {
                     proptest::prop_assert!(response.peers.iter().all(|e| e.peer != peer(p)));
                     let stats = s.stats(t, &bundle(b));
                     proptest::prop_assert_eq!(
@@ -699,6 +832,10 @@ mod tests {
                     );
                 }
                 check_counts(&s);
+                for swarm in s.swarms.values() {
+                    proptest::prop_assert!(swarm.per_client.0.values().all(|&n| n <= 3));
+                }
+                proptest::prop_assert!(s.per_client.0.values().all(|&n| n <= 5));
                 if wait > 350 {
                     s.sweep(t);
                     check_counts(&s);

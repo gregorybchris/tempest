@@ -33,7 +33,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization, serde for tracker JSON) |
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | (none) |
 | `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `core`, `tracker-api` |
-| `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `tracker-api` |
+| `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `tracker-api`, `http` |
 | `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `tracker-api` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results and the queries the results UI reads (D-204) | `core`, `sim-api` |
 | `sim-api` | The simulation results API's types and query strings, shared by its server and the results UI (D-204) | (none) |
@@ -44,7 +44,8 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `sim-web` | Simulation results UI, served by `tempest-sim web` | `ui-kit`, `sim-api` |
 | `tracker-api` | The types and text rules of a tracker's listing API, shared by the tracker, the client and the tracker website (D-206, D-234) | (none) |
 | `tracker-web` | The tracker website (D-210, D-234) | `ui-kit`, `tracker-api` |
-| `tracker` | Tracker server: peer-list service, and a catalog (its internal store) with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `tracker-api`, `net` |
+| `tracker` | Tracker server: peer-list service, and a catalog (its internal store) with search and ranking, fetching listed bundles' manifests (D-207, D-209) | `tracker-api`, `net`, `http` |
+| `http` | Serving HTTP/1.1 with a connection cap and timeouts, for the tracker and the engine API (D-238) | (none) |
 | `relay` | Relay library | `net` (D-185) |
 | `assets` | Serving embedded web UIs' files, and embedding them from build scripts (D-201); shared by the binaries that embed a UI (D-214, D-236) | (none) |
 | `tempest` | The `tempest` binary: CLI subcommands, launches engine, TUI and web UI; embeds the client web UI's built files (D-201). It has no tracker or relay server, only their clients in `net` (D-236) | the client's crates, not `sim`, `tracker` or `relay` |

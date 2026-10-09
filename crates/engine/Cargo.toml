@@ -11,6 +11,7 @@ rust-version.workspace = true
 tempest-api = { workspace = true, features = ["axum"] }
 tempest-tracker-api.workspace = true
 tempest-core.workspace = true
+tempest-http.workspace = true
 tempest-net.workspace = true
 tempest-protocol.workspace = true
 

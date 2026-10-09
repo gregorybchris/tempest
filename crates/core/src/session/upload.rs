@@ -10,6 +10,11 @@ use crate::io::{Action, ConnId, Reply, StreamId};
 use crate::time::Time;
 use crate::upload::{PeerView, QueuedUpload, UploadContext};
 
+/// The most Manifests sent on one connection. A requester needs one; a second allows for a
+/// request it gave up on. A manifest can be 64 MiB, so more would let a peer that is never
+/// served take bandwidth without limit.
+pub const MAX_MANIFESTS_PER_CONNECTION: u32 = 2;
+
 impl Session {
     fn reject(&mut self, conn: ConnId, stream: StreamId, reason: RejectReason, message: String) {
         self.actions.push(Action::Respond {
@@ -52,6 +57,16 @@ impl Session {
             return Ok(());
         };
         let Message::Request(request) = message else {
+            // One at a time, so a requester holds at most one manifest's memory here.
+            if conn.manifest_sending.is_some()
+                || conn.manifests_sent >= MAX_MANIFESTS_PER_CONNECTION
+            {
+                let message = "the manifest was already sent".to_owned();
+                self.reject(id, stream, RejectReason::Busy, message);
+                return Ok(());
+            }
+            conn.manifest_sending = Some(stream);
+            conn.manifests_sent += 1;
             self.actions.push(Action::Respond {
                 conn: id,
                 stream,
@@ -98,15 +113,22 @@ impl Session {
     pub(super) fn on_reset(&mut self, now: Time, id: ConnId, stream: StreamId) {
         let conn = self.conns.get_mut(&id).expect("open");
         conn.held.retain(|(s, _)| *s != stream);
+        if conn.manifest_sending == Some(stream) {
+            conn.manifest_sending = None;
+        }
         if conn.incoming.remove(&stream).is_some_and(|i| i.sending) {
             self.uploading -= 1;
             self.pump_uploads(now);
         }
     }
 
-    /// The driver finished sending Data on a stream.
+    /// The driver finished sending Data or the Manifest on a stream.
     pub(super) fn on_data_sent(&mut self, now: Time, id: ConnId, stream: StreamId) {
         let conn = self.conns.get_mut(&id).expect("open");
+        if conn.manifest_sending == Some(stream) {
+            conn.manifest_sending = None;
+            return;
+        }
         let Some(&incoming) = conn.incoming.get(&stream).filter(|i| i.sending) else {
             return;
         };

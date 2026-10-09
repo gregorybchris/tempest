@@ -12,8 +12,9 @@
 //! A command-line client does all three steps itself. A browser does steps 1 and 3 and shows
 //! the code, which the user's client signs in step 2, so the key never leaves the client.
 //!
-//! The signed message names the tracker as the signer reached it, so a tracker can't pass on a
-//! code it got from another tracker and use the signature to sign in there.
+//! The signed message names the tracker by the URL the signer reached it at, and the tracker
+//! checks it against its own public URL, never the request's headers. So a site can't pass on a
+//! code it got from a tracker and use its visitor's signature to sign in there.
 
 use serde::{Deserialize, Serialize};
 use tempest_protocol::PeerId;

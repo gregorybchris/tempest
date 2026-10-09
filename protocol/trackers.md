@@ -60,6 +60,7 @@ POST /tempest/v1/announce
 - The tracker MUST NOT include the requesting peer in `peers`. It SHOULD return at most `num_want` peers (and MAY cap `num_want`), chosen at random.
 - On `stopped`, the tracker SHOULD remove the peer immediately and MAY return an empty `peers` list.
 - The tracker SHOULD forget a peer that hasn't announced for twice the most recent `interval_secs` it gave that peer.
+- The tracker MAY limit how many peers it lists from one source address, and refuse announces of further peers from it with `rate_limited`. Peer IDs cost nothing to make up, so without such a limit one host could crowd a swarm with peers that don't exist.
 
 **Example:**
 
@@ -150,7 +151,7 @@ An error is an HTTP status code (4xx or 5xx) with a JSON body:
 | Code | Typical status | Meaning |
 | --- | --- | --- |
 | `invalid_request` | 400 | A field is missing or malformed |
-| `rate_limited` | 429 | The client is announcing too often |
+| `rate_limited` | 429 | The client is announcing too often, or for too many peers |
 | `bundle_not_allowed` | 403 | This tracker doesn't serve this bundle (e.g. a private tracker) |
 | `unavailable` | 503 | The tracker is temporarily unable to serve requests |
 

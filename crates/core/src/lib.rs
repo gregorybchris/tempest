@@ -34,7 +34,10 @@ pub use config::{Config, Profile, Settings};
 pub use event::{Event, EventKind};
 pub use inspect::{ChunkCell, ChunkState, PeerStatus};
 pub use io::{Action, ConnId, ConnInfo, Inbound, Reply, RequestId, Response, StreamId};
-pub use session::{LocalPeer, MAX_PEER_ADDRESSES, OPENING_TIMEOUT, Session, SessionError};
+pub use session::{
+    LocalPeer, MAX_MANIFESTS_PER_CONNECTION, MAX_PEER_ADDRESSES, OPENING_TIMEOUT, Session,
+    SessionError,
+};
 pub use time::Time;
 
 /// The random number generator every session draws from, seeded by its driver.

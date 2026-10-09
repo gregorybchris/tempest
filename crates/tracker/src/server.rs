@@ -18,13 +18,14 @@ use tempest_protocol::tracker::{
     API_PREFIX, AnnounceEvent, AnnounceRequest, BundleStats, ErrorCode, listing_message,
 };
 use tempest_tracker_api::listing::Listing;
+use tempest_tracker_api::{account, codes};
 use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
 use crate::fetcher::{self, FetcherConfig};
-use crate::http::{self, HttpLimits};
 use crate::limits::{Action, CatalogLimits, Limiter};
 use crate::swarms::{Refusal, Swarms, TrackerConfig};
+use tempest_http::HttpLimits;
 
 /// The largest request body accepted. An announce with every field at its limit is far smaller.
 const MAX_BODY: usize = 16 * 1024;
@@ -40,10 +41,25 @@ pub struct Tracker {
     catalog: Option<Arc<Mutex<Catalog>>>,
     fetcher: FetcherConfig,
     behind_proxy: bool,
+    public: Option<PublicUrl>,
     limiter: Arc<Mutex<Limiter>>,
     http_limits: HttpLimits,
     pages: Option<Router>,
 }
+
+/// The URL clients reach the tracker at, which sign-ins name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublicUrl {
+    /// Its authority, as [`sign_in_message`](tempest_tracker_api::account::sign_in_message)
+    /// takes it.
+    authority: String,
+    https: bool,
+}
+
+/// A public URL that isn't an `http` or `https` URL with a host.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the public URL must be an http or https URL, such as https://tracker.example.org")]
+pub struct InvalidPublicUrl;
 
 impl Tracker {
     /// A tracker with no swarms yet.
@@ -54,6 +70,7 @@ impl Tracker {
             catalog: None,
             fetcher: FetcherConfig::default(),
             behind_proxy: false,
+            public: None,
             limiter: Arc::new(Mutex::new(Limiter::new(CatalogLimits::default()))),
             http_limits: HttpLimits::default(),
             pages: None,
@@ -100,6 +117,24 @@ impl Tracker {
         self
     }
 
+    /// The URL clients reach the tracker at, such as `https://tracker.example.org`. A sign-in
+    /// must be signed for its host and port (D-239), whatever the request's headers say, so no
+    /// other site can pass on this tracker's codes and sign its visitors in here. Without one,
+    /// only clients on the tracker's own machine can sign in.
+    pub fn public_url(mut self, url: &str) -> Result<Self, InvalidPublicUrl> {
+        let scheme = url
+            .split_once("://")
+            .map(|(scheme, _)| scheme.to_ascii_lowercase());
+        let https = match scheme.as_deref() {
+            Some("https") => true,
+            Some("http") => false,
+            _ => return Err(InvalidPublicUrl),
+        };
+        let authority = account::authority(url).ok_or(InvalidPublicUrl)?;
+        self.public = Some(PublicUrl { authority, https });
+        Ok(self)
+    }
+
     /// The tracker's routes. Serve them with connect info, as [`Tracker::serve`] does, so the
     /// announce handler can observe the client's address.
     pub fn router(&self) -> Router {
@@ -129,8 +164,8 @@ impl Tracker {
     ) -> io::Result<()> {
         let mut sweeper = tokio::spawn(self.clone().sweep());
         let mut fetching = match &self.catalog {
-            Some(catalog) => {
-                let run = fetcher::run(self.clone(), catalog.clone(), self.fetcher.clone());
+            Some(_) => {
+                let run = fetcher::run(self.clone(), self.fetcher.clone());
                 Some(tokio::spawn(run))
             }
             None => None,
@@ -141,7 +176,7 @@ impl Tracker {
                 None => std::future::pending().await,
             }
         };
-        let served = http::serve(listener, self.router(), self.http_limits, shutdown);
+        let served = tempest_http::serve(listener, self.router(), self.http_limits, shutdown);
         // The sweeper and the fetcher run until aborted; either ending early is a fault.
         let result = tokio::select! {
             () = served => Ok(()),
@@ -227,22 +262,34 @@ impl Tracker {
             .check(Instant::now(), action, ip)
     }
 
-    pub(crate) fn is_behind_proxy(&self) -> bool {
-        self.behind_proxy
+    /// Whether clients reach the tracker over HTTPS: through a proxy, or at an `https` public
+    /// URL.
+    pub(crate) fn is_https(&self) -> bool {
+        self.behind_proxy || self.public.as_ref().is_some_and(|public| public.https)
     }
 
-    /// The authority the client reached the tracker at: `Host`, or behind a proxy the last
-    /// `X-Forwarded-Host`, which the proxy sets.
-    pub(crate) fn authority(&self, headers: &HeaderMap) -> Option<String> {
-        let header = |name: &str| {
-            let value = headers.get_all(name).iter().next_back()?.to_str().ok()?;
-            Some(value.rsplit(',').next()?.trim().to_owned())
-        };
-        let forwarded = self
-            .behind_proxy
-            .then(|| header("x-forwarded-host"))
-            .flatten();
-        forwarded.or_else(|| header("host"))
+    /// The authority a sign-in must be signed for: the public URL's. Without one, the `Host`
+    /// the request reached, but only if it names this machine: a client elsewhere could have
+    /// been sent by another site with a `Host` of its choosing.
+    pub(crate) fn sign_in_authority(&self, headers: &HeaderMap) -> Result<String, Refusal> {
+        if let Some(public) = &self.public {
+            return Ok(public.authority.clone());
+        }
+        let host = headers
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok())
+            .map(account::normalize_authority);
+        match host {
+            Some(host) if is_loopback(&host) => Ok(host),
+            _ => {
+                let message = "this tracker takes sign-ins only from its own machine until its \
+                    operator sets its public URL (tempest-tracker --public-url)";
+                Err(Refusal {
+                    status: 403,
+                    ..Refusal::new(ErrorCode::Other(codes::SIGN_IN_FAILED.into()), message)
+                })
+            }
+        }
     }
 
     /// The IP address the request came from.
@@ -257,6 +304,28 @@ impl Tracker {
             false => peer.ip(),
         }
     }
+}
+
+/// Runs `work` on a blocking thread, as all of the catalog's work must: SQLite and the search
+/// index block, and so does waiting for the catalog's lock.
+pub(crate) async fn blocking<T: Send + 'static>(
+    tracker: Tracker,
+    work: impl FnOnce(&Tracker) -> T + Send + 'static,
+) -> T {
+    match tokio::task::spawn_blocking(move || work(&tracker)).await {
+        Ok(value) => value,
+        // A blocking task is cancelled only as the runtime shuts down.
+        Err(error) => std::panic::resume_unwind(error.into_panic()),
+    }
+}
+
+/// Whether `authority`'s host is this machine: `localhost` or a loopback address.
+fn is_loopback(authority: &str) -> bool {
+    let host = match authority.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => authority.split(':').next().unwrap_or(authority),
+    };
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 async fn announce(
@@ -306,29 +375,32 @@ async fn announce(
         Err(refusal) => return refuse(refusal),
     };
     if tracker.catalog.is_some() && (listing.is_some() || downloaded) {
-        let now = catalog::unix_now();
-        let mut catalog = tracker.catalog();
-        // The announce itself succeeded; the catalog's work is retried by later announces or
-        // lost, as a download count is, and neither is worth refusing it for.
-        // Asking again for a bundle the catalog knows costs nothing, so only new ones count
-        // against the client's limit. Over it, a later announce asks again.
-        let publish = listing.is_some()
-            && match catalog.knows_listing(&request.bundle) {
-                Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
-                Err(error) => {
-                    eprintln!("cannot list {}: {error}", request.bundle);
-                    false
-                }
-            };
-        if publish && let Err(error) = catalog.request_listing(now, &request.bundle, &request.peer)
-        {
-            eprintln!("cannot list {}: {error}", request.bundle);
-        }
-        // Fresh peer IDs could otherwise inflate the counts.
-        let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
-        if downloaded && let Err(error) = catalog.record_download(now, &request.bundle) {
-            eprintln!("cannot count a download of {}: {error}", request.bundle);
-        }
+        let (bundle, peer, listed) = (request.bundle, request.peer, listing.is_some());
+        blocking(tracker, move |tracker| {
+            let now = catalog::unix_now();
+            let mut catalog = tracker.catalog();
+            // The announce itself succeeded; the catalog's work is retried by later announces
+            // or lost, as a download count is, and neither is worth refusing it for.
+            // Asking again for a bundle the catalog knows costs nothing, so only new ones count
+            // against the client's limit. Over it, a later announce asks again.
+            let publish = listed
+                && match catalog.knows_listing(&bundle) {
+                    Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
+                    Err(error) => {
+                        eprintln!("cannot list {bundle}: {error}");
+                        false
+                    }
+                };
+            if publish && let Err(error) = catalog.request_listing(now, &bundle, &peer) {
+                eprintln!("cannot list {bundle}: {error}");
+            }
+            // Fresh peer IDs could otherwise inflate the counts.
+            let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
+            if downloaded && let Err(error) = catalog.record_download(now, &bundle) {
+                eprintln!("cannot count a download of {bundle}: {error}");
+            }
+        })
+        .await;
     }
     json(StatusCode::OK, &response)
 }

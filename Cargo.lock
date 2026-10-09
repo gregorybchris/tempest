@@ -4810,6 +4810,7 @@ dependencies = [
  "sha2",
  "tempest-api",
  "tempest-core",
+ "tempest-http",
  "tempest-net",
  "tempest-protocol",
  "tempest-relay",
@@ -4821,6 +4822,19 @@ dependencies = [
  "tokio-rustls",
  "tower",
  "unicode-normalization",
+]
+
+[[package]]
+name = "tempest-http"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -4959,8 +4973,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "getrandom 0.3.4",
- "hyper",
- "hyper-util",
  "proptest",
  "rand 0.9.5",
  "rand_chacha",
@@ -4969,6 +4981,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tantivy",
+ "tempest-core",
+ "tempest-http",
  "tempest-net",
  "tempest-protocol",
  "tempest-tracker-api",
@@ -5420,7 +5434,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

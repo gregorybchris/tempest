@@ -65,6 +65,13 @@ pub struct TrackerArgs {
     /// The most peers listed across all swarms.
     #[arg(long, default_value_t = TrackerConfig::default().max_peers)]
     max_peers: usize,
+    /// The most peers listed across all swarms from one IP address, or one IPv6 /64.
+    #[arg(long, default_value_t = TrackerConfig::default().max_peers_per_ip, value_name = "N")]
+    max_peers_per_ip: usize,
+    /// The most peers listed in one swarm from one IP address, or one IPv6 /64.
+    #[arg(long, default_value_t = TrackerConfig::default().max_swarm_peers_per_ip,
+        value_name = "N")]
+    max_swarm_peers_per_ip: usize,
     /// A relay to recommend to peers, as `<key>@host[:port]`, which `tempest-relay` prints
     /// when it starts. Repeat for more. The relay runs separately.
     #[arg(long, value_name = "RELAY")]
@@ -76,6 +83,12 @@ pub struct TrackerArgs {
     /// IP from the last `X-Forwarded-For` entry.
     #[arg(long)]
     behind_proxy: bool,
+    /// The URL people reach the tracker at, such as `https://tracker.example.org`. Sign-ins
+    /// are signed for it, so no other site can pass on this tracker's sign-in codes. Without
+    /// it, only this machine can sign in to the catalog. Required with `--behind-proxy` and
+    /// `--catalog`.
+    #[arg(long, value_name = "URL")]
+    public_url: Option<String>,
     #[command(flatten)]
     catalog: CatalogArgs,
 }
@@ -97,15 +110,16 @@ struct CatalogArgs {
     #[arg(long, default_value_t = FetcherConfig::default().concurrency, value_name = "N",
         requires = "catalog")]
     fetch_concurrency: usize,
-    /// The largest manifest fetched, in bytes. Bundles with larger ones stay pending.
+    /// The largest manifest fetched, in bytes. Bundles with larger ones stay pending until
+    /// they are dropped.
     #[arg(long, default_value_t = FetcherConfig::default().limits.max_manifest,
         value_name = "BYTES", requires = "catalog")]
     fetch_max_manifest: u32,
-    /// Hours after the first failed fetch of a bundle's manifest to stop trying until the
-    /// tracker restarts.
-    #[arg(long, default_value_t = FetcherConfig::default().give_up.as_secs() / 3600,
+    /// Hours a listing may wait for its manifest, from when it was made or last edited, before
+    /// it is dropped. Its sharer's next announce asks again.
+    #[arg(long, default_value_t = FetcherConfig::default().pending_lifetime.as_secs() / 3600,
         value_name = "HOURS", requires = "catalog")]
-    fetch_give_up: u64,
+    pending_hours: u64,
     /// Change a per-IP rate limit, as `action=BURST/SECONDS` (BURST at once, then one per
     /// SECONDS) or `action=off`. Actions: challenge, sign-in, browse, publish, edit, vote,
     /// comment, report, download. Repeat for more. See specs/tracker.md for the defaults.
@@ -248,7 +262,7 @@ impl CatalogArgs {
                 max_manifest: self.fetch_max_manifest,
                 ..defaults.limits
             },
-            give_up: Duration::from_secs(self.fetch_give_up.saturating_mul(3600)),
+            pending_lifetime: Duration::from_secs(self.pending_hours.saturating_mul(3600)),
             ..defaults
         }
     }
@@ -264,11 +278,19 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
     if args.min_interval > args.interval {
         anyhow::bail!("--min-interval must not be longer than --interval");
     }
+    // Behind a proxy, clients never reach the tracker at a loopback address.
+    if args.behind_proxy && args.catalog.catalog.is_some() && args.public_url.is_none() {
+        anyhow::bail!(
+            "--behind-proxy with --catalog needs --public-url, the URL people reach the tracker at"
+        );
+    }
     let catalog = args.catalog.open()?;
     let config = TrackerConfig {
         interval: Duration::from_secs(args.interval.max(1)),
         min_interval: Duration::from_secs(args.min_interval),
         max_peers: args.max_peers,
+        max_peers_per_ip: args.max_peers_per_ip,
+        max_swarm_peers_per_ip: args.max_swarm_peers_per_ip,
         allowed: (!args.allow.is_empty())
             .then(|| args.allow.iter().copied().collect::<HashSet<_>>()),
         relays: args.relay.clone(),
@@ -280,8 +302,17 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         let address = listener.local_addr()?;
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
         let mut tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
+        if let Some(url) = &args.public_url {
+            tracker = tracker.public_url(url)?;
+        }
         if let Some(catalog) = catalog {
-            eprintln!("website at http://{address}/");
+            match &args.public_url {
+                Some(url) => eprintln!("website at {url}"),
+                None => {
+                    eprintln!("website at http://{address}/");
+                    eprintln!("note: only this machine can sign in; pass --public-url to let others");
+                }
+            }
             if TRACKER_WEB.is_empty() {
                 eprintln!("note: this binary was built without the tracker website; the page says how to add it");
             }

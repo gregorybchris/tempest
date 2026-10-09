@@ -3296,7 +3296,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-207: How the tracker fetches manifests to list bundles
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-240)
 
 **Context:** D-129 has the tracker fetch a listed bundle's manifest from peers, but leaves open which peers, how often and within what limits. Every fetch is a QUIC connection the tracker opens to addresses that announces gave it.
 
@@ -3862,6 +3862,61 @@ This revises D-175, D-182 and D-189.
 - The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
 
 **Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.
+
+---
+
+## D-238: One hardened HTTP server for the tracker and the engine API
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The tracker served its routes through hyper with a connection cap and timeouts on headers and requests. The engine's API used `axum::serve`, which has none of them, and completed TLS handshakes in tasks of its own without a cap. With remote access on (D-125), anyone who can reach the port could hold connections open.
+
+**Options:** copy the tracker's serving code into the engine; move it into `tempest-net`, which both use; a small crate of its own (chosen).
+
+**Decision:** `tempest-http` serves an axum router over HTTP/1.1 with a cap on open connections, which counts connections still in their handshake, a timeout on a connection's handshake and on each request's headers, and a timeout from a request's headers to its response's headers, answered with 408 in the JSON error shape both APIs share. `serve_with` takes a handshake, so the engine runs TLS through it. The engine's API uses it with limits of its own: a request timeout long enough for slow tracker calls, and no limit on how long an event stream lasts, since the timeout ends at the response's headers. Shutdown waits a short grace period for responses in progress instead of every one.
+
+**Rationale:** One implementation of the limits, tested once. `tempest-net` is the client's networking, and a server module would bring hyper's server into everything that uses it.
+
+---
+
+## D-239: Sign-ins are checked against the tracker's configured public URL
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A sign-in signs the tracker's authority with the code (D-128), so that a code passed on from another tracker can't be used there. The tracker checked the signature against the request's `Host`, or behind a proxy `X-Forwarded-Host`. Both come from the client: a malicious site could show a visitor another tracker's code, have the visitor's client sign it for the site, and replay the signature to that tracker with the site's name as the host. The check proved nothing.
+
+**Options:** keep reading the host from the request; a configured public URL (chosen); sign the tracker's own key instead of its URL, which trackers don't have.
+
+**Decision:**
+
+- `tempest-tracker --public-url URL` names the URL people reach the tracker at, `http` or `https`. A sign-in must be signed for its authority, whatever the request's headers say. A failed signature's message names the authority expected, for operators who set the wrong one.
+- Without it, a sign-in is accepted only for a `Host` on the tracker's own machine (`localhost` or a loopback address, any port), so trying a tracker locally, and the tests, need no flag. A client elsewhere is refused with 403 `sign_in_failed`, saying the operator must set `--public-url`. A malicious site can't use this: its visitors' clients sign for the site's name, never a loopback one.
+- `--behind-proxy` with `--catalog` requires `--public-url`, since clients behind a proxy never reach the tracker at a loopback address. `X-Forwarded-Host` is no longer read.
+- The session cookie is `Secure` behind a proxy or with an `https` public URL.
+- Clients are unchanged: they already sign the authority of the URL they use.
+
+**Rationale:** The operator is the only source of the tracker's name that a client can't forge. Refusing sign-ins without it, outside the local machine, is safe by default and still lets a tracker run with no configuration.
+
+---
+
+## D-240: Bounds on what one client can make a tracker, relay or peer do
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A review before launch found work that one client could make a server or a peer do without limit: fill a swarm, or the tracker, with made-up peer IDs; fetch a 64 MiB manifest again and again; leave listings pending forever; read every comment, or rank every search match, in one request; use a relay's bandwidth without limit; and keep real peers from getting forwarding permissions with forged sources.
+
+**Decision:**
+
+- **Announces (tracker).** Each listed peer records its client: its IPv4 address or IPv6 /64. A new peer from a client that already lists `max_swarm_peers_per_ip` (100) in the swarm, or `max_peers_per_ip` (10,000) across the tracker, is refused with `rate_limited`, retrying after the announce interval. Both are generous for many people behind one carrier-grade NAT, and are `tempest-tracker` options. The protocol allows trackers such limits.
+- **Manifests (peers).** A Manifest being sent counts toward `max_open_requests` until the driver reports it sent, as the protocol already required. A connection gets one at a time and at most two in all; further ManifestRequests are refused with `busy`, which the protocol now allows. The Manifest also waits for the upload speed limits, and Data waits for them before it is read from disk, so a throttled connection doesn't hold whole responses in memory.
+- **Pending listings (catalog).** A listing still pending three days after it was made or last edited is dropped; its sharer's next announce asks again. This replaces D-207's giving up until restart (`--pending-hours` replaces `--fetch-give-up`).
+- **Comments and search (catalog).** A listing's comments come a page (100) at a time, after a given comment ID. Search matches stream out of the index into a bounded heap holding a page's depth, at most 10,000 deep; the total still counts every match. The catalog's database and index work runs on blocking threads.
+- **Relays.** Each registered peer's forwarding is limited to 1 MiB/s in each direction by default. When a peer's permission table is full, a new address replaces the oldest one the peer never sent to, so forged sources, which never get answers, can't crowd out real ones. Sockets to lend are bound outside the registry's lock.
+- **Recommended relays (client).** A relay no tracker has recommended for an hour is forgotten, a newcomer beyond 16 replaces the one recommended longest ago, and only four come from one response.
+
+**Rationale:** Each limit is far above what an honest client needs and bounds what a dishonest one costs. Where refusing would hurt honest users more than the abuse, as with forwarding permissions and recommended relays, old entries make way instead.
+
+---
 
 ## D-241: Tests run in tiers, and the default is unit tests
 

@@ -2,8 +2,9 @@
 //!
 //! The index mirrors the store and is rebuilt from it when the catalog opens; [`super::Catalog`]
 //! updates it whenever a listing is listed, changed or unpublished. It finds the listings that
-//! match a search, scores how well, and counts the matches' categories and tags. Ranking by
-//! popularity is [`super::rank`]'s.
+//! match a search, scores how well, and counts the matches' categories and tags. It hands each
+//! match to its caller as it finds it, rather than collecting them, so a search's memory
+//! doesn't grow with its matches. Ranking by popularity is [`super::rank`]'s.
 //!
 //! Matching forgives typos: each word of the search matches words within an edit distance that
 //! grows with its length, and the last word also matches as a prefix, so results follow typing.
@@ -12,10 +13,10 @@
 
 use std::collections::HashSet;
 
-use tantivy::collector::{Collector, FacetCollector, SegmentCollector};
-use tantivy::columnar::{BytesColumn, Column};
+use tantivy::collector::FacetCollector;
 use tantivy::query::{
-    AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, FuzzyTermQuery, Occur, Query, TermQuery,
+    AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, EnableScoring, FuzzyTermQuery, Occur,
+    Query, TermQuery,
 };
 use tantivy::schema::{
     BytesOptions, FAST, FacetOptions, Field, IndexRecordOption, Schema, TextFieldIndexing,
@@ -24,10 +25,7 @@ use tantivy::schema::{
 use tantivy::tokenizer::{
     AsciiFoldingFilter, LowerCaser, RemoveLongFilter, SimpleTokenizer, TextAnalyzer,
 };
-use tantivy::{
-    DocId, Index, IndexReader, IndexWriter, ReloadPolicy, Score, SegmentReader, TantivyDocument,
-    Term,
-};
+use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Score, TantivyDocument, Term};
 use tempest_protocol::{BundleId, Hash};
 use tempest_tracker_api::listing::{FacetCount, Facets, MAX_TAG_FACETS};
 
@@ -84,15 +82,6 @@ pub struct Match {
     pub created: u64,
     /// How well it matched the search's text; the same for every listing without text.
     pub score: Score,
-}
-
-/// A search's matches, in no order, and how they spread over categories and tags.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Found {
-    /// Every match.
-    pub matches: Vec<Match>,
-    /// The categories' and tags' counts.
-    pub facets: Facets,
 }
 
 /// The catalog's search index.
@@ -200,13 +189,15 @@ impl SearchIndex {
         doc
     }
 
-    /// The listings matching `text`, in `category` if one is given, with every one of `tags`.
+    /// Hands `found` each listing matching `text`, in `category` if one is given, with every one
+    /// of `tags`, in no order. Returns how the matches spread over categories and tags.
     pub fn search(
         &self,
         text: &str,
         category: Option<&str>,
         tags: &[String],
-    ) -> tantivy::Result<Found> {
+        mut found: impl FnMut(Match),
+    ) -> tantivy::Result<Facets> {
         let searcher = self.reader.searcher();
         let text = self.text_query(text);
         let tag_filters = || -> Vec<Box<dyn Query>> {
@@ -228,7 +219,37 @@ impl SearchIndex {
         let mut by_tag = FacetCollector::for_field("tags");
         by_tag.add_facet("/");
         let query = all_of(text, filters);
-        let (matches, tag_counts) = searcher.search(&query, &(Matches, by_tag))?;
+        let tag_counts = searcher.search(&query, &by_tag)?;
+
+        let weight = query.weight(EnableScoring::enabled_from_searcher(&searcher))?;
+        for segment in searcher.segment_readers() {
+            let fast = segment.fast_fields();
+            let (Some(bundles), created) = (fast.bytes("bundle")?, fast.u64("created")?) else {
+                continue;
+            };
+            let alive = segment.alive_bitset();
+            let mut buffer = Vec::new();
+            weight.for_each(segment, &mut |doc, score| {
+                if alive.is_some_and(|alive| alive.is_deleted(doc)) {
+                    return;
+                }
+                let Some(ord) = bundles.term_ords(doc).next() else {
+                    return;
+                };
+                buffer.clear();
+                if !matches!(bundles.ord_to_bytes(ord, &mut buffer), Ok(true)) {
+                    return;
+                }
+                let Ok(bundle) = <[u8; 32]>::try_from(buffer.as_slice()) else {
+                    return;
+                };
+                found(Match {
+                    bundle: Hash::new(bundle),
+                    created: created.first(doc).unwrap_or(0),
+                    score,
+                });
+            })?;
+        }
 
         let counts = |counts: &tantivy::collector::FacetCounts, most: usize| {
             let mut counted: Vec<FacetCount> = counts
@@ -242,12 +263,9 @@ impl SearchIndex {
             counted.truncate(most);
             counted
         };
-        Ok(Found {
-            matches,
-            facets: Facets {
-                categories: counts(&category_counts, usize::MAX),
-                tags: counts(&tag_counts, MAX_TAG_FACETS),
-            },
+        Ok(Facets {
+            categories: counts(&category_counts, usize::MAX),
+            tags: counts(&tag_counts, MAX_TAG_FACETS),
         })
     }
 
@@ -343,68 +361,6 @@ fn all_of(query: Box<dyn Query>, filters: Vec<Box<dyn Query>>) -> Box<dyn Query>
     Box::new(BooleanQuery::new(clauses))
 }
 
-/// Collects every match with its bundle, creation time and score.
-struct Matches;
-
-struct SegmentMatches {
-    bundles: Option<BytesColumn>,
-    created: Column<u64>,
-    matches: Vec<Match>,
-    buffer: Vec<u8>,
-}
-
-impl Collector for Matches {
-    type Fruit = Vec<Match>;
-    type Child = SegmentMatches;
-
-    fn for_segment(&self, _: u32, segment: &SegmentReader) -> tantivy::Result<SegmentMatches> {
-        let fast = segment.fast_fields();
-        Ok(SegmentMatches {
-            bundles: fast.bytes("bundle")?,
-            created: fast.u64("created")?,
-            matches: Vec::new(),
-            buffer: Vec::new(),
-        })
-    }
-
-    fn requires_scoring(&self) -> bool {
-        true
-    }
-
-    fn merge_fruits(&self, fruits: Vec<Vec<Match>>) -> tantivy::Result<Vec<Match>> {
-        Ok(fruits.into_iter().flatten().collect())
-    }
-}
-
-impl SegmentCollector for SegmentMatches {
-    type Fruit = Vec<Match>;
-
-    fn collect(&mut self, doc: DocId, score: Score) {
-        let Some(bundles) = &self.bundles else {
-            return;
-        };
-        let Some(ord) = bundles.term_ords(doc).next() else {
-            return;
-        };
-        self.buffer.clear();
-        if !matches!(bundles.ord_to_bytes(ord, &mut self.buffer), Ok(true)) {
-            return;
-        }
-        let Ok(bundle) = <[u8; 32]>::try_from(self.buffer.as_slice()) else {
-            return;
-        };
-        self.matches.push(Match {
-            bundle: Hash::new(bundle),
-            created: self.created.first(doc).unwrap_or(0),
-            score,
-        });
-    }
-
-    fn harvest(self) -> Vec<Match> {
-        self.matches
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,6 +380,20 @@ mod tests {
         }
     }
 
+    /// A search's matches and facets.
+    struct Found {
+        matches: Vec<Match>,
+        facets: Facets,
+    }
+
+    fn search(index: &SearchIndex, text: &str, category: Option<&str>, tags: &[String]) -> Found {
+        let mut matches = Vec::new();
+        let facets = index
+            .search(text, category, tags, |found| matches.push(found))
+            .unwrap();
+        Found { matches, facets }
+    }
+
     fn index(listings: &[Indexed]) -> SearchIndex {
         let mut index = SearchIndex::new().unwrap();
         index.rebuild(listings.iter().map(|l| (l, None))).unwrap();
@@ -431,7 +401,7 @@ mod tests {
     }
 
     fn found(index: &SearchIndex, text: &str) -> Vec<u8> {
-        let mut matches = index.search(text, None, &[]).unwrap().matches;
+        let mut matches = search(index, text, None, &[]).matches;
         matches.sort_by(|a, b| b.score.total_cmp(&a.score));
         matches.iter().map(|m| m.bundle.as_bytes()[0]).collect()
     }
@@ -485,15 +455,15 @@ mod tests {
     #[test]
     fn empty_text_matches_everything() {
         let index = index(&sample());
-        assert_eq!(index.search("  ", None, &[]).unwrap().matches.len(), 4);
-        assert_eq!(index.search("!!", None, &[]).unwrap().matches.len(), 4);
+        assert_eq!(search(&index, "  ", None, &[]).matches.len(), 4);
+        assert_eq!(search(&index, "!!", None, &[]).matches.len(), 4);
     }
 
     #[test]
     fn filters_and_facets() {
         let index = index(&sample());
         let climate = ["climate".to_string()];
-        let found = index.search("", Some("datasets"), &climate).unwrap();
+        let found = search(&index, "", Some("datasets"), &climate);
         assert_eq!(found.matches.len(), 1);
         let counts = |counts: &[FacetCount]| -> Vec<(String, u64)> {
             counts.iter().map(|c| (c.value.clone(), c.count)).collect()
@@ -517,10 +487,10 @@ mod tests {
         index.put(&listings[0], None).unwrap();
         assert_eq!(found(&index, "sea"), [1]);
         assert_eq!(found(&index, "archive"), Vec::<u8>::new());
-        assert_eq!(index.search("", None, &[]).unwrap().matches.len(), 4);
+        assert_eq!(search(&index, "", None, &[]).matches.len(), 4);
         index.remove(&listings[0].bundle).unwrap();
         assert!(found(&index, "sea").is_empty());
-        let rest = index.search("", None, &[]).unwrap().matches;
+        let rest = search(&index, "", None, &[]).matches;
         assert_eq!(rest.len(), 3);
         assert!(
             rest.iter()

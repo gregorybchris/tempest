@@ -9,9 +9,12 @@
 //! - A peer that registers again within [`KEEP_FOR`] of leaving gets its socket back, so its
 //!   relay address stays the same. So does a peer that registers again while its old connection
 //!   is still open; the old connection is then replaced.
+//!
+//! Registering takes two steps, so that binding a new socket, which may try many ports, happens
+//! outside the lock around the registry: [`Registry::check`] says whether a peer may register
+//! and needs a new socket, and [`Registry::admit`] registers it, with the socket bound meanwhile.
 
 use std::collections::{HashMap, HashSet};
-use std::io;
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -90,16 +93,9 @@ impl<S: Clone, C> Registry<S, C> {
         self.held.len() + self.kept.len()
     }
 
-    /// Lets `peer`, connected from `ip` over `connection`, register, giving back its socket if
-    /// it has one and otherwise one from `bind`. Refuses with the RelayReject to send.
-    pub fn admit(
-        &mut self,
-        peer: PeerId,
-        ip: IpAddr,
-        connection: C,
-        now: Instant,
-        bind: impl FnOnce() -> io::Result<S>,
-    ) -> Result<Admitted<S, C>, RelayReject> {
+    /// Whether `peer`, connected from `ip`, may register, and if so whether it needs a new
+    /// socket: `false` if it has one held or kept. Refuses with the RelayReject to send.
+    pub fn check(&mut self, peer: PeerId, ip: IpAddr, now: Instant) -> Result<bool, RelayReject> {
         self.expire(now);
         if let Some(allowlist) = &self.limits.allowlist
             && !allowlist.contains(&peer)
@@ -120,18 +116,40 @@ impl<S: Clone, C> Registry<S, C> {
                 "too many registrations from this IP address",
             ));
         }
+        if self.held.contains_key(&peer) || self.kept.contains_key(&peer) {
+            return Ok(false);
+        }
+        if self.sockets() >= self.limits.max_registrations && !self.give_up_oldest_kept() {
+            return Err(reject(RelayRejectReason::Full, "the relay is full"));
+        }
+        Ok(true)
+    }
 
+    /// Lets `peer`, connected from `ip` over `connection`, register, giving back its socket if
+    /// it has one and otherwise `fresh`, bound since [`check`](Self::check) asked for one.
+    /// `fresh` is dropped if the peer doesn't need it. Refuses with the RelayReject to send,
+    /// such as when the peer needs a socket and none was bound.
+    pub fn admit(
+        &mut self,
+        peer: PeerId,
+        ip: IpAddr,
+        connection: C,
+        now: Instant,
+        fresh: Option<S>,
+    ) -> Result<Admitted<S, C>, RelayReject> {
+        self.check(peer, ip, now)?;
         let (socket, replaced) = if let Some(held) = self.held.remove(&peer) {
             (held.socket, Some(held.connection))
         } else if let Some(kept) = self.kept.remove(&peer) {
             (kept.socket, None)
         } else {
-            if self.sockets() >= self.limits.max_registrations && !self.give_up_oldest_kept() {
-                return Err(reject(RelayRejectReason::Full, "the relay is full"));
-            }
-            let socket = bind()
-                .map_err(|_| reject(RelayRejectReason::Full, "the relay has no port to lend"))?;
-            (socket, None)
+            let busy = || {
+                reject(
+                    RelayRejectReason::Full,
+                    "the relay had no port ready to lend",
+                )
+            };
+            (fresh.ok_or_else(busy)?, None)
         };
 
         let generation = self.next_generation;
@@ -219,7 +237,8 @@ mod tests {
     }
 
     /// A registry whose sockets are numbered in the order they were bound, and whose
-    /// connections are labelled.
+    /// connections are labelled. Admitting checks first and binds only if asked to, as the
+    /// relay does.
     struct Test {
         registry: Registry<u32, &'static str>,
         bound: Cell<u32>,
@@ -241,12 +260,16 @@ mod tests {
             ip: IpAddr,
             connection: &'static str,
         ) -> Result<Admitted<u32, &'static str>, RelayRejectReason> {
-            let bound = &self.bound;
+            let fresh = match self.registry.check(peer, ip, self.now) {
+                Ok(true) => {
+                    self.bound.set(self.bound.get() + 1);
+                    Some(self.bound.get())
+                }
+                Ok(false) => None,
+                Err(reject) => return Err(reject.reason),
+            };
             self.registry
-                .admit(peer, ip, connection, self.now, || {
-                    bound.set(bound.get() + 1);
-                    Ok(bound.get())
-                })
+                .admit(peer, ip, connection, self.now, fresh)
                 .map_err(|reject| reject.reason)
         }
     }
@@ -348,15 +371,27 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_bind_means_full() {
+    fn a_newcomer_without_a_socket_is_refused() {
         let mut registry: Registry<u32, ()> = Registry::new(limits());
         let refused = registry
-            .admit(peer(1), IP, (), Instant::now(), || {
-                Err(io::Error::from(io::ErrorKind::AddrInUse))
-            })
+            .admit(peer(1), IP, (), Instant::now(), None)
             .unwrap_err();
         assert_eq!(refused.reason, RelayRejectReason::Full);
         assert_eq!(registry.sockets(), 0);
+    }
+
+    #[test]
+    fn a_socket_bound_for_a_returning_peer_is_not_used() {
+        let mut registry: Registry<u32, ()> = Registry::new(limits());
+        let now = Instant::now();
+        assert_eq!(registry.check(peer(1), IP, now), Ok(true));
+        let first = registry.admit(peer(1), IP, (), now, Some(7)).unwrap();
+        registry.release(peer(1), first.generation, now);
+        assert_eq!(registry.check(peer(1), IP, now), Ok(false));
+        // Meanwhile another task bound a socket anyway; the kept one is given back.
+        let again = registry.admit(peer(1), IP, (), now, Some(8)).unwrap();
+        assert_eq!(again.socket, 7);
+        assert_eq!(registry.sockets(), 1);
     }
 
     #[derive(Debug, Clone)]

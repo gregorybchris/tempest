@@ -68,6 +68,10 @@ pub(super) struct Conn {
     pub held: Vec<(StreamId, Message)>,
     /// The other peer's open requests that this peer has accepted.
     pub incoming: BTreeMap<StreamId, Incoming>,
+    /// The stream of the Manifest being sent, if one is.
+    pub manifest_sending: Option<StreamId>,
+    /// How many Manifests this peer has sent on the connection, or is sending.
+    pub manifests_sent: u32,
     /// Whether this peer has sent Candidates.
     pub sent_candidates: bool,
     /// Whether the other peer has sent Candidates.
@@ -146,6 +150,8 @@ impl Conn {
             lacks_manifest: false,
             held: Vec::new(),
             incoming: BTreeMap::new(),
+            manifest_sending: None,
+            manifests_sent: 0,
             sent_candidates: false,
             received_candidates: false,
             received: Meter::new(config.upload.rate_window, now),
@@ -181,7 +187,7 @@ impl Conn {
 
     /// The number of the other peer's requests that are open: held or accepted.
     pub fn open_incoming(&self) -> usize {
-        self.held.len() + self.incoming.len()
+        self.held.len() + self.incoming.len() + usize::from(self.manifest_sending.is_some())
     }
 }
 

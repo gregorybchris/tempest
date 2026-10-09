@@ -194,11 +194,19 @@ async fn packets_go_only_to_addresses_that_sent_to_the_relay_address() {
     let mut client = Client::connect(&Identity::generate().unwrap(), &relay).await;
     let relay_address = client.registered().await.relay_address.socket_addr();
 
+    // A witness that may be sent to shows when the relay has handled what came before.
+    let witness = udp().await;
+    witness.send_to(b"witness", relay_address).await.unwrap();
+    client.forwarded().await;
+
     let stranger = udp().await;
     client.forward(stranger.local_addr().unwrap(), b"unsolicited");
-    assert_eq!(receive(&stranger, Duration::from_millis(300)).await, None);
+    client.forward(witness.local_addr().unwrap(), b"probe");
+    let (probe, _) = receive(&witness, WAIT).await.expect("the probe arrives");
+    assert_eq!(probe, b"probe");
 
-    // Once the stranger has sent something, it may be answered.
+    // Once the stranger has sent something, it may be answered. The first packet it gets is
+    // the answer: the unsolicited one, handled before, was dropped.
     stranger.send_to(b"hi", relay_address).await.unwrap();
     client.forwarded().await;
     client.forward(stranger.local_addr().unwrap(), b"answer");
@@ -311,14 +319,16 @@ async fn the_rate_limit_drops_what_exceeds_it() {
     for _ in 0..10 {
         dialer.send_to(&[7; 200], relay_address).await.unwrap();
     }
-    let mut arrived = 0;
-    while timeout(Duration::from_millis(300), client.conn.read_datagram())
+    // The first fits the burst; then count what follows until the relay falls quiet.
+    client.forwarded().await;
+    let mut arrived = 1;
+    while timeout(Duration::from_secs(1), client.conn.read_datagram())
         .await
         .is_ok()
     {
         arrived += 1;
     }
-    assert!((1..10).contains(&arrived), "{arrived} arrived");
+    assert!(arrived < 10, "{arrived} arrived");
 }
 
 #[tokio::test]

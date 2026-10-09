@@ -73,7 +73,8 @@ pub struct ListingQuery {
     pub tags: Vec<String>,
     /// What to sort by. Key `sort`.
     pub sort: Sort,
-    /// How many matches to skip. Key `offset`.
+    /// How many matches to skip. Key `offset`. A tracker may serve pages only so deep, such as
+    /// the first 10,000 matches, and answer deeper ones with no listings.
     pub offset: u64,
     /// How many to return, from 1 to [`MAX_PAGE`]. Key `limit`.
     pub limit: u32,

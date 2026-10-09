@@ -493,7 +493,7 @@ impl Registration {
                     return;
                 }
             }
-            std::future::pending().await
+            std::future::pending::<()>().await;
         };
         let end = tokio::select! {
             () = forward => End::Lost,

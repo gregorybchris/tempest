@@ -369,7 +369,7 @@ fn ControlView(row: Row) -> impl IntoView {
             let (save_name, remove_name) = (name.clone(), name.clone());
             let save = move |draft: String| {
                 let draft = draft.trim().to_owned();
-                if !tempest_api::settings::absolute(&draft) {
+                if !settings::absolute(&draft) {
                     return Err("Type an absolute path on the engine's machine.".to_owned());
                 }
                 config.set_category(save_name.clone(), draft);
@@ -465,7 +465,7 @@ fn AddField(adds: Adds) -> impl IntoView {
                 let path = folder.get_untracked().trim().to_owned();
                 if text.is_empty() {
                     Err("Give the category a name.")
-                } else if !tempest_api::settings::absolute(&path) {
+                } else if !settings::absolute(&path) {
                     Err("Type the folder its downloads go to, as an absolute path.")
                 } else {
                     config.set_category(text, path);

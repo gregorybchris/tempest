@@ -526,7 +526,7 @@ impl CompareQuery {
 
     /// Writes the query string, without the `?`.
     pub fn to_query(&self) -> String {
-        let variants: Vec<String> = self.variants.iter().map(|v| v.to_string()).collect();
+        let variants: Vec<String> = self.variants.iter().map(ToString::to_string).collect();
         let mut pairs = vec![("variants", variants.join(","))];
         if self.reference != 0 {
             pairs.push(("reference", self.reference.to_string()));

@@ -235,7 +235,7 @@ pub(crate) async fn run(
     let lock = || {
         catalog
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     };
     let mut rng = ChaCha8Rng::seed_from_u64(getrandom::u64()?);
     let mut schedule = Schedule::new(&config);

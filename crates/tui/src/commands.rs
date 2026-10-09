@@ -199,14 +199,14 @@ impl Command {
     pub fn keys(self, screen: Screen) -> &'static [KeyCode] {
         use KeyCode::*;
         match self {
-            Self::Down => &[Char('j'), KeyCode::Down],
-            Self::Up => &[Char('k'), KeyCode::Up],
+            Self::Down => &[Char('j'), Down],
+            Self::Up => &[Char('k'), Up],
             // In the detail, `g` opens the rates chart.
             Self::First if screen == Screen::Detail => &[Home],
             Self::First => &[Char('g'), Home],
             Self::Last => &[Char('G'), End],
-            Self::PageDown => &[KeyCode::PageDown],
-            Self::PageUp => &[KeyCode::PageUp],
+            Self::PageDown => &[PageDown],
+            Self::PageUp => &[PageUp],
             Self::Add => &[Char('a')],
             Self::StartStop => &[Char(' ')],
             Self::ForceStart => &[Char('F')],

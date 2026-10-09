@@ -1,8 +1,9 @@
 //! Where the page is, kept in the address's `#` so that every view has a link and the
 //! browser's back button works: `#/?q=rain&category=datasets` (browsing, with the API's own
-//! query string), `#/listings/{bundle}`, `#/listings/{bundle}/edit`, `#/sign-in` and `#/me`.
+//! query string), `#/listings/{bundle}`, `#/listings/{bundle}/edit`, `#/users/{key}`, `#/sign-in`
+//! and `#/me`.
 
-use tempest_protocol::BundleId;
+use tempest_protocol::{BundleId, PeerId};
 use tempest_tracker_api::query::ListingQuery;
 
 /// A view and what it shows.
@@ -14,6 +15,8 @@ pub enum Route {
     Listing(BundleId),
     /// The publisher's form for a listing.
     Edit(BundleId),
+    /// An account's page: who it is, and what it listed and said.
+    User(PeerId),
     /// Signing in with a Tempest key.
     SignIn,
     /// The account signed in, and its listings.
@@ -37,6 +40,7 @@ impl Route {
             [] => ListingQuery::parse(query).ok().map(Route::Browse),
             ["listings", bundle] => bundle.parse().ok().map(Route::Listing),
             ["listings", bundle, "edit"] => bundle.parse().ok().map(Route::Edit),
+            ["users", key] => key.parse().ok().map(Route::User),
             ["sign-in"] => Some(Route::SignIn),
             ["me"] => Some(Route::Me),
             _ => None,
@@ -53,6 +57,7 @@ impl Route {
             },
             Route::Listing(bundle) => format!("#/listings/{bundle}"),
             Route::Edit(bundle) => format!("#/listings/{bundle}/edit"),
+            Route::User(key) => format!("#/users/{key}"),
             Route::SignIn => "#/sign-in".to_owned(),
             Route::Me => "#/me".to_owned(),
         }
@@ -63,7 +68,9 @@ impl Route {
         match self {
             Route::Browse(_) => None,
             Route::Edit(bundle) => Some(Route::Listing(*bundle)),
-            Route::Listing(_) | Route::SignIn | Route::Me => Some(Route::default()),
+            Route::Listing(_) | Route::User(_) | Route::SignIn | Route::Me => {
+                Some(Route::default())
+            }
         }
     }
 }
@@ -101,12 +108,17 @@ mod tests {
             }),
             Route::Listing(bundle),
             Route::Edit(bundle),
+            Route::User(BUNDLE.parse().unwrap()),
             Route::SignIn,
             Route::Me,
         ];
         for route in routes {
             assert_eq!(Route::parse(&route.hash()), route, "{}", route.hash());
         }
+        assert_eq!(
+            Route::User(BUNDLE.parse().unwrap()).hash(),
+            format!("#/users/{BUNDLE}")
+        );
         assert_eq!(Route::default().hash(), "#/");
         assert_eq!(
             Route::Listing(bundle).hash(),

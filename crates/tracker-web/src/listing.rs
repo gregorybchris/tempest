@@ -17,7 +17,7 @@ use crate::keys::Command;
 use crate::present::{self, plural};
 use crate::request::{self, method};
 use crate::route::Route;
-use crate::views::{Crumbs, HealthBars, TextArea, fetch, shown};
+use crate::views::{Crumbs, HealthBars, PersonLink, TextArea, fetch, shown};
 
 /// A listing's page.
 #[component]
@@ -151,7 +151,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                     {edit_button}
                 </div>
                 <p class="listing__byline dim">
-                    "listed by "<span class="listing__publisher">{present::person(&l.publisher)}</span>
+                    "listed by "<span class="listing__publisher"><PersonLink person=l.publisher.clone() /></span>
                     " · "{move || present::ago(now.get(), created)}
                     {(updated > created).then(|| view! { " · updated "{move || present::ago(now.get(), updated)} })}
                 </p>
@@ -398,7 +398,7 @@ fn Comments(
                         view! {
                             <li class="comment">
                                 <div class="comment__head">
-                                    <span class="comment__author" class:comment__author--me=own>{present::person(&c.author)}</span>
+                                    <span class="comment__author" class:comment__author--me=own><PersonLink person=c.author.clone() /></span>
                                     <span class="dim">{move || present::ago(ctx.now.get(), created)}</span>
                                     {own.then(|| view! {
                                         <button class="btn btn--ghost btn--small comment__delete" type="button" on:click=move |_| remove(id)>

@@ -11,8 +11,9 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use tempest_protocol::tracker::BundleStats;
 use tempest_protocol::{BundleId, Hash, PeerId};
+use tempest_tracker_api::account::{Count, ProfileComment, ProfileStats};
 use tempest_tracker_api::listing::{
-    Comment, Content, Listing, ListingStatus, Person, Vote, VoteCounts,
+    Comment, Content, Listing, ListingRef, ListingStatus, Person, Vote, VoteCounts,
 };
 use tempest_tracker_api::text::name_key;
 
@@ -687,6 +688,142 @@ impl Store {
             offset,
             limit,
         )
+    }
+
+    /// A page of the listings of `publisher` that show: listed and not taken down, newest first.
+    pub fn shown_from(
+        &self,
+        publisher: &PeerId,
+        offset: u64,
+        limit: u32,
+    ) -> Result<(Vec<Listing>, u64), StoreError> {
+        let key = publisher.as_bytes().as_slice();
+        self.listing_page(
+            None,
+            &format!("l.publisher = ?2 AND l.status = 'listed' AND NOT {BLOCKED}"),
+            &[&key],
+            "l.created DESC, l.bundle",
+            offset,
+            limit,
+        )
+    }
+
+    /// What `key` has done over its listings that show.
+    pub fn profile_stats(&self, key: &PeerId) -> Result<ProfileStats, StoreError> {
+        let key = key.as_bytes().as_slice();
+        let shown = format!("l.publisher = ?1 AND l.status = 'listed' AND NOT {BLOCKED}");
+        let count = |sql: String| -> Result<u64, StoreError> {
+            Ok(to_u64(self.conn.query_row(&sql, [key], |row| row.get(0))?))
+        };
+        let (up, down): (i64, i64) = self.conn.query_row(
+            &format!(
+                "SELECT coalesce(sum(v.value = 1), 0), coalesce(sum(v.value = -1), 0)
+                 FROM votes v JOIN listings l ON l.bundle = v.bundle WHERE {shown}"
+            ),
+            [key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(ProfileStats {
+            listings: count(format!("SELECT count(*) FROM listings l WHERE {shown}"))?,
+            downloads: count(format!(
+                "SELECT coalesce(sum(d.count), 0) FROM downloads d
+                 JOIN listings l ON l.bundle = d.bundle WHERE {shown}"
+            ))?,
+            votes_up: to_u64(up),
+            votes_down: to_u64(down),
+            comments: count(format!(
+                "SELECT count(*) FROM comments c JOIN listings l ON l.bundle = c.bundle
+                 WHERE c.author = ?1 AND l.status = 'listed' AND NOT {BLOCKED}"
+            ))?,
+        })
+    }
+
+    /// The categories and the tags (at most `max_tags`) of the listings of `key` that show, each
+    /// with how many listings, the most first.
+    pub fn profile_counts(
+        &self,
+        key: &PeerId,
+        max_tags: u32,
+    ) -> Result<(Vec<Count>, Vec<Count>), StoreError> {
+        let key = key.as_bytes().as_slice();
+        let counts = |sql: String| -> Result<Vec<Count>, StoreError> {
+            let mut statement = self.conn.prepare_cached(&sql)?;
+            let rows = statement.query_map([key], |row| {
+                Ok(Count {
+                    name: row.get(0)?,
+                    count: to_u64(row.get(1)?),
+                })
+            })?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        };
+        let shown = format!("l.publisher = ?1 AND l.status = 'listed' AND NOT {BLOCKED}");
+        let categories = counts(format!(
+            "SELECT l.category, count(*) AS n FROM listings l
+             WHERE {shown} AND l.category IS NOT NULL GROUP BY l.category ORDER BY n DESC, l.category"
+        ))?;
+        let tags = counts(format!(
+            "SELECT t.tag, count(*) AS n FROM listing_tags t JOIN listings l ON l.bundle = t.bundle
+             WHERE {shown} GROUP BY t.tag ORDER BY n DESC, t.tag LIMIT {max_tags}"
+        ))?;
+        Ok((categories, tags))
+    }
+
+    /// Up to `limit` of the comments `author` wrote on listings that show, newest first, before
+    /// the comment `before` if given.
+    pub fn comments_by(
+        &self,
+        author: &PeerId,
+        before: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<ProfileComment>, StoreError> {
+        let sql = format!(
+            "SELECT c.id, c.body, c.created, l.bundle, l.title, l.content_name
+             FROM comments c JOIN listings l ON l.bundle = c.bundle
+             WHERE c.author = ?1 AND c.id < ?2 AND l.status = 'listed' AND NOT {BLOCKED}
+             ORDER BY c.id DESC LIMIT ?3"
+        );
+        let mut statement = self.conn.prepare_cached(&sql)?;
+        let rows = statement.query_map(
+            params![author.as_bytes(), before.map_or(i64::MAX, to_i64), limit],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )?;
+        let name = self.name_of(author)?;
+        let mut comments = Vec::new();
+        for row in rows {
+            let (id, body, created, bundle, title, content_name) = row?;
+            comments.push(ProfileComment {
+                comment: Comment {
+                    id: to_u64(id),
+                    author: Person {
+                        key: *author,
+                        name: name.clone(),
+                    },
+                    body,
+                    created: to_u64(created),
+                },
+                listing: ListingRef {
+                    bundle: hash_of(bundle)?,
+                    title: match title.is_empty() {
+                        true => content_name.unwrap_or_default(),
+                        false => title,
+                    },
+                },
+            });
+        }
+        Ok(comments)
+    }
+
+    fn name_of(&self, key: &PeerId) -> Result<Option<String>, StoreError> {
+        Ok(self.account(key)?.and_then(|(name, _)| name))
     }
 
     fn read_listing(&self, row: &Row) -> Result<Listing, StoreError> {

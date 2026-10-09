@@ -50,6 +50,9 @@ pub(crate) fn router(tracker: &Tracker) -> Router<Tracker> {
         .route(&route("session"), post(sign_in).delete(sign_out))
         .route(&route("account"), get(me).put(edit_me))
         .route(&route("account/listings"), get(my_listings))
+        .route(&route("accounts/{key}"), get(profile))
+        .route(&route("accounts/{key}/listings"), get(profile_listings))
+        .route(&route("accounts/{key}/comments"), get(profile_comments))
         .route(&route("listings"), get(listings))
         .route(
             &route("listings/{bundle}"),
@@ -337,6 +340,64 @@ async fn my_listings(
                 .published_by(&key, page.offset, page.limit)?;
             tracker.add_swarms(&mut page.listings);
             ok(&page)
+        })())
+    })
+    .await
+}
+
+fn account_key(text: &str) -> Result<PeerId, Refusal> {
+    text.parse().map_err(|_| {
+        let message = "the key must be 64 lowercase hexadecimal characters";
+        Refusal::new(ErrorCode::InvalidRequest, message)
+    })
+}
+
+async fn profile(State(tracker): State<Tracker>, Path(key): Path<String>) -> Response {
+    blocking(tracker, move |tracker| {
+        answer((|| ok(&tracker.catalog().profile(&account_key(&key)?)?))())
+    })
+    .await
+}
+
+async fn profile_listings(
+    State(tracker): State<Tracker>,
+    Path(key): Path<String>,
+    page: Result<Query<PageQuery>, QueryRejection>,
+) -> Response {
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let page = query(page)?;
+            let mut page =
+                tracker
+                    .catalog()
+                    .listings_of(&account_key(&key)?, page.offset, page.limit)?;
+            tracker.add_swarms(&mut page.listings);
+            ok(&page)
+        })())
+    })
+    .await
+}
+
+/// The query string of `GET /tempest/v1/accounts/{key}/comments`.
+#[derive(Debug, Deserialize)]
+struct BeforeQuery {
+    /// Only the comments before this one.
+    before: Option<u64>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+}
+
+async fn profile_comments(
+    State(tracker): State<Tracker>,
+    Path(key): Path<String>,
+    page: Result<Query<BeforeQuery>, QueryRejection>,
+) -> Response {
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let page = query(page)?;
+            ok(&tracker
+                .catalog()
+                .comments_of(&account_key(&key)?, page.before, page.limit)?)
         })())
     })
     .await

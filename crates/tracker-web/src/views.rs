@@ -5,11 +5,13 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
 use tempest_protocol::tracker::BundleStats;
+use tempest_tracker_api::listing::Person;
 use tempest_ui_kit::components::*;
 
 use crate::app::use_ctx;
 use crate::present;
 use crate::request::{self, RequestError};
+use crate::route::Route;
 
 /// What a page fetched: `None` while the first answer is on its way.
 pub type Fetched<T> = RwSignal<Option<Result<T, RequestError>>>;
@@ -82,6 +84,16 @@ pub fn Problem(error: RequestError) -> impl IntoView {
             })}
         </Empty>
     }
+}
+
+/// Someone's name, or else the start of their key, linking to their page.
+#[component]
+pub fn PersonLink(
+    /// Who.
+    person: Person,
+) -> impl IntoView {
+    let href = Route::User(person.key).hash();
+    view! { <a class="person" href=href title="See who this is">{present::person(&person)}</a> }
 }
 
 /// Links back up to where a view sits.

@@ -13,7 +13,7 @@ use crate::app::{on_command, use_ctx};
 use crate::keys::Command;
 use crate::present::{self, PageButton, plural};
 use crate::route::Route;
-use crate::views::{HealthBars, Problem, fetch};
+use crate::views::{HealthBars, PersonLink, Problem, fetch};
 
 /// The listings, searched, filtered, sorted and paged.
 #[component]
@@ -398,11 +398,14 @@ fn Results(
 
 /// One listing among the results.
 #[component]
-fn ResultCard(
+pub fn ResultCard(
     index: usize,
     listing: Listing,
     words: String,
     selected: Selector<Option<usize>>,
+    /// Whether to name the publisher, which a page of one publisher's listings needn't.
+    #[prop(default = true)]
+    byline: bool,
 ) -> impl IntoView {
     let ctx = use_ctx();
     let href = Route::Listing(listing.bundle).hash();
@@ -466,7 +469,7 @@ fn ResultCard(
                 <div class="result__meta dim">
                     {category}
                     {content.map(|c| view! { <span>{c}</span> })}
-                    <span>"by "{present::person(&listing.publisher)}</span>
+                    {byline.then(|| view! { <span>"by "<PersonLink person=listing.publisher.clone() /></span> })}
                     <span>{move || present::ago(now.get(), created)}</span>
                 </div>
                 {(!excerpt.is_empty()).then(|| view! { <p class="result__excerpt">{excerpt}</p> })}

@@ -4282,6 +4282,22 @@ This revises D-175, D-182 and D-189.
 - **Invisible characters.** A name can't hold zero-width, direction-control or other invisible format characters.
 - **Operator commands.** `rename` gives an account a name and `clear-name` removes it, which frees the name. Like `ban`, they act on the catalog file, whether or not a tracker runs on it.
 - **Upgrade.** A catalog from before this change keeps the earliest account's name where several have names with one key, and the others show their keys.
-- **Not decided here:** a name history, and glyphs beside names.
+- **Not built:** a history of an account's earlier names.
 
-**Rationale:** First come, first served is the simplest rule people understand, and the operator can undo it. A lookalike check catches the common tricks without a full confusables table, whose size and upkeep aren't worth it here. Names only help people who read them, so a name is meant to be read next to its key.
+**Rationale:** First come, first served is the simplest rule people understand, and the operator can undo it. A lookalike check catches the common tricks without a full confusables table, whose size and upkeep aren't worth it here. Names only help people who read them, so a name is meant to be read next to its key (D-262).
+
+
+## D-262: Every name links to an account page
+
+**Date:** 2026-10-09 · **Status:** Decided
+
+**Context:** Unique names (D-261) stop the casual copy, but people still judge an account by its name. They need a place to check who is behind one.
+
+**Decision:**
+
+- **Names link to `#/users/{key}`** everywhere the website shows one: on results, on a listing and on comments. The route uses the key, which is stable when a name changes or is cleared.
+- **The page shows** the name (or the key's start), when the account joined, the whole key in groups of eight characters with a copy button, and a glyph made from the key (an 8 by 8 mirrored pattern with a hue from the key, the same for the same key everywhere). Below are figures over its listings that show (listings, downloads, votes, comments, and how many have a complete peer now), its listings newest first with "show more", the categories and tags it uses (each a link to browse them), and its latest ten comments with the listing each is on. A banned key shows only that it is banned.
+- **API:** `GET /tempest/v1/accounts/{key}`, `/accounts/{key}/listings` and `/accounts/{key}/comments`, without a session. They count and list only what shows: listed, not hidden, not by a banned key. Votes the account cast are not shown.
+- **The glyph is only on this page,** not beside names in lists, and there is no name history.
+
+**Rationale:** Anyone can pick a name, but no one else has the key. Showing it in a form that can be read, compared and copied, next to what the account has actually published, is the check that works against a lookalike. The page stays small because the tracker has little else to say about an account that isn't private.

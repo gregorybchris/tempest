@@ -24,8 +24,8 @@ use ring::signature::{ED25519, UnparsedPublicKey};
 use tempest_protocol::tracker::{BundleStats, ErrorCode, Signature};
 use tempest_protocol::{BundleId, Hash, PeerId};
 use tempest_tracker_api::account::{
-    Account, AccountEdit, CODE_LEN, Challenge, Poll, PollResponse, Session, SignIn, code_from,
-    normalize_code, sign_in_message,
+    Account, AccountEdit, CODE_LEN, Challenge, Poll, PollResponse, Profile, ProfileComment,
+    Session, SignIn, code_from, normalize_code, sign_in_message,
 };
 use tempest_tracker_api::listing::{
     Comment, Content, Listing, ListingEdit, ListingPage, ListingStatus, MAX_PAGE, NewComment,
@@ -70,6 +70,9 @@ pub struct CatalogConfig {
     /// give one to an account. Names are compared as [`text::name_key`] does.
     pub reserved_names: Vec<String>,
 }
+
+/// The most tags a profile lists.
+const PROFILE_TAGS: u32 = 12;
 
 /// The names that look like the operator's or the project's.
 pub const DEFAULT_RESERVED_NAMES: &[&str] = &[
@@ -827,6 +830,67 @@ impl Catalog {
             total,
             facets: Default::default(),
         })
+    }
+
+    // Accounts as anyone sees them.
+
+    /// The public side of `key`'s account. Fails if there is no such account.
+    pub fn profile(&self, key: &PeerId) -> Result<Profile, Refusal> {
+        let Some((name, joined)) = self.store.account(key)? else {
+            return Err(not_found("account"));
+        };
+        let banned = self.store.is_banned(key)?;
+        let (stats, categories, tags) = match banned {
+            true => Default::default(),
+            false => {
+                let (categories, tags) = self.store.profile_counts(key, PROFILE_TAGS)?;
+                (self.store.profile_stats(key)?, categories, tags)
+            }
+        };
+        Ok(Profile {
+            key: *key,
+            name,
+            joined,
+            banned,
+            stats,
+            categories,
+            tags,
+        })
+    }
+
+    /// A page of the listings of `key` that show, newest first. A banned key has none.
+    pub fn listings_of(
+        &self,
+        key: &PeerId,
+        offset: u64,
+        limit: u32,
+    ) -> Result<ListingPage, Refusal> {
+        if self.store.account(key)?.is_none() {
+            return Err(not_found("account"));
+        }
+        let (listings, total) = self.store.shown_from(key, offset, limit.min(MAX_PAGE))?;
+        Ok(ListingPage {
+            listings,
+            total,
+            facets: Default::default(),
+        })
+    }
+
+    /// Up to `limit` of the comments `key` wrote on listings that show, newest first, before the
+    /// comment `before` if given. A banned key has none.
+    pub fn comments_of(
+        &self,
+        key: &PeerId,
+        before: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<ProfileComment>, Refusal> {
+        if self.store.account(key)?.is_none() {
+            return Err(not_found("account"));
+        }
+        if self.store.is_banned(key)? {
+            return Ok(Vec::new());
+        }
+        Ok(self.store.comments_by(key, before, limit.min(MAX_PAGE))?)
     }
 
     // Votes and comments.

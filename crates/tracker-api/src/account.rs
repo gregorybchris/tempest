@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use tempest_protocol::PeerId;
 use tempest_protocol::tracker::Signature;
 
+use crate::listing::{Comment, ListingRef};
+
 /// The prefix of [`sign_in_message`], which keeps its signatures from meaning anything else.
 pub const SIGN_IN_CONTEXT: &[u8] = b"tempest sign-in v1\0";
 
@@ -138,6 +140,65 @@ pub struct Account {
     pub name: Option<String>,
     /// When it joined, in seconds since the Unix epoch.
     pub joined: u64,
+}
+
+/// An account as anyone sees it: the answer to `GET /tempest/v1/accounts/{key}`. Its listings
+/// are `GET /tempest/v1/accounts/{key}/listings`, and its comments
+/// `GET /tempest/v1/accounts/{key}/comments`.
+///
+/// Everything counted is public: the account's listings that show, and what people did on them.
+/// What the account voted for is not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Profile {
+    /// The account's key.
+    pub key: PeerId,
+    /// The name it shows, if it chose one.
+    pub name: Option<String>,
+    /// When it joined, in seconds since the Unix epoch.
+    pub joined: u64,
+    /// Whether the operator banned the key. Its listings and comments don't show then, and its
+    /// counts are zero.
+    pub banned: bool,
+    /// What it has done.
+    pub stats: ProfileStats,
+    /// The categories of its listings, most listings first. A listing without one isn't counted.
+    pub categories: Vec<Count>,
+    /// Its most used tags, most listings first.
+    pub tags: Vec<Count>,
+}
+
+/// What an account has done, over the listings of it that show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ProfileStats {
+    /// How many listings it has.
+    pub listings: u64,
+    /// How many times the tracker saw a peer complete one of them.
+    pub downloads: u64,
+    /// The votes up its listings have.
+    pub votes_up: u64,
+    /// The votes down its listings have.
+    pub votes_down: u64,
+    /// The comments it wrote on listings that show.
+    pub comments: u64,
+}
+
+/// A category slug or a tag, and how many listings have it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Count {
+    /// The category's slug, or the tag.
+    pub name: String,
+    /// How many listings.
+    pub count: u64,
+}
+
+/// A comment an account wrote, and where: an item of `GET /tempest/v1/accounts/{key}/comments`,
+/// newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileComment {
+    /// The comment.
+    pub comment: Comment,
+    /// The listing it is on.
+    pub listing: ListingRef,
 }
 
 /// The body of `PUT /tempest/v1/account`.

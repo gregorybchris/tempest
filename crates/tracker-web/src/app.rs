@@ -21,6 +21,7 @@ use crate::present;
 use crate::request;
 use crate::route::Route;
 use crate::signin::SignInPage;
+use crate::user::UserPage;
 
 /// Where the theme is kept in this browser.
 const THEME_KEY: &str = "tempest-tracker-theme";
@@ -230,6 +231,7 @@ fn Shell() -> impl IntoView {
         Page::Browse => view! { <BrowsePage /> }.into_any(),
         Page::Listing(bundle) => view! { <ListingPage bundle /> }.into_any(),
         Page::Edit(bundle) => view! { <EditPage bundle /> }.into_any(),
+        Page::User(key) => view! { <UserPage key /> }.into_any(),
         Page::SignIn => view! { <SignInPage /> }.into_any(),
         Page::Me => view! { <MePage /> }.into_any(),
     };
@@ -299,6 +301,7 @@ enum Page {
     Browse,
     Listing(tempest_protocol::BundleId),
     Edit(tempest_protocol::BundleId),
+    User(tempest_protocol::PeerId),
     SignIn,
     Me,
 }
@@ -308,6 +311,7 @@ fn page_of(route: &Route) -> Page {
         Route::Browse(_) => Page::Browse,
         Route::Listing(bundle) => Page::Listing(*bundle),
         Route::Edit(bundle) => Page::Edit(*bundle),
+        Route::User(key) => Page::User(*key),
         Route::SignIn => Page::SignIn,
         Route::Me => Page::Me,
     }

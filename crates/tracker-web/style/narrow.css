@@ -1,7 +1,8 @@
 /* Narrow windows and phones, over every page; this sheet comes last. */
 
 @media (max-width: 900px) {
-  .listing__grid {
+  .listing__grid,
+  .user__grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -79,6 +80,23 @@
 
   .signin__card {
     padding: var(--gap-4) var(--gap-3);
+  }
+
+  .user__card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--gap-3);
+    padding: var(--gap-4) var(--gap-3);
+  }
+
+  .glyph {
+    width: 72px;
+    height: 72px;
+    padding: 6px;
+  }
+
+  .user__stats {
+    padding: var(--gap-3);
+    gap: var(--gap-2) var(--gap-4);
   }
 
   .signin__code {

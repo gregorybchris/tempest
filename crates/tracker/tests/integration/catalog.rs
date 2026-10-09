@@ -1055,3 +1055,144 @@ async fn hiding_and_banning_take_effect_in_a_running_tracker() {
         .router();
     assert_eq!(search(&router, "q=weather").await.0.len(), 2);
 }
+
+#[tokio::test]
+async fn anyone_can_see_an_accounts_profile_listings_and_comments() {
+    let tracker = tracker();
+    let router = tracker.router();
+    let (alice, bob) = (Key::new(1), Key::new(2));
+    let (shown, pending) = (bundle(1), bundle(2));
+    announce_listed(&router, &alice, &shown).await;
+    announce_listed(&router, &alice, &pending).await;
+    let content = Content {
+        name: "weather.csv".into(),
+        size: 4096,
+        files: 1,
+    };
+    let catalog = tracker.catalog_handle().unwrap();
+    catalog
+        .lock()
+        .unwrap()
+        .set_content(&shown, &content)
+        .unwrap();
+    let alice_auth = sign_in(&router, &alice).await;
+    let bob_auth = sign_in(&router, &bob).await;
+    let comment = json!({ "body": "Thanks!" });
+    let said = call(
+        &router,
+        Method::POST,
+        &format!("/tempest/v1/listings/{shown}/comments"),
+        &[("authorization", &bob_auth)],
+        comment,
+    )
+    .await;
+    assert_eq!(said.status, StatusCode::CREATED, "{}", said.body);
+    call(
+        &router,
+        Method::PUT,
+        "/tempest/v1/account",
+        &[("authorization", &alice_auth)],
+        json!({ "name": "Alice" }),
+    )
+    .await;
+    // Another account can't take a name that looks like it.
+    let taken = call(
+        &router,
+        Method::PUT,
+        "/tempest/v1/account",
+        &[("authorization", &bob_auth)],
+        json!({ "name": "AIice" }),
+    )
+    .await;
+    assert_eq!(taken.status, StatusCode::CONFLICT);
+    assert_eq!(taken.body["error"], "name_taken");
+
+    // Without a session: the name, the counts of what shows, and only what shows.
+    let profile = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}", alice.id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(profile.status, StatusCode::OK);
+    assert_eq!(profile.body["name"], "Alice");
+    assert_eq!(profile.body["banned"], false);
+    assert_eq!(profile.body["stats"]["listings"], 1);
+    assert_eq!(profile.body["stats"]["comments"], 0);
+    let listings = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}/listings", alice.id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(listings.body["total"], 1);
+    assert_eq!(listings.body["listings"][0]["title"], "weather.csv");
+
+    let bobs = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}", bob.id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(bobs.body["name"], Value::Null);
+    assert_eq!(bobs.body["stats"]["comments"], 1);
+    let comments = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}/comments", bob.id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(comments.body[0]["comment"]["body"], "Thanks!");
+    assert_eq!(comments.body[0]["listing"]["bundle"], json!(shown));
+    assert_eq!(comments.body[0]["listing"]["title"], "weather.csv");
+
+    // A banned key shows nothing but that it is banned.
+    catalog.lock().unwrap().set_banned(&bob.id(), true).unwrap();
+    let banned = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}", bob.id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(banned.body["banned"], true);
+    assert_eq!(banned.body["stats"]["comments"], 0);
+    let comments = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}/comments", bob.id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(comments.body, json!([]));
+
+    // Bad and unknown keys.
+    let bad = call(
+        &router,
+        Method::GET,
+        "/tempest/v1/accounts/zzz",
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let unknown = call(
+        &router,
+        Method::GET,
+        &format!("/tempest/v1/accounts/{}", Key::new(9).id()),
+        &[],
+        Value::Null,
+    )
+    .await;
+    assert_eq!(unknown.status, StatusCode::NOT_FOUND);
+}

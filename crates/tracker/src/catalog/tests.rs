@@ -701,12 +701,7 @@ fn reserved_names_are_the_operators_to_give() {
     let (alice, bob) = (Key::new(1), Key::new(2));
     sign_in(&mut catalog, &alice, 0);
     sign_in(&mut catalog, &bob, 0);
-    for reserved in [
-        "admin",
-        "Moderator",
-        "tempest",
-        "tеmpest",
-    ] {
+    for reserved in ["admin", "Moderator", "tempest", "tеmpest"] {
         let refused = name_account(&mut catalog, &alice, Some(reserved)).unwrap_err();
         assert_eq!(refused.body.error.as_str(), codes::NAME_TAKEN, "{reserved}");
     }

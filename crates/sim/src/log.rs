@@ -139,13 +139,7 @@ impl Row {
     /// Fills the row from `entry`, naming peers by their index in `peers`. A decision event's
     /// readable detail is written only if `describe` is set, since formatting every event costs
     /// more than the rest of the log together.
-    fn fill(
-        &mut self,
-        seq: u64,
-        entry: &Entry,
-        peers: &BTreeMap<PeerId, usize>,
-        describe: bool,
-    ) {
+    fn fill(&mut self, seq: u64, entry: &Entry, peers: &BTreeMap<PeerId, usize>, describe: bool) {
         let detail = self.detail.take();
         *self = Self {
             seq,

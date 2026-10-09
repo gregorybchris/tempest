@@ -68,30 +68,30 @@ fn median(values: &[f64]) -> f64 {
     stats::median(values).unwrap()
 }
 
-/// When the origin leaves early, rarest-first has already spread every chunk, while random and
-/// sequential selection leave chunks that nobody holds (Legout: rarest-first "prevents the
-/// reappearance of rare pieces"; Bharambe: it avoids the last-block problem).
+/// When the origin leaves early, rarest-first has already spread chunks evenly, so the rarest
+/// chunk has more copies than under random or sequential selection (Legout: rarest-first
+/// "prevents the reappearance of rare pieces"). Under max-min sharing (D-245) the origin sends
+/// enough distinct chunks that every variant completes, so the chunk loss Bharambe et al. found
+/// no longer shows; `specs/simulation.md` records this.
 #[test]
 #[ignore = "slow: a few seconds in release; CI runs it"]
-fn rarest_first_keeps_every_chunk_when_the_origin_leaves() {
+fn rarest_first_keeps_more_copies_of_the_rarest_chunk_when_the_origin_leaves() {
     let scenario = load("origin-leaves.yaml");
     let results = run(&scenario, &());
     let samples = stats::samples(&scenario, &results);
     let completed = |name| metric(&samples, name, Metric::Completed);
     let rarest = |name| metric(&samples, name, Metric::RarestCopies);
 
-    // Whether everyone completes is all or nothing in a run, so the medians compare the
-    // availability of the rarest chunk, and completions are counted.
-    let total = |name| completed(name).values().sum::<f64>();
-    assert!(completed("rarest-first").values().all(|&c| c == 1.0));
-    assert!(total("=random") < total("rarest-first") - 1.0);
-    assert_eq!(total("sequential"), 0.0);
+    for name in ["rarest-first", "=random", "sequential"] {
+        assert!(completed(name).values().all(|&c| c == 1.0), "{name}");
+    }
     assert_shift(rarest("rarest-first"), rarest("=random"), false);
     assert_shift(rarest("rarest-first"), rarest("sequential"), false);
 }
 
 /// A crowd that arrives at once finishes close to the fastest possible time, set by the total
-/// upload capacity, and faster with rarest-first than with random selection (Bharambe et al.).
+/// upload capacity, and keeps more copies of its rarest chunk with rarest-first than with random
+/// selection (Bharambe et al.). Random selection no longer finishes later (D-245).
 #[test]
 #[ignore = "slow: about 15 s in release; CI runs it"]
 fn a_flash_crowd_finishes_near_the_bound() {
@@ -119,8 +119,6 @@ fn a_flash_crowd_finishes_near_the_bound() {
     let samples = stats::samples(&scenario, &results);
     let utilization = metric(&samples, "rarest-first", Metric::Utilization);
     assert!(utilization.values().all(|&u| u > 0.75), "{utilization:?}");
-    let p90 = |name| metric(&samples, name, Metric::CompletionP90);
-    assert_shift(p90("rarest-first"), p90("random"), true);
     let rarest = |name| metric(&samples, name, Metric::RarestCopies);
     assert_shift(rarest("rarest-first"), rarest("random"), false);
 }

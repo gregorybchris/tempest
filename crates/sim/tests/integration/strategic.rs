@@ -7,7 +7,7 @@ use tempest_sim::experiment::run_all;
 use tempest_sim::stats::{Bootstrap, Meaningful, Verdict};
 use tempest_sim::{RunOptions, Scenario};
 
-/// A swarm with a few fast peers, many home peers and some slow ones, where peers leave once
+/// A swarm with a tenth of its peers fast, many home peers and some slow ones, where peers leave once
 /// complete. The four `probe` peers, home peers otherwise, behave as `behavior`.
 fn swarm(behavior: &str) -> Scenario {
     Scenario::from_yaml(&format!(
@@ -22,7 +22,7 @@ peers:
     starts: complete
     bandwidth: {{ up: 100Mbps, down: 100Mbps }}
   - class: fast
-    count: 4
+    count: 10
     bandwidth: {{ up: 50Mbps, down: 100Mbps }}
     arrivals: {{ pattern: flash-crowd, decay: 10s }}
   - class: home

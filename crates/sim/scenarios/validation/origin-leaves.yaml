@@ -1,4 +1,4 @@
-# Rarest-first keeps every chunk in the swarm when the origin leaves early (Legout et al.,
+# Rarest-first keeps more copies of the rarest chunk when the origin leaves early (Legout et al.,
 # Bharambe et al.). See crates/sim/tests/integration/validation.rs.
 name: origin-leaves
 description: 100 home peers fetch a release from an origin that leaves after about 30 seconds.

@@ -4010,7 +4010,7 @@ This revises D-175, D-182 and D-189.
 - If a change hasn't settled after a bounded amount of work, every level is filled from scratch. The property test checks every rate against filling from scratch.
 - The network keeps one finish time per running flow, so the run loop no longer queues an event for every rate change and skips the stale ones.
 
-**Consequences:** the golden baselines were saved again (D-246 changed them too). Medians over 20 seeds moved by up to about 10%: `mixed` completes 10% sooner at the median, `routers` and `sessions` 6–7%, `crowd` 2% later; `crowd`'s rarest-chunk count fell from 10 to 8.5 and `strategic`'s fairness from 0.61 to 0.55. Strategic clients (D-166) now finish about 5% sooner than BitTorrent peers on the same seeds, down from the 15% recorded there, and the difference is no longer meaningful at 20 seeds (95% interval −26 s to +3 s), so `strategic::strategic_clients_download_faster_among_bittorrent_peers` fails: fast peers' spare upload now reaches everyone, which leaves less to gain by gaming them. **Open question for the owner:** whether to keep that test's claim, for example with more seeds or a more uneven swarm, or record the new result. Two validation tests (`rarest_first_keeps_every_chunk_when_the_origin_leaves` and `a_flash_crowd_finishes_near_the_bound`) already failed before this change.
+**Consequences:** the golden baselines were saved again (D-246 changed them too). Medians over 20 seeds moved by up to about 10%: `mixed` completes 10% sooner at the median, `routers` and `sessions` 6–7%, `crowd` 2% later; `crowd`'s rarest-chunk count fell from 10 to 8.5 and `strategic`'s fairness from 0.61 to 0.55. Strategic clients (D-166) now finish about 5% sooner than BitTorrent peers on the same seeds, down from the 15% recorded there, and the difference is no longer meaningful at 20 seeds (95% interval −26 s to +3 s), so `strategic::strategic_clients_download_faster_among_bittorrent_peers` fails: fast peers' spare upload now reaches everyone, which leaves less to gain by gaming them. The failing checks are resolved in D-259.
 
 **Rationale:** Max-min fairness is what "share capacity fairly" means for flows, and what TCP and QUIC flows approach on access links. Working levels out only where they change keeps a change's cost near D-158's in large swarms.
 
@@ -4226,3 +4226,20 @@ This revises D-175, D-182 and D-189.
 - It is keyboard-first: arrows, page keys, home and end move; enter or → opens a folder, and enter chooses a file; ← or backspace goes up; typing filters and esc clears the filter, then closes; `.` shows hidden entries; ctrl or cmd with L types a path, and with enter chooses. Its list draws only the rows in view, as the transfers list does. Remotely, it says the folders are the engine's, not the device's.
 
 **Rationale:** Only the engine can see its own disk, and a picker that shows it keeps the paths exact without making people type them. Keeping the text fields means a pasted path still works.
+
+---
+
+## D-259: Validation claims follow the max-min network
+
+**Date:** 2026-10-09 · **Status:** Decided
+
+**Context:** After D-245, three slow checks failed (the strategic gain, chunk survival when the origin leaves, and random selection's slower flash crowd). Rerunning them showed the model's results had changed, not that the simulator was broken.
+
+**Decision:**
+
+- **Strategic clients** (D-166): the swarm has 10 fast peers instead of 4. With max-min sharing, a few fast peers' spare upload reaches everyone, so gaming them gains little (about 5%, not meaningful at 20 seeds). With 10, strategic probes finish about 22% sooner (a median of 52 s, 95% interval 18 s to 65 s), which is the result Piatek et al. report for uneven swarms. The test keeps its claim.
+- **Origin leaves early:** every selection now completes whenever the origin has sent a full copy, and none does when it has not (between 10 and 12 s of upload in `origin-leaves`), so there is no setting where only rarest-first completes. The test now checks that all complete and that rarest-first leaves more copies of the rarest chunk (26 against 17 for random and 13 for sequential). It is renamed to match.
+- **Flash crowd:** random selection finishes as fast as rarest-first at the 90th percentile (0.2% apart). The test keeps the bound, utilization and rarest-copies checks and drops the completion-time claim.
+
+**Rationale:** The earlier loss and slowdown came from the old model leaving capacity unused, which the tests' claims depended on. Keeping a claim the model no longer shows would mean tuning scenarios until it appears.
+

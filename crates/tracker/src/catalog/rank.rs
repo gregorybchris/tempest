@@ -4,6 +4,8 @@
 //! Everything here is a pure function of a listing's [`Signals`], so the orders can be tested
 //! with made-up numbers.
 
+use std::collections::BinaryHeap;
+
 use tempest_protocol::BundleId;
 use tempest_protocol::tracker::BundleStats;
 use tempest_tracker_api::listing::VoteCounts;
@@ -79,27 +81,97 @@ pub fn relevance(text_score: f32, signals: &Signals) -> f64 {
     f64::from(text_score) * (POPULARITY_WEIGHT * popularity(signals)).exp()
 }
 
-/// Sorts `listings` by `sort`. Ties go to the newer listing, then to the lower bundle ID, so the
-/// order is the same on every page.
-pub fn sort(listings: &mut [Ranked], sort: Sort) {
-    let key = |r: &Ranked| -> [f64; 2] {
-        let s = &r.signals;
-        match sort {
-            Sort::Relevance => [relevance(r.text_score, s), 0.0],
+/// A listing with what `sort` orders it by, first first: its key's parts, highest first, then
+/// the newer listing, then the lower bundle ID, so the order is the same on every page.
+#[derive(Debug, Clone, PartialEq)]
+struct Keyed {
+    key: [f64; 2],
+    ranked: Ranked,
+}
+
+impl Keyed {
+    fn new(ranked: Ranked, sort: Sort) -> Self {
+        let s = &ranked.signals;
+        let key = match sort {
+            Sort::Relevance => [relevance(ranked.text_score, s), 0.0],
             Sort::Newest => [0.0, 0.0],
             Sort::Seeders => [s.swarm.complete as f64, s.swarm.incomplete as f64],
             Sort::Votes => [net_votes(&s.votes) as f64, s.votes.up as f64],
             Sort::Trending => [s.trending, health(&s.swarm)],
+        };
+        Self { key, ranked }
+    }
+}
+
+impl Eq for Keyed {}
+
+impl Ord for Keyed {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let (a, b) = (self, other);
+        b.key[0]
+            .total_cmp(&a.key[0])
+            .then_with(|| b.key[1].total_cmp(&a.key[1]))
+            .then_with(|| b.ranked.signals.created.cmp(&a.ranked.signals.created))
+            .then_with(|| a.ranked.bundle.as_bytes().cmp(b.ranked.bundle.as_bytes()))
+    }
+}
+
+impl PartialOrd for Keyed {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Sorts `listings` by `sort`. Ties go to the newer listing, then to the lower bundle ID, so the
+/// order is the same on every page.
+pub fn sort(listings: &mut Vec<Ranked>, sort: Sort) {
+    let mut keyed: Vec<Keyed> = listings.drain(..).map(|r| Keyed::new(r, sort)).collect();
+    keyed.sort();
+    listings.extend(keyed.into_iter().map(|keyed| keyed.ranked));
+}
+
+/// The first `capacity` listings in `sort`'s order of those pushed, kept as they arrive, so
+/// ranking a search needs memory for a page's depth rather than for every match.
+#[derive(Debug)]
+pub struct Top {
+    sort: Sort,
+    capacity: usize,
+    /// The last of those kept is on top, to make way for a better one.
+    heap: BinaryHeap<Keyed>,
+}
+
+impl Top {
+    /// Keeps the first `capacity` by `sort`.
+    pub fn new(sort: Sort, capacity: usize) -> Self {
+        Self {
+            sort,
+            capacity,
+            heap: BinaryHeap::with_capacity(capacity.min(1024) + 1),
         }
-    };
-    listings.sort_by(|a, b| {
-        let (a_key, b_key) = (key(a), key(b));
-        b_key[0]
-            .total_cmp(&a_key[0])
-            .then_with(|| b_key[1].total_cmp(&a_key[1]))
-            .then_with(|| b.signals.created.cmp(&a.signals.created))
-            .then_with(|| a.bundle.as_bytes().cmp(b.bundle.as_bytes()))
-    });
+    }
+
+    /// Considers `ranked`.
+    pub fn push(&mut self, ranked: Ranked) {
+        if self.capacity == 0 {
+            return;
+        }
+        let keyed = Keyed::new(ranked, self.sort);
+        if self.heap.len() == self.capacity {
+            match self.heap.peek() {
+                Some(last) if keyed < *last => {
+                    self.heap.pop();
+                }
+                _ => return,
+            }
+        }
+        self.heap.push(keyed);
+    }
+
+    /// Those kept, in order.
+    pub fn into_sorted(self) -> Vec<Ranked> {
+        let sorted = self.heap.into_sorted_vec();
+        sorted.into_iter().map(|keyed| keyed.ranked).collect()
+    }
 }
 
 #[cfg(test)]
@@ -232,7 +304,17 @@ mod tests {
             let once = listings.clone();
             listings.reverse();
             sort(&mut listings, by);
-            prop_assert_eq!(listings, once);
+            prop_assert_eq!(&listings, &once);
+
+            // Keeping only the first few as they arrive gives the sorted list's first few.
+            for capacity in [0, 1, 3, once.len(), once.len() + 2] {
+                let mut top = Top::new(by, capacity);
+                for ranked in listings.iter().rev() {
+                    top.push(ranked.clone());
+                }
+                let kept = top.into_sorted();
+                prop_assert_eq!(&kept[..], &once[..capacity.min(once.len())]);
+            }
         }
     }
 }

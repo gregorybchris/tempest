@@ -46,6 +46,10 @@ const DAY: u64 = 24 * 60 * 60;
 /// How long a sign-in code can be signed and its session collected.
 const CHALLENGE_LIFETIME: u64 = 10 * 60;
 
+/// How deep into a search's ranked matches pages reach: a page's offset and limit together.
+/// Ranking keeps this many of the best matches as they are found, rather than all of them.
+pub const MAX_DEPTH: u64 = 10_000;
+
 /// The most sign-in challenges outstanding at once, which bounds their memory.
 const MAX_CHALLENGES: usize = 10_000;
 
@@ -585,39 +589,38 @@ impl Catalog {
         swarm: impl Fn(&BundleId) -> BundleStats,
     ) -> Result<ListingPage, Refusal> {
         self.sync_blocked()?;
-        let found = self
-            .search
-            .search(&query.q, query.category.as_deref(), &query.tags)
-            .map_err(StoreError::from)?;
         let today = now / DAY;
         let mut votes = self.store.vote_counts()?;
         let mut downloads = self
             .store
             .downloads_since(today.saturating_sub(rank::TRENDING_DAYS))?;
-        let mut ranked: Vec<rank::Ranked> = found
-            .matches
-            .into_iter()
-            .map(|found| rank::Ranked {
-                bundle: found.bundle,
-                text_score: found.score,
-                signals: rank::Signals {
-                    created: found.created,
-                    swarm: swarm(&found.bundle),
-                    votes: votes.remove(&found.bundle).unwrap_or_default(),
-                    trending: rank::trending(
-                        downloads.remove(&found.bundle).unwrap_or_default(),
-                        today,
-                    ),
-                },
+        let limit = query.limit.min(MAX_PAGE);
+        let depth = query.offset.saturating_add(u64::from(limit)).min(MAX_DEPTH);
+        let mut top = rank::Top::new(query.sort, depth as usize);
+        let mut total = 0;
+        let facets = self
+            .search
+            .search(&query.q, query.category.as_deref(), &query.tags, |found| {
+                total += 1;
+                top.push(rank::Ranked {
+                    bundle: found.bundle,
+                    text_score: found.score,
+                    signals: rank::Signals {
+                        created: found.created,
+                        swarm: swarm(&found.bundle),
+                        votes: votes.remove(&found.bundle).unwrap_or_default(),
+                        trending: rank::trending(
+                            downloads.remove(&found.bundle).unwrap_or_default(),
+                            today,
+                        ),
+                    },
+                });
             })
-            .collect();
-        rank::sort(&mut ranked, query.sort);
+            .map_err(StoreError::from)?;
 
-        let total = ranked.len() as u64;
         let start = usize::try_from(query.offset).unwrap_or(usize::MAX);
-        let limit = query.limit.min(MAX_PAGE) as usize;
         let mut listings = Vec::new();
-        for ranked in ranked.iter().skip(start).take(limit) {
+        for ranked in top.into_sorted().iter().skip(start) {
             // The store and the index change together under the catalog's lock.
             if let Some(mut listing) = self.store.listing(&ranked.bundle, viewer)? {
                 listing.swarm = ranked.signals.swarm;
@@ -627,7 +630,7 @@ impl Catalog {
         Ok(ListingPage {
             listings,
             total,
-            facets: found.facets,
+            facets,
         })
     }
 

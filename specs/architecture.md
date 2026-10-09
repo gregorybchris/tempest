@@ -37,7 +37,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200) | `tracker-api` |
 | `sim` | Discrete-event simulator, scenarios, DuckDB results and the queries the results UI reads (D-204) | `core`, `sim-api` |
 | `sim-api` | The simulation results API's types and query strings, shared by its server and the results UI (D-204) | (none) |
-| `ui-kit` | Shared design system for the web UIs (D-076, D-198) | (none) |
+| `ui-kit` | Shared design system for the web UIs (D-076, D-198), and the request layer and app shell they share (D-243) | (none) |
 | `ui-gallery` | A gallery of the design system, and the browser benchmark of its live views (D-199) | `ui-kit` |
 | `web` | Client web UI | `ui-kit`, `api` |
 | `tui` | Terminal UI | `api`, `engine` (its API client) |

@@ -155,7 +155,7 @@ impl Upload {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WhenComplete {
-    /// Serve every interested peer, answering their requests in turn.
+    /// Serve every wanting peer, answering their requests in turn.
     #[default]
     RoundRobin,
     /// Keep the upload strategy used while downloading.

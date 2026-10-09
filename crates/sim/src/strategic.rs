@@ -59,7 +59,7 @@ impl Default for Estimate {
 /// A BitTyrant-style upload strategy.
 ///
 /// Prices are measured in equal shares of the upload capacity among BitTorrent's slots, and
-/// start at one. Every review interval the strategy serves the interested peers with the best
+/// start at one. Every review interval the strategy serves the wanting peers with the best
 /// ratio of what they last gave to their price, until the prices add up to the slot count, and
 /// orders responses so that each served peer gets upload in proportion to its price. Peers that
 /// never uploaded to it rank last, in random order, and get what the others leave; peers that
@@ -113,7 +113,7 @@ impl Strategic {
         }
     }
 
-    /// The interested peers among `peers` that fit in `budget` shares, best ratio of what they
+    /// The wanting peers among `peers` that fit in `budget` shares, best ratio of what they
     /// gave to their price first, ties broken at random. Unless `strict`, the first is taken
     /// even if it doesn't fit.
     fn choose<'p>(

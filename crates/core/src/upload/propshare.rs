@@ -19,7 +19,7 @@ pub const OPTIMISTIC_SHARE: f64 = 0.2;
 
 /// PropShare (Levin et al., "BitTorrent is an Auction").
 ///
-/// It serves every interested peer that uploaded to this peer over the rate window, plus
+/// It serves every wanting peer that uploaded to this peer over the rate window, plus
 /// `optimistic_slots` others chosen at random and rotated every optimistic interval. Upload is
 /// then divided by ordering responses: each contributor's share of upload is its share of what
 /// this peer received, scaled to leave [`OPTIMISTIC_SHARE`] to the optimistic peers, and the next

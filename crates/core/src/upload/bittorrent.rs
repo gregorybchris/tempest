@@ -14,8 +14,8 @@ use crate::time::Time;
 
 /// BitTorrent's choking algorithm, the default upload strategy while downloading.
 ///
-/// Every review interval, it serves the `reciprocal_slots` interested peers that uploaded to
-/// this peer fastest over the rate window, and `optimistic_slots` other interested peers chosen
+/// Every review interval, it serves the `reciprocal_slots` wanting peers that uploaded to
+/// this peer fastest over the rate window, and `optimistic_slots` other wanting peers chosen
 /// at random, rotated every optimistic interval so newcomers can start. Between reviews it only
 /// stops serving peers that want nothing more and fills slots left free.
 #[derive(Debug, Clone)]

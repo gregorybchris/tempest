@@ -107,25 +107,25 @@ The simulator reproduces the classic results qualitatively. Numbers are medians 
 
 - **Rarest-first keeps every chunk alive** (Legout; Bharambe's last-block problem). When the origin leaves after uploading about 4.5 copies' worth, every peer completes with rarest-first; with random selection a chunk is lost in 3 seeds of 10 and nobody completes in those, and with sequential selection nobody ever completes. The rarest chunk averages about 21 copies with rarest-first and 7 with random.
 - **Near-optimal distribution** (Bharambe). 100 peers arriving at once finish within about 1.2× the bound set by total upload capacity, using over 80% of it. Random selection is about 14% slower at the 90th percentile.
-- **Choking resists free riders, mildly** (Legout). Free riders take about 15% longer than contributors under the BitTorrent strategy and no longer under the cooperative one. Finished peers and the origin serve everyone, which limits the penalty. Fast peers upload about twice what they download under either strategy (Bharambe: tit-for-tat doesn't equalize heterogeneous peers).
-- **First blocks, not last pieces** (Legout). A newcomer's first 5% takes about 3.7× as long as a 5% in the middle; its last 5% about 1.8×.
+- **The BitTorrent strategy resists free riders, mildly** (Legout). Free riders take about 15% longer than contributors under the BitTorrent strategy and no longer under the cooperative one. Finished peers and the origin serve everyone, which limits the penalty. Fast peers upload about twice what they download under either strategy (Bharambe: tit-for-tat doesn't equalize heterogeneous peers).
+- **First chunks, not last ones** (Legout). A newcomer's first 5% takes about 3.7× as long as a 5% in the middle; its last 5% about 1.8×.
 
-Validation exposed three client weaknesses, since fixed: a crowd arriving together locked half its peers out for a minute (D-169), and requests and freed slots leaked upload to peers the choke had refused (D-170).
+Validation exposed three client weaknesses, since fixed: a crowd arriving together locked half its peers out for a minute (D-169), and requests and freed slots leaked upload to peers the strategy had stopped serving (D-170).
 
-Two effects can hide piece selection. In [`flash-crowd`](../crates/sim/scenarios/flash-crowd.yaml), peers arrive over minutes, the origin stays and every peer sees most of the swarm, so random selection corrects itself (as Massoulié and Vojnović predict) and matches rarest-first. And an origin whose upload is the bottleneck sends what newcomers ask for first, which is chosen at random before rarity is known; it answers every peer in turn (D-154), so it sends several copies of some chunks before one of others, whatever the peers' selection.
+Two effects can hide chunk selection. In [`flash-crowd`](../crates/sim/scenarios/flash-crowd.yaml), peers arrive over minutes, the origin stays and every peer sees most of the swarm, so random selection corrects itself (as Massoulié and Vojnović predict) and matches rarest-first. And an origin whose upload is the bottleneck sends what newcomers ask for first, which is chosen at random before rarity is known; it answers every peer in turn (D-154), so it sends several copies of some chunks before one of others, whatever the peers' selection.
 
 ## Experiment backlog
 
 From the owner's planning notes and the research (see the research atlas):
 
-- Rarest-first vs random vs sequential piece selection: see [Validation](#validation).
+- Rarest-first vs random vs sequential chunk selection: see [Validation](#validation).
 - Merkle vs flat hashes (simulator-only flat variant)
 - Discovery speed: tracker vs peer exchange vs LAN vs links
 - Endgame with one very slow peer: limited vs classic. *First run* ([`endgame-slow-peer`](../crates/sim/scenarios/experiments/endgame-slow-peer.yaml)): without endgame, peers wait on the slow peer and the 90th percentile takes 4.3× as long; limited and classic are within 10% of each other. Neither received duplicate bytes, since cancels arrive before the redundant transfers finish.
 - Does withholding upload from non-reciprocating peers help? Which upload strategy should be the default?
 - Cross-swarm helping: the owner's idea of helping slow peers in other swarms (prior art: Tribler's 2Fast)
 - Request size and in-flight amount sweeps. *First run* ([`request-size`](../crates/sim/scenarios/experiments/request-size.yaml), 100 ms links): the defaults are best or tied. One-chunk requests are 16% slower and send 15× the overhead, and 70% slower when only the bandwidth-delay product is kept in flight; 64-chunk requests are 15% slower.
-- How the origin serves a crowd when its upload is the bottleneck. *First run* ([`origin-policy`](../crates/sim/scenarios/experiments/origin-policy.yaml)): answering every peer in turn, the default, takes 2.7× the time the origin needs to send one copy; serving a few peers at a time, BitTorrent's choke, 1.5×; superseeding, 1.2×. Superseeding is on by default only while two or more peers lack chunks (D-063, D-223).
+- How the origin serves a crowd when its upload is the bottleneck. *First run* ([`origin-policy`](../crates/sim/scenarios/experiments/origin-policy.yaml)): answering every peer in turn, the default, takes 2.7× the time the origin needs to send one copy; serving a few peers at a time, as BitTorrent does, 1.5×; superseeding, 1.2×. Superseeding is on by default only while two or more peers lack chunks (D-063, D-223).
 - Lingering policies and swarm stability
 - Superseeding: when it helps and when it hurts. *First run* ([`superseed-crowd`](../crates/sim/scenarios/experiments/superseed-crowd.yaml), [`superseed-direct`](../crates/sim/scenarios/experiments/superseed-direct.yaml)): with a window of offered ranges, crowds keep the whole saving, and 1:1 sends keep up unless superseeding is always on at 1 Gbps; superseeding only while a crowd wants the bundle (`crowd`) keeps both, but slows a small crowd whose origin is not the bottleneck. Numbers in D-223.
 - Free-rider and strategic-client robustness

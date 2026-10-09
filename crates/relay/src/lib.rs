@@ -13,5 +13,5 @@ pub mod permissions;
 pub mod registry;
 pub mod server;
 
-pub use server::{Relay, RelayConfig};
+pub use server::{DEFAULT_RATE_LIMIT, Relay, RelayConfig};
 pub use tempest_protocol::relay::DEFAULT_RELAY_PORT as DEFAULT_PORT;

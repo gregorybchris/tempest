@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use tempest_net::Identity;
 use tempest_protocol::PeerId;
 use tempest_protocol::relay::RelayHost;
-use tempest_relay::{DEFAULT_PORT, Relay, RelayConfig};
+use tempest_relay::{DEFAULT_PORT, DEFAULT_RATE_LIMIT, Relay, RelayConfig};
 
 /// The environment variable that overrides where the relay's identity is stored.
 const RELAY_IDENTITY_ENV: &str = "TEMPEST_RELAY_IDENTITY";
@@ -42,10 +42,9 @@ pub struct RelayArgs {
     /// The most peers registered at once from one IP address, or one IPv6 /64.
     #[arg(long, default_value_t = RelayConfig::localhost().max_per_ip)]
     max_per_ip: usize,
-    /// The most bytes per second forwarded for each peer in each direction. Unlimited by
-    /// default.
-    #[arg(long, value_name = "BYTES")]
-    rate_limit: Option<u64>,
+    /// The most bytes per second forwarded for each peer in each direction, or 0 for no limit.
+    #[arg(long, default_value_t = DEFAULT_RATE_LIMIT, value_name = "BYTES")]
+    rate_limit: u64,
 }
 
 pub fn relay(args: RelayArgs) -> Result<()> {
@@ -58,7 +57,7 @@ pub fn relay(args: RelayArgs) -> Result<()> {
             allowlist: (!args.allow.is_empty()).then(|| args.allow.iter().copied().collect()),
             max_registrations: args.max_peers,
             max_per_ip: args.max_per_ip,
-            rate_limit: args.rate_limit,
+            rate_limit: (args.rate_limit > 0).then_some(args.rate_limit),
             ..RelayConfig::new(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), args.port))
         };
         let relay = start(&identity, config, args.bind)?;

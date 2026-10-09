@@ -143,7 +143,7 @@ fn runs_replay_exactly() {
         swarm
             .nodes
             .iter()
-            .flat_map(|n| n.events.iter().map(|e| e.to_string()))
+            .flat_map(|n| n.events.iter().map(ToString::to_string))
             .collect::<Vec<_>>()
     };
     let first = log();

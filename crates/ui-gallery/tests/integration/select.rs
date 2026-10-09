@@ -24,7 +24,7 @@ fn mount() -> Mounted {
     let changes = RwSignal::new(Vec::new());
     let host: web_sys::HtmlElement = document().create_element("div").unwrap().unchecked_into();
     document().body().unwrap().append_child(&host).unwrap();
-    let mounted = leptos::mount::mount_to(host.clone(), move || {
+    let mounted = mount_to(host.clone(), move || {
         view! {
             <Select
                 label="Category"

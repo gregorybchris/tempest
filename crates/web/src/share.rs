@@ -93,7 +93,7 @@ fn NewShare() -> impl IntoView {
                     true
                 }
                 _ => false,
-            })
+            });
         },
         Duration::from_secs(1),
     ) {

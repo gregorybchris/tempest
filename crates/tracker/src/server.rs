@@ -215,7 +215,7 @@ impl Tracker {
         // finishes its checks before changing anything.
         self.swarms
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The catalog, shared, if the tracker has one: for work beside the routes, such as
@@ -233,7 +233,7 @@ impl Tracker {
         // The store's writes are transactions, so a panic leaves nothing half done.
         catalog
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// A bundle's swarm counts now.
@@ -258,7 +258,7 @@ impl Tracker {
         // The limiter is plain data that each check leaves consistent.
         self.limiter
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .check(Instant::now(), action, ip)
     }
 

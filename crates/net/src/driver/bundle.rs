@@ -286,8 +286,8 @@ impl BundleTask {
         let session = &self.session;
         let status = Status {
             manifest: session.manifest().cloned(),
-            have: session.have().map_or(0, |have| have.len()),
-            chunks: session.have().map_or(0, |have| have.capacity()),
+            have: session.have().map_or(0, ChunkSet::len),
+            chunks: session.have().map_or(0, ChunkSet::capacity),
             downloaded: session.downloaded(),
             uploaded: session.uploaded(),
             connections: session.connection_count(),

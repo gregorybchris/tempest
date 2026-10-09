@@ -274,7 +274,7 @@ impl Shades {
                         }
                     }
                 });
-            })
+            });
         });
         shades
     }

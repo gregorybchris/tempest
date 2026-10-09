@@ -373,7 +373,7 @@ mod tests {
                 title: title.into(),
                 description: description.into(),
                 category: Some(category.into()).filter(|c: &String| !c.is_empty()),
-                tags: tags.iter().map(|t| t.to_string()).collect(),
+                tags: tags.iter().map(ToString::to_string).collect(),
             },
             content_name: format!("content-{n}"),
             created: u64::from(n),

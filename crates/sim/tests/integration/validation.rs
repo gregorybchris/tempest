@@ -161,7 +161,11 @@ fn share_ratio(scenario: &Scenario, result: &RunResult, class: &str) -> f64 {
 fn choking_slows_free_riders() {
     let scenario = load("free-riders.yaml");
     let results = run(&scenario, &());
-    let names: Vec<String> = scenario.variants().iter().map(|v| v.name()).collect();
+    let names: Vec<String> = scenario
+        .variants()
+        .iter()
+        .map(tempest_sim::Variant::name)
+        .collect();
     let variant = |name: &str| names.iter().position(|n| n.ends_with(name)).unwrap();
     let penalty = |v| {
         per_seed(&results, v, |r| {

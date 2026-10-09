@@ -173,7 +173,7 @@ MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g
     fn signs_the_specs_listing_test_vector() {
         let identity = Identity::from_pem(RFC_8032_PEM).unwrap();
         let bundle = format!("3f9a{}", "0".repeat(60)).parse().unwrap();
-        let sig = identity.sign(&tempest_protocol::tracker::listing_message(&bundle));
+        let sig = identity.sign(&listing_message(&bundle));
         assert_eq!(
             sig.to_string(),
             "ad66ac47ca8e640246582dcc0000087592145360a7a7f3b7385efd630f83a2aa\

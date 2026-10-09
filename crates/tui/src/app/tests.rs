@@ -724,7 +724,7 @@ fn tabs_cycle_both_ways_and_fetch_what_they_show() {
 
     // The chunk map asks for as many cells as the terminal shows.
     app.resize(100, 30);
-    let cells = crate::chunkmap::cells_for_screen(100, 30);
+    let cells = chunkmap::cells_for_screen(100, 30);
     assert_eq!(
         type_keys(&mut app, "c"),
         Some(Request::Look(id, Look::Chunks(cells)))
@@ -806,8 +806,8 @@ fn hints_follow_the_screen() {
     assert_eq!(app.help_sections()[0].0, Section::View);
 }
 
-fn transfer(seed: u8, name: &str, position: u32) -> tempest_api::TransferInfo {
-    tempest_api::TransferInfo::example(seed, name, position)
+fn transfer(seed: u8, name: &str, position: u32) -> TransferInfo {
+    TransferInfo::example(seed, name, position)
 }
 
 #[test]

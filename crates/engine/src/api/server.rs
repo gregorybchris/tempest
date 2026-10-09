@@ -260,7 +260,7 @@ fn load_cert(
         ServeError::Tls(format!("{}: {error}", path.display()))
     };
     let chain = CertificateDer::pem_file_iter(cert)
-        .and_then(|certs| certs.collect::<Result<Vec<_>, _>>())
+        .and_then(Iterator::collect::<Result<Vec<_>, _>>)
         .map_err(|error| invalid(cert, error))?;
     if chain.is_empty() {
         return Err(ServeError::Tls(format!(

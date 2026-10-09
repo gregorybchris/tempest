@@ -61,7 +61,11 @@ async fn poll<T: serde::de::DeserializeOwned>(
 
 fn assert_covers(map: &ChunkMapInfo, cells: usize) {
     assert_eq!(map.cells.len(), cells);
-    let covered: u32 = map.cells.iter().map(|cell| cell.chunks()).sum();
+    let covered: u32 = map
+        .cells
+        .iter()
+        .map(tempest_engine::inspect::CellInfo::chunks)
+        .sum();
     assert_eq!(covered, map.chunks);
 }
 

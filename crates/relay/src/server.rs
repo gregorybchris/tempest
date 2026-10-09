@@ -185,7 +185,7 @@ impl Relay {
                 .config
                 .allowlist
                 .as_ref()
-                .map_or(0, std::collections::HashSet::len)
+                .map_or(0, HashSet::len)
         );
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
         let opening = Arc::new(Semaphore::new(MAX_OPENING));

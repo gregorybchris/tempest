@@ -63,18 +63,18 @@ where
 pub fn Problem(error: RequestError) -> impl IntoView {
     let ctx = use_ctx();
     let title = match &error {
-        e if e.needs_sign_in() => "Sign in first",
-        e if e.not_found() => "Not here",
+        e if request::needs_sign_in(e) => "Sign in first",
+        e if request::not_found(e) => "Not here",
         RequestError::Unreachable => "Can't reach the tracker",
         _ => "Something went wrong",
     };
     let text = match &error {
-        e if e.not_found() => {
+        e if request::not_found(e) => {
             "No listing is here: it may have been unpublished, or not be listed yet.".to_owned()
         }
         e => e.to_string(),
     };
-    let sign_in = error.needs_sign_in();
+    let sign_in = request::needs_sign_in(&error);
     view! {
         <Empty title text>
             {sign_in.then(|| view! {

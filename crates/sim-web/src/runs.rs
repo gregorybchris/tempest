@@ -11,8 +11,9 @@ use tempest_sim_api::query::{Named, Outcome, RunQuery, RunSort};
 use tempest_ui_kit::chart::{Bar, BarChart, Color, LineChart, Unit};
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
+use tempest_ui_kit::shell::{debounce, synced};
 
-use crate::app::{debounce, synced, use_ctx};
+use crate::app::use_ctx;
 use crate::present::{self, maybe, plural, short};
 use crate::request::load;
 use crate::route::Route;

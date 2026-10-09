@@ -122,9 +122,7 @@ fn SignIn() -> impl IntoView {
                         ctx.replace(back);
                     }
                     Ok(PollResponse { session: None }) => {}
-                    Err(RequestError::Refused(_, e))
-                        if e.error.as_str() == codes::SIGN_IN_FAILED =>
-                    {
+                    Err(e) if e.code() == Some(codes::SIGN_IN_FAILED) => {
                         let _ = step.try_set(Step::Expired);
                     }
                     // A dropped poll is tried again at the next tick.

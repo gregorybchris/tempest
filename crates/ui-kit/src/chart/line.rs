@@ -239,6 +239,8 @@ pub struct LinePlot {
     pub paths: Vec<SeriesPaths>,
     /// The x values shown.
     pub window: (f64, f64),
+    /// The x values the data spans, which the window can grow to.
+    pub full: (f64, f64),
     /// Whether that is less than all the data.
     pub zoomed: bool,
 }
@@ -369,6 +371,7 @@ impl LineData {
             y_ticks,
             paths,
             window,
+            full,
             zoomed,
         }
     }
@@ -416,6 +419,7 @@ impl LineData {
         };
         Some(Hover {
             x: plot.x.map(x),
+            at: x,
             title,
             rows,
         })
@@ -445,6 +449,8 @@ fn labeled(
 pub struct Hover {
     /// The pixel x of the sample, for the crosshair.
     pub x: f64,
+    /// The sample's x value.
+    pub at: f64,
     /// The sample's x, as text.
     pub title: String,
     /// Each shown series' value there.

@@ -26,6 +26,7 @@ mod signin;
 mod state;
 mod store;
 mod stream;
+mod viewport;
 
 fn main() {
     console_error_panic_hook::set_once();

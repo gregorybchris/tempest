@@ -27,11 +27,11 @@ where
 /// What went wrong with a request, in plain language.
 #[component]
 pub fn Problem(error: RequestError) -> impl IntoView {
-    let title = match &error {
-        RequestError::Refused(e) if e.error == "no_database" => "No results yet",
-        RequestError::Refused(e) if e.error == "busy" => "The results are busy",
-        RequestError::Refused(e) if e.error == "not_found" => "Not found",
-        RequestError::Unreachable => "Can't reach the results",
+    let title = match (&error, error.code()) {
+        (_, Some("no_database")) => "No results yet",
+        (_, Some("busy")) => "The results are busy",
+        (_, Some("not_found")) => "Not found",
+        (RequestError::Unreachable, _) => "Can't reach the results",
         _ => "Something went wrong",
     };
     view! { <Empty title text=error.to_string() /> }

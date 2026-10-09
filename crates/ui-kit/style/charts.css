@@ -1,0 +1,208 @@
+/* Line and bar charts and sparklines (`chart`). */
+
+.chart {
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chart__svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+.chart__grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart__axis text {
+  fill: var(--dim);
+  font-size: 10.5px;
+  font-family: var(--font);
+}
+
+.chart__axis--y text {
+  text-anchor: end;
+}
+
+.chart__axis--x text {
+  text-anchor: middle;
+}
+
+.chart__line {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart__line--glow {
+  filter: drop-shadow(0 0 3px var(--glow));
+}
+
+.chart__line--dashed {
+  stroke-dasharray: 5 4;
+}
+
+.chart__area {
+  fill: var(--c);
+  stroke: none;
+  opacity: 0.1;
+}
+
+.chart__band {
+  fill: var(--c);
+  stroke: none;
+  opacity: 0.16;
+}
+
+.chart__crosshair {
+  stroke: var(--dim);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.chart__dot {
+  fill: var(--c);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.chart__selection {
+  fill: var(--select);
+  stroke: var(--dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.chart__bar {
+  fill: var(--c);
+  fill-opacity: 0.22;
+  stroke: var(--c);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart__bar-group:hover .chart__bar,
+.chart__bar-group[data-active] .chart__bar {
+  fill-opacity: 0.4;
+}
+
+.chart__whisker {
+  stroke: var(--fg);
+  stroke-width: 1.25;
+  shape-rendering: crispEdges;
+}
+
+.chart__tooltip {
+  position: absolute;
+  top: 6px;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  padding: 6px 9px;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  white-space: nowrap;
+  transform: translateX(12px);
+}
+
+.chart__tooltip--left {
+  transform: translateX(calc(-100% - 12px));
+}
+
+.chart__tooltip-title {
+  color: var(--dim);
+}
+
+.chart__tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart__tooltip-row > span:last-child {
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.chart__swatch {
+  width: 10px;
+  height: 2px;
+  background: var(--c);
+}
+
+.chart__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px 14px;
+  margin-bottom: 8px;
+  font-size: var(--text-xs);
+}
+
+.chart__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c);
+}
+
+.chart__toggle::before {
+  content: "";
+  width: 14px;
+  height: 0;
+  border-top: 2px solid currentColor;
+}
+
+.chart__toggle[aria-pressed="false"] {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+
+.chart__reset {
+  color: var(--hot);
+}
+
+.chart__body:focus-visible {
+  outline-offset: 4px;
+}
+
+/* The hint names the gestures of the pointer in use, and the keys while the chart has focus. */
+.chart__hint {
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.chart__hint-touch,
+.chart__hint-keys {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .chart__hint-pointer {
+    display: none;
+  }
+
+  .chart__hint-touch {
+    display: inline;
+  }
+}
+
+.chart:has(.chart__body:focus-visible) .chart__hint > span {
+  display: none;
+}
+
+.chart:has(.chart__body:focus-visible) .chart__hint > .chart__hint-keys {
+  display: inline;
+  color: var(--fg);
+}

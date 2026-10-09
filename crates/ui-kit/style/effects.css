@@ -1,0 +1,36 @@
+/* The CRT look's effects, which come last so they apply over every component. */
+
+[data-scanlines="on"]:not([data-look="clean"]) body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, 0.35) 100%);
+  z-index: 100;
+}
+
+[data-theme="beige"][data-scanlines="on"]:not([data-look="clean"]) body::after {
+  background: repeating-linear-gradient(to bottom, rgba(60, 50, 30, 0.08) 0 1px, transparent 1px 3px);
+}
+
+[data-look="clean"] *,
+[data-look="clean"] *::before,
+[data-look="clean"] *::after {
+  animation: none !important;
+}
+
+[data-look="clean"] .chart__line--glow,
+[data-look="clean"] .wordmark path {
+  filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

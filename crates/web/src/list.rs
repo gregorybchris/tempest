@@ -1,7 +1,8 @@
 //! The Transfers area: a toolbar for finding (D-192) and the list, list first (D-131). Each row
 //! answers "is it working, how far, how fast, how long".
 
-use leptos::html::Div;
+use leptos::ev;
+use leptos::html::{Div, Tbody};
 use leptos::prelude::*;
 use tempest_api::TransferInfo;
 use tempest_api::columns::Column;
@@ -11,18 +12,24 @@ use tempest_ui_kit::chart::use_width;
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::theme::bool_attr;
 
-use crate::app::{Fields, row_id};
+use crate::app::Fields;
 use crate::columns::{cell_class, fitting, hiding};
 use crate::present;
 use crate::state::{Dialog, Ui};
 use crate::store::Store;
+use crate::viewport::View;
 
-/// The transfers the list shows, in order, and moving the cursor through them.
+/// The transfers the list shows, in order, which of them are drawn, and moving the cursor
+/// through them.
 #[derive(Clone, Copy)]
 pub struct Order {
     /// The IDs of the transfers that pass the filters, in the list's order.
     pub ids: Memo<Vec<BundleId>>,
     ui: Ui,
+    /// The list's body, once drawn.
+    body: NodeRef<Tbody>,
+    /// Where the body is on the screen.
+    view: RwSignal<View>,
 }
 
 impl Order {
@@ -34,10 +41,15 @@ impl Order {
                     .with(|f| f.apply(m.transfers()).iter().map(|t| t.id).collect())
             })
         });
-        Self { ids, ui }
+        Self {
+            ids,
+            ui,
+            body: NodeRef::new(),
+            view: RwSignal::new(View::default()),
+        }
     }
 
-    /// Moves the cursor as `to` says, and keeps its row in view.
+    /// Moves the cursor as `to` says, and scrolls its row into view.
     pub fn go(self, to: Move) {
         let ids = self.ids.get_untracked();
         let current = self
@@ -47,7 +59,62 @@ impl Order {
             .and_then(|id| ids.iter().position(|i| *i == id));
         if let Some(next) = to.from(current, ids.len()) {
             self.ui.cursor.set(Some(ids[next]));
-            scroll_to(&ids[next]);
+            self.reveal(next);
+        }
+    }
+
+    /// Reads where the list's body is, after a scroll, a resize or a change of rows.
+    fn measure(self) {
+        let Some(body) = self.body.get_untracked() else {
+            return;
+        };
+        let height = window()
+            .inner_height()
+            .ok()
+            .and_then(|h| h.as_f64())
+            .unwrap_or_default();
+        let row = body
+            .query_selector("tr[aria-rowindex]")
+            .ok()
+            .flatten()
+            .map(|row| row.get_bounding_client_rect().height())
+            .filter(|&h| h > 0.0);
+        let view = View {
+            top: body.get_bounding_client_rect().top(),
+            height,
+            row: row.unwrap_or_else(|| self.view.with_untracked(|v| v.row)),
+        };
+        if self.view.with_untracked(|v| *v != view) {
+            self.view.set(view);
+        }
+    }
+
+    /// Scrolls the page so that row `index` shows clear of the app bar and the key hints.
+    fn reveal(self, index: usize) {
+        // The first row brings the toolbar and the headings back too.
+        if index == 0 {
+            window().scroll_to_with_x_and_y(0.0, 0.0);
+            self.measure();
+            return;
+        }
+        self.measure();
+        let edge = |selector: &str, bottom: bool| {
+            let element = document().query_selector(selector).ok().flatten()?;
+            let rect = element.get_bounding_client_rect();
+            (rect.height() > 0.0).then(|| if bottom { rect.bottom() } else { rect.top() })
+        };
+        let view = self.view.get_untracked();
+        let top = edge(".appbar", true).unwrap_or(0.0);
+        // The hint bar, or on phones the navigation along the bottom.
+        let bottom = [edge(".hints", false), edge(".nav", false)]
+            .into_iter()
+            .flatten()
+            .filter(|&y| y > top + view.row)
+            .fold(view.height, f64::min);
+        let by = view.scroll_to(index, top, bottom);
+        if by != 0.0 {
+            window().scroll_by_with_x_and_y(0.0, by);
+            self.measure();
         }
     }
 }
@@ -77,15 +144,6 @@ impl Move {
             (Move::Up, Some(i)) => i.saturating_sub(1).min(last),
         })
     }
-}
-
-fn scroll_to(id: &BundleId) {
-    let Some(row) = document().get_element_by_id(&row_id(id)) else {
-        return;
-    };
-    let options = web_sys::ScrollIntoViewOptions::new();
-    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-    row.scroll_into_view_with_scroll_into_view_options(&options);
 }
 
 /// The Transfers area.
@@ -251,18 +309,62 @@ fn List() -> impl IntoView {
             .into_any(),
         })
     };
+
+    // Only the rows in view are drawn (`viewport`); the spacers stand in for the rest.
+    let count = Memo::new(move |_| order.ids.with(Vec::len));
+    let drawn = Memo::new(move |_| order.view.with(|v| v.rows(count.get())));
+    let rows = move || {
+        let range = drawn.get();
+        order.ids.with(|ids| {
+            ids[range.clone()]
+                .iter()
+                .zip(range)
+                .map(|(id, i)| (i, *id))
+                .collect::<Vec<_>>()
+        })
+    };
+    let spacer = move |rows: Signal<usize>| {
+        let height = move || format!("{}px", rows.get() as f64 * order.view.with(|v| v.row));
+        view! {
+            <tr class="list__spacer" aria-hidden="true" style:height=height>
+                <td colspan=Column::ORDER.len()></td>
+            </tr>
+        }
+    };
+    let above = Signal::derive(move || drawn.with(|r| r.start));
+    let below = Signal::derive(move || count.get() - drawn.with(|r| r.end));
+    let measure = move || order.measure();
+    let on_scroll = window_event_listener(ev::scroll, move |_| measure());
+    let on_resize = window_event_listener(ev::resize, move |_| measure());
+    on_cleanup(move || {
+        on_scroll.remove();
+        on_resize.remove();
+    });
+    // Rows coming and going, or the toolbar wrapping, move the body without a scroll.
+    Effect::new(move |_| {
+        count.track();
+        width.track();
+        request_animation_frame(measure);
+    });
+
     // One selector, so moving the cursor touches two rows rather than every row.
     let cursor = Selector::new(move || ui.cursor.get());
     view! {
         <div class="list" node_ref=frame>
-            <table class=class aria-label="Transfers">
+            <table
+                class=class
+                aria-label="Transfers"
+                aria-rowcount=move || count.get() + 1
+            >
                 <thead>
-                    <tr>{Column::ORDER.map(|column| view! { <Header column /> })}</tr>
+                    <tr aria-rowindex="1">{Column::ORDER.map(|column| view! { <Header column /> })}</tr>
                 </thead>
-                <tbody>
-                    <For each=move || order.ids.get() key=|id| *id let:id>
-                        <Row id cursor=cursor.clone() />
+                <tbody node_ref=order.body>
+                    {spacer(above)}
+                    <For each=rows key=|row| *row let:row>
+                        <Row id=row.1 index=row.0 cursor=cursor.clone() />
                     </For>
+                    {spacer(below)}
                 </tbody>
             </table>
             {empty}
@@ -308,7 +410,7 @@ fn Header(column: Column) -> impl IntoView {
 }
 
 #[component]
-fn Row(id: BundleId, cursor: Selector<Option<BundleId>>) -> impl IntoView {
+fn Row(id: BundleId, index: usize, cursor: Selector<Option<BundleId>>) -> impl IntoView {
     let store = expect_context::<Store>();
     let ui = expect_context::<Ui>();
     let Some(row) = store.row(id) else {
@@ -319,7 +421,7 @@ fn Row(id: BundleId, cursor: Selector<Option<BundleId>>) -> impl IntoView {
     let cell = move |column: Column| cell_class(column);
     view! {
         <tr
-            id=row_id(&id)
+            aria-rowindex=index + 2
             aria-selected=move || bool_attr(cursor.selected(&Some(id)))
             on:click=move |_| ui.open(id)
         >

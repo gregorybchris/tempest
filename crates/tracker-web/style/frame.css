@@ -1,0 +1,124 @@
+/* The tracker website's frame and app bar; components and themes come from the UI kit. */
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+}
+
+a.btn {
+  text-decoration: none;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.loading {
+  padding: var(--gap-4);
+}
+
+.note {
+  margin: 0 0 var(--gap-2);
+  font-size: var(--text-xs);
+}
+
+/* ---------- App bar ---------- */
+
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  gap: var(--gap-4);
+}
+
+.appbar__home {
+  display: flex;
+  align-items: center;
+}
+
+.appbar__tracker {
+  display: inline-flex;
+  align-items: stretch;
+  margin-left: -6px;
+  border: 1px solid var(--line);
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.appbar__kind {
+  padding: 1px 7px;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+
+.appbar__host {
+  padding: 1px 8px;
+  color: var(--dim);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.appbar__links {
+  display: flex;
+  gap: var(--gap-3);
+}
+
+.appbar__links a {
+  position: relative;
+  padding: 4px 2px;
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.appbar__links a:hover,
+.appbar__links a[aria-current="page"] {
+  color: var(--fg);
+}
+
+.appbar__links a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -11px;
+  height: 2px;
+  background: var(--down);
+  box-shadow: 0 0 var(--glow-size) var(--glow);
+}
+
+.account-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.account-link:hover {
+  color: var(--hot);
+}
+
+.account-link__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--up);
+  box-shadow: 0 0 var(--glow-size) var(--up);
+}

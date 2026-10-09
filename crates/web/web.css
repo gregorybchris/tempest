@@ -106,8 +106,25 @@
   padding: 0 var(--gap-4) var(--gap-5);
 }
 
+/* Every row has this height, which the list measures to draw only the rows in view
+   (`viewport.rs`); cells never wrap. The spacers stand in for the rows not drawn. */
 .transfers tbody tr {
+  height: 38px;
   cursor: pointer;
+}
+
+.transfers tbody tr.list__spacer {
+  height: auto;
+  cursor: default;
+}
+
+.transfers tbody tr.list__spacer:hover {
+  background: none;
+}
+
+.list__spacer td {
+  padding: 0;
+  border: 0;
 }
 
 .transfers .col-progress .progress {

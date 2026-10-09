@@ -1,0 +1,190 @@
+/* The app's frame: the wordmark, the app bar and navigation, meters and the key hint bar
+   (`components::chrome`). */
+
+/* ---------- Wordmark ---------- */
+
+.wordmark {
+  width: 112px;
+  height: auto;
+  flex: none;
+  overflow: visible;
+}
+
+.wordmark path {
+  fill: none;
+  stroke: var(--down);
+  stroke-width: 1.15;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 0 2px var(--glow));
+}
+
+[data-theme="vector"] .wordmark path {
+  stroke: url(#wordmark-gradient);
+}
+
+/* ---------- App bar and navigation ---------- */
+
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-5);
+  padding: 10px var(--gap-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.appbar__spacer {
+  flex: 1;
+}
+
+.nav {
+  display: flex;
+  gap: 2px;
+}
+
+.nav__item {
+  position: relative;
+  padding: 4px 10px;
+  color: var(--dim);
+}
+
+.nav__item:hover {
+  color: var(--fg);
+}
+
+.nav__item[aria-current="page"] {
+  color: var(--fg);
+}
+
+.nav__item[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -11px;
+  height: 2px;
+  background: var(--down);
+  box-shadow: 0 0 var(--glow-size) var(--glow);
+}
+
+.nav__key {
+  color: var(--dim);
+  margin-right: 6px;
+  font-size: var(--text-xs);
+}
+
+.theme-button {
+  color: var(--dim);
+  font-size: var(--text-lg);
+  padding: 2px 6px;
+}
+
+.theme-button:hover {
+  color: var(--fg);
+}
+
+/* Phones: the navigation becomes a bottom tab bar (D-136), which the key hints make way
+   for. */
+@media (max-width: 640px) {
+  .app:has(.nav) {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+
+  .app:has(.nav) .hints {
+    display: none;
+  }
+
+  .nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    justify-content: space-around;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    background: var(--raise);
+    border-top: 1px solid var(--line);
+  }
+
+  .nav__item[aria-current="page"]::after {
+    top: -7px;
+    bottom: auto;
+  }
+
+  .nav__key {
+    display: none;
+  }
+}
+
+/* ---------- Meters and sparklines ---------- */
+
+.meters {
+  display: flex;
+  gap: var(--gap-5);
+  min-width: 0;
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 10px;
+  align-items: end;
+}
+
+.meter__label {
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.meter__value {
+  grid-row: 2;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--tone, var(--fg));
+  text-shadow: 0 0 var(--glow-size) var(--glow);
+}
+
+.meter .spark {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  width: 72px;
+  height: 24px;
+}
+
+.spark {
+  display: block;
+  overflow: visible;
+}
+
+.spark__line {
+  fill: none;
+  stroke: var(--tone, var(--fg));
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.spark__area {
+  fill: var(--tone, var(--fg));
+  opacity: 0.12;
+}
+
+/* ---------- Key hints ---------- */
+
+.hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 7px var(--gap-4);
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+kbd {
+  font: inherit;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  padding: 0 4px;
+  margin-right: 4px;
+}

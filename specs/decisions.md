@@ -3901,7 +3901,87 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-250: The API client lives in `tempest-api`, and the TUI no longer depends on the engine
+## D-240: The transfers list draws only the rows in view
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The web UI's list drew a table row, with its signals, for every transfer. A client with ten thousand transfers built ten thousand rows.
+
+**Options:** keep every row; page the list; draw only the rows in view (chosen).
+
+**Decision:**
+
+- Rows have one fixed height (`web.css`), which the list measures from a drawn row. It draws the rows in view and ten either side, between a spacer row above and one below that stand in for the rest. Which rows show follows from the list body's place on screen, read on scroll, resize and when rows come or go.
+- The page keeps scrolling as a whole: the app bar and the hint bar stay where they are, and the list is not a scroll box of its own.
+- Moving the cursor scrolls the page just enough for its row to show clear of the app bar and the hint bar, or the navigation on phones; the first row scrolls to the top, bringing back the toolbar.
+- The table's `aria-rowcount` counts every transfer and each row has its `aria-rowindex`, so screen readers announce a row's place in the whole list. The spacers are hidden from them.
+
+**Rationale:** Paging would break "list first" and finding by scrolling. With fixed heights the window is a division, with no measuring per row, and a screenful of rows costs the same at any size: about 45 rows are drawn at any position, at 60 frames a second, with 10,000 transfers.
+
+---
+
+## D-241: Charts take the keyboard and touch
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The UI kit's charts answered only the mouse: hover for values, drag to zoom. The hint under each line chart said "drag to zoom" on phones too.
+
+**Decision:**
+
+- A chart's plot takes focus, as a group labeled with the chart's label and the role description "chart". The SVG is hidden from screen readers; a polite live region announces the sample a key or a tap chose, such as "-11s: download 12.9 MB/s, upload 1.19 MB/s".
+- Line chart keys: `←` `→` step the readout from sample to sample (ten with `shift`), `home` and `end` jump to either end and move a zoomed window to show the sample, `+` and `-` zoom about the readout, `0` shows all the data, and `esc` hides the readout (otherwise it closes the drawer, as before). Bar charts: `←` `→` `home` `end` move between bars.
+- Touch: a tap shows the readout and keeps it until another tap or the chart loses focus; two fingers pinch to zoom, keeping the values touched under the fingers; one finger pans a zoomed chart. Vertical scrolling stays the page's (`touch-action: pan-y`).
+- The hint names the gestures of the pointer in use (`hover: none` and `pointer: coarse` mean touch), and the keys while the chart has keyboard focus.
+- Stepping, zooming, panning and pinching are plain functions in `chart::navigate`, tested without a browser.
+
+**Rationale:** Every UI should work without a mouse (specs/interfaces.md). Pinching is what touch screens use for zooming, and keeping the touched values under the fingers makes it predictable.
+
+---
+
+## D-242: Errors are announced at once
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Every toast went into one `role="status"` region, which screen readers read only at a pause, so an error waited behind whatever was being read.
+
+**Decision:** Toasts with the bad tone go into a `role="alert"` region and are announced at once; the others stay in the polite `status` region. Both regions stay in the page while empty, so screen readers hear what is added, and they stack as one at the bottom right, errors nearest the corner.
+
+**Rationale:** An error needs the user's attention now; a confirmation can wait.
+
+---
+
+## D-243: The web UIs share their request layer and app shell through the UI kit
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The client web UI, the tracker website and the results UI each had a copy of the same `fetch`, decoding and error-sentence code. The tracker website and the results UI also copied their shell: the route kept in the address's `#`, the theme read from `?theme=` or the browser, fields synced to the address, the typing debounce and the rules a key passes before reaching the bindings table.
+
+**Decision:**
+
+- `tempest_ui_kit::request` holds the requests, generic over a `Server` each app names: its API's prefix, the body of its errors, what to call it and what to say when it doesn't answer. An app's `request` module is its `Server`, a `RequestError` alias and two thin wrappers.
+- Every write sends a JSON body, `{}` when it has nothing to say, as the tracker already required so that other sites' forms can't post to it.
+- `tempest_ui_kit::shell` holds the shared shell: `Address` (the route and the `#`, both ways), `use_theme`, `synced`, `debounce` and `page_keys`. Both apps now save the theme only once it is chosen, so the default applies until then, and wait 150 ms of quiet typing before searching.
+- The client web UI keeps its own shell: it has no address routes, and its keys depend on its focus scopes (D-202).
+
+**Rationale:** One copy of each rule, tested once, and the apps stay thin.
+
+---
+
+## D-244: The kit's stylesheet is one sheet per kind of component
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The UI kit's stylesheet had grown to 1,800 lines and the tracker website's to 1,000.
+
+**Options:** keep one file each; one sheet per component, linked by `@import` from an index sheet; one sheet per component, each linked by the apps' pages (chosen).
+
+**Decision:** The kit's sheets in `crates/ui-kit/style/` follow its modules: `themes`, `fonts`, `base`, `chrome`, `controls`, `fields`, `choices`, `marks`, `layout`, `tables`, `overlays`, `charts`, `chunkmap` and `effects`. The tracker website's, in `crates/tracker-web/style/`, are `frame`, `pages`, `browse`, `listing`, `account` and `narrow`. Each app's `index.html` links every sheet; trunk hashes each, so browsers cache them for good. A kit test checks that every app links every kit sheet in the same order, the themes first and the effects last.
+
+**Rationale:** `@import` chains a round trip after the first sheet, and trunk copies imported files without hashing them, so browsers would revalidate each on every load. Linking costs a line per sheet in four pages, which the test keeps in step.
+
+---
+
+## D-245: The API client lives in `tempest-api`, and the TUI no longer depends on the engine
 
 **Date:** 2026-10-08 · **Status:** Decided
 
@@ -3920,7 +4000,7 @@ This revises D-175, D-182 and D-189.
 
 ---
 
-## D-251: Standalone runs have keys of their own; `get` has a timed-out exit code
+## D-246: Standalone runs have keys of their own; `get` has a timed-out exit code
 
 **Date:** 2026-10-08 · **Status:** Decided
 

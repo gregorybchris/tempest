@@ -451,6 +451,8 @@ async fn run(
         }
     };
     let port = local.port();
+    tracing::info!("port mapping started for {local}");
+    let mut unavailable = false;
     let mut mapping: Option<Mapping> = None;
     let mut backoff = Backoff::default();
     let mut due = Instant::now();
@@ -458,6 +460,7 @@ async fn run(
         let current = config.borrow_and_update().clone();
         if !current.enabled {
             if let Some(mut old) = mapping.take() {
+                tracing::info!("port mapping turned off; removing {}", old.external);
                 old.router.remove(port, old.external).await;
             }
             publish(PortMappingStatus::Off);
@@ -469,6 +472,7 @@ async fn run(
                     break;
                 }
                 // New settings: start over with them.
+                tracing::info!("port mapping settings changed; mapping again");
                 if let Some(mut old) = mapping.take() {
                     old.router.remove(port, old.external).await;
                 }
@@ -483,6 +487,7 @@ async fn run(
         if mapping.is_none() {
             publish(PortMappingStatus::Mapping);
         }
+        let renewing = mapping.is_some();
         let attempt = async {
             match mapping.as_mut() {
                 Some(mapping) => mapping.renew(port).await.map_err(|failure| vec![failure]),
@@ -496,6 +501,16 @@ async fn run(
         let now = Instant::now();
         match (result, &mapping) {
             (Ok(()), Some(mapping)) => {
+                let status = mapping.status();
+                if renewing || unavailable {
+                    tracing::debug!("port mapping renewed: {status:?}");
+                } else {
+                    tracing::info!(
+                        "port mapped: {status:?}, lease {:?}",
+                        mapping.lease.lifetime
+                    );
+                }
+                unavailable = false;
                 backoff.reset();
                 publish(mapping.status());
                 due = mapping.lease.renew_at();
@@ -507,8 +522,13 @@ async fn run(
                 };
                 match retry {
                     // Still mapped until the lease runs out.
-                    Some(at) => due = at,
+                    Some(at) => {
+                        tracing::warn!("port mapping renewal failed, will retry: {}", failures[0]);
+                        due = at;
+                    }
                     None => {
+                        tracing::warn!("port mapping lost: {}", failures[0]);
+                        unavailable = true;
                         if let Some(mut lost) = mapping.take() {
                             lost.router.remove(port, lost.external).await;
                         }
@@ -518,6 +538,13 @@ async fn run(
                 }
             }
             (Err(failures), None) => {
+                let reasons: Vec<String> = failures.iter().map(ToString::to_string).collect();
+                // Once per outage; attempts go on with backoff.
+                match unavailable {
+                    false => tracing::warn!("no port mapping: {}", reasons.join("; ")),
+                    true => tracing::debug!("still no port mapping: {}", reasons.join("; ")),
+                }
+                unavailable = true;
                 publish(PortMappingStatus::Unavailable { failures });
                 due = backoff.failed(now);
             }
@@ -525,6 +552,7 @@ async fn run(
         }
     }
     if let Some(mut mapping) = mapping {
+        tracing::info!("port mapping stopped; removing {}", mapping.external);
         mapping.router.remove(port, mapping.external).await;
     }
     publish(PortMappingStatus::Off);

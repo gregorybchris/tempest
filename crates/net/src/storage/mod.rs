@@ -276,13 +276,27 @@ impl Storage {
         let task_manifest = manifest.clone();
         let cancel = CancelOnDrop(Cancel::default());
         let job_cancel = cancel.0.clone();
+        let started = std::time::Instant::now();
+        tracing::debug!("opening storage: {size} bytes, writable {writable}");
         let (layout, opened) = tokio::task::spawn_blocking(move || {
             let layout = ChunkLayout::new(&task_manifest);
             open(&task_manifest, &layout, &job_cancel).map(|opened| (layout, opened))
         })
         .await
-        .expect("opening storage panicked")?;
+        .expect("opening storage panicked")
+        .inspect_err(|error| {
+            tracing::warn!(
+                "opening storage failed after {:?}: {error}",
+                started.elapsed()
+            );
+        })?;
         drop(cancel);
+        tracing::debug!(
+            "opened storage in {:?}: {} files, {} chunks",
+            started.elapsed(),
+            opened.len(),
+            layout.chunk_count()
+        );
 
         let mut have = ChunkSet::new(layout.chunk_count());
         let mut files = Vec::with_capacity(opened.len());
@@ -736,7 +750,9 @@ impl Task {
         self.stats.syncs += unsynced.files.len() as u64;
         let files = self.files.clone();
         self.jobs.spawn_blocking(move || {
-            let _ = files.sync(unsynced.files);
+            if let Err(error) = files.sync(unsynced.files) {
+                tracing::warn!("cannot sync downloaded files to disk: {error}");
+            }
             Done::Sync
         });
     }

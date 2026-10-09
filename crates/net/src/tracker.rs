@@ -490,11 +490,44 @@ impl AnnounceTask {
             Ok(response) => response,
             Err(error) => {
                 let retry_after = error.retry_after();
+                // Warn once per outage, so a dead tracker doesn't flood a busy client.
+                let first = self.state.borrow().error.is_none();
+                if first {
+                    tracing::warn!(
+                        "announce of {} to {} failed: {error}; retrying (retry-after {retry_after:?})",
+                        self.bundle,
+                        self.tracker
+                    );
+                } else {
+                    tracing::debug!(
+                        "announce of {} to {} failed again: {error}",
+                        self.bundle,
+                        self.tracker
+                    );
+                }
                 self.state
                     .send_modify(|state| state.error = Some(error.to_string()));
                 return Err(retry_after);
             }
         };
+        if self.state.borrow().error.is_some() {
+            tracing::info!(
+                "announce of {} to {} works again",
+                self.bundle,
+                self.tracker
+            );
+        }
+        tracing::debug!(
+            "announced {} to {} ({event:?}, listing {}): {} peers listed, {} complete, {} incomplete, seen as {}, next in {}s",
+            self.bundle,
+            self.tracker,
+            request.listing.is_some(),
+            response.peers.len(),
+            response.complete,
+            response.incomplete,
+            response.your_ip,
+            response.interval_secs
+        );
         self.home_relay.recommend(&response.relays);
         self.state.send_modify(|state| {
             state.announces += 1;

@@ -592,7 +592,13 @@ impl NodeTask {
                             let timeout = self.config.hello_timeout;
                             tokio::spawn(route(incoming, opening, commands, timeout));
                         }
-                        None => incoming.refuse(),
+                        None => {
+                            tracing::debug!(
+                                "refused an incoming connection from {}: too many are opening",
+                                incoming.remote_address()
+                            );
+                            incoming.refuse();
+                        }
                     }
                 }
             }
@@ -616,6 +622,7 @@ impl NodeTask {
                     hash_map::Entry::Occupied(_) => Err(DriverError::AlreadyRunning(bundle_id)),
                     hash_map::Entry::Vacant(vacant) => {
                         vacant.insert(entry);
+                        tracing::debug!("{bundle_id} registered with the node");
                         Ok(())
                     }
                 };
@@ -623,6 +630,7 @@ impl NodeTask {
             }
             Command::Unregister { bundle_id } => {
                 self.bundles.remove(&bundle_id);
+                tracing::debug!("{bundle_id} unregistered from the node");
             }
             Command::Route { bundle_id, reply } => {
                 let route = match self.bundles.get(&bundle_id) {
@@ -637,6 +645,7 @@ impl NodeTask {
     }
 
     fn begin_shutdown(&mut self, done: Option<oneshot::Sender<()>>) {
+        tracing::info!("node shutting down; {} bundles running", self.bundles.len());
         for entry in self.bundles.values() {
             entry.shutdown.send_replace(true);
         }
@@ -652,19 +661,29 @@ async fn route(
     commands: mpsc::Sender<Command>,
     hello_timeout: Duration,
 ) {
-    let Ok(connection) = incoming.accept().await else {
-        return;
+    let remote = incoming.remote_address();
+    let connection = match incoming.accept().await {
+        Ok(connection) => connection,
+        Err(error) => {
+            tracing::debug!("handshake with incoming {remote} failed: {error}");
+            return;
+        }
     };
     let opening = tokio::time::timeout(hello_timeout, read_hello(&connection)).await;
     let (send, recv, hello) = match opening {
         Ok(Ok(opening)) => opening,
         Ok(Err(Some(message))) => {
+            tracing::debug!("incoming {remote} closed: {message}");
             connection.close(GoodbyeReason::ProtocolViolation, message);
             return;
         }
         // The connection is gone.
-        Ok(Err(None)) => return,
+        Ok(Err(None)) => {
+            tracing::debug!("incoming {remote} went away before its Hello");
+            return;
+        }
         Err(_) => {
+            tracing::debug!("incoming {remote} sent no Hello within {hello_timeout:?}");
             connection.close(GoodbyeReason::ProtocolViolation, "no Hello in time");
             return;
         }
@@ -689,11 +708,17 @@ async fn route(
                 hello,
             };
             if inbox.send(accepted).await.is_err() {
+                tracing::debug!("incoming {remote} for {bundle_id}: the bundle has stopped");
                 connection.close(GoodbyeReason::ShuttingDown, "");
+            } else {
+                tracing::debug!("accepted incoming {remote} for {bundle_id}");
             }
             drop(place);
         }
-        Ok(Route::Unknown) => connection.close(GoodbyeReason::UnknownBundle, ""),
+        Ok(Route::Unknown) => {
+            tracing::debug!("incoming {remote} asked for {bundle_id}, which this node doesn't run");
+            connection.close(GoodbyeReason::UnknownBundle, "");
+        }
         Ok(Route::ShuttingDown) | Err(_) => connection.close(GoodbyeReason::ShuttingDown, ""),
     }
 }

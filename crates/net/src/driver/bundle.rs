@@ -271,10 +271,43 @@ impl BundleTask {
             }
         }
         for event in self.session.poll_events() {
+            self.log(&event);
             // Nobody listening is fine.
             let _ = self.events.send(event);
         }
         self.publish_status();
+    }
+
+    /// Logs the session's notable events: connections and peers at debug, the bundle's
+    /// completion and failures above that. Per-chunk events are left to subscribers.
+    fn log(&self, event: &Event) {
+        use tempest_core::EventKind as Kind;
+        let bundle = self.session.bundle_id();
+        match &event.kind {
+            Kind::Connected {
+                peer,
+                direction,
+                path,
+                ..
+            } => tracing::debug!("{bundle}: connected to {peer} ({direction:?}, {path:?})"),
+            Kind::Opened { peer, .. } => tracing::debug!("{bundle}: {peer} said hello"),
+            Kind::Closed { peer, cause, .. } => {
+                tracing::debug!("{bundle}: connection to {peer} closed: {cause:?}");
+            }
+            Kind::DialFailed { peer } => tracing::debug!("{bundle}: dialing {peer} failed"),
+            Kind::ManifestReceived { peer, .. } => {
+                tracing::info!("{bundle}: manifest received from {peer}");
+            }
+            Kind::RequestRejected { peer, reason, .. } => {
+                tracing::debug!("{bundle}: {peer} rejected a request: {reason:?}");
+            }
+            Kind::Banned { peer } => tracing::info!("{bundle}: banned {peer} for the session"),
+            Kind::Completed => tracing::info!("{bundle}: complete"),
+            Kind::Snubbed { .. } | Kind::ServingChanged { .. } => {
+                tracing::debug!("{bundle}: {:?}", event.kind);
+            }
+            _ => tracing::trace!("{bundle}: {:?}", event.kind),
+        }
     }
 
     pub(super) fn with_status_published(self) -> Self {
@@ -363,6 +396,7 @@ impl BundleTask {
                 self.session.handle_closed(now, conn, closed);
             }
             Report::StorageFailed(error) => {
+                tracing::error!("{}: storage failed: {error}", session.bundle_id());
                 self.failure.get_or_insert(error);
                 session.shutdown(now);
             }
@@ -375,6 +409,7 @@ impl BundleTask {
                         self.storage.send_replace(Some(storage));
                     }
                     Err(error) => {
+                        tracing::error!("{}: cannot lay out storage: {error}", session.bundle_id());
                         self.failure.get_or_insert(error);
                         session.shutdown(now);
                     }

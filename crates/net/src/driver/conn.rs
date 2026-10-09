@@ -48,6 +48,7 @@ pub(super) async fn dial(
     match first_some(direct, relayed).await {
         Some(opened) => report_dialed(opened, &inbox).await,
         None => {
+            tracing::debug!("could not reach {peer} by any address");
             let _ = inbox.send(Report::DialFailed { peer }).await;
         }
     }

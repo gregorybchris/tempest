@@ -288,6 +288,10 @@ async fn run(endpoint: Endpoint, shared: Arc<Shared>) {
             }
         }
         shared.status.send_replace(RelayStatus::Connecting);
+        tracing::debug!(
+            "registering with a home relay; {} candidates",
+            candidates.len()
+        );
         let attempt = tokio::select! {
             attempt = register(&endpoint, &candidates) => attempt,
             _ = stopped.wait_for(|stop| *stop) => break,
@@ -295,9 +299,15 @@ async fn run(endpoint: Endpoint, shared: Arc<Shared>) {
         match attempt {
             Ok(registration) => {
                 let since = Instant::now();
+                tracing::info!("registered with relay {}", registration.relay);
                 let end = registration
                     .serve(&endpoint, &shared, &mut choice, &mut stopped)
                     .await;
+                match &end {
+                    End::Lost => tracing::warn!("lost the home relay after {:?}", since.elapsed()),
+                    End::Unlisted => tracing::info!("left the home relay: no longer listed"),
+                    End::Stopped => {}
+                }
                 match end {
                     End::Stopped => break,
                     // Another relay may be listed: no reason to wait.
@@ -308,6 +318,11 @@ async fn run(endpoint: Endpoint, shared: Arc<Shared>) {
                 shared.status.send_replace(RelayStatus::Connecting);
             }
             Err(failures) => {
+                let reasons: Vec<String> = failures.iter().map(ToString::to_string).collect();
+                tracing::warn!(
+                    "cannot register with a relay ({}); retrying in {retry:?}",
+                    reasons.join("; ")
+                );
                 shared
                     .status
                     .send_replace(RelayStatus::Unavailable { failures });

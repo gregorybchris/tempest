@@ -79,6 +79,11 @@ impl Lan {
     pub fn start(endpoint: &Endpoint, config: LanConfig) -> io::Result<Self> {
         let interfaces = local_interfaces(&endpoint.local_addrs())?;
         let sockets = Sockets::open(&interfaces, config.port)?;
+        tracing::info!(
+            "LAN discovery on {} interfaces, port {}",
+            interfaces.len(),
+            config.port
+        );
         let (commands, receiver) = mpsc::channel(64);
         let task = LanTask {
             state: LanState::new(endpoint.peer_id(), &config),
@@ -446,6 +451,10 @@ impl LanTask {
         if !known.is_empty() {
             deliver(vec![watched.sink.clone()], known);
         }
+        tracing::debug!(
+            "LAN discovery watching a bundle; {} watched",
+            self.watched.len() + 1
+        );
         self.watched.push(watched);
         self.query().await;
         let wait = self.config.query_interval * 2;
@@ -473,6 +482,10 @@ impl LanTask {
         // listener from beyond it, and could steer this peer's dials anywhere.
         let interfaces = self.sockets.senders.iter().map(|s| &s.interface);
         if !on_lan(interfaces, datagram.source.ip()) {
+            tracing::debug!(
+                "ignored a LAN message from {}: not on a local network",
+                datagram.source
+            );
             return;
         }
         let now = Instant::now();
@@ -481,9 +494,16 @@ impl LanTask {
             && let Some(sender) = self.sockets.sender_for(source)
         {
             let announce = self.message(LanKind::Announce, sender);
-            let _ = sender.socket.send_to(&announce, source).await;
+            if let Err(error) = sender.socket.send_to(&announce, source).await {
+                tracing::debug!("LAN reply to {source} failed: {error}");
+            }
         }
         if let Some(record) = received.discovered {
+            tracing::debug!(
+                "LAN peer {} found at {:?}",
+                record.peer_id,
+                record.addresses
+            );
             self.watched.retain(|w| !w.stopped());
             let sinks = self
                 .watched
@@ -517,7 +537,9 @@ impl LanTask {
             let message = self.message(kind, sender);
             let group = group(sender.interface.address.ip(), self.config.port);
             // A network that goes away fails its sends until it comes back.
-            let _ = sender.socket.send_to(&message, group).await;
+            if let Err(error) = sender.socket.send_to(&message, group).await {
+                tracing::debug!("LAN {kind:?} to {group} failed: {error}");
+            }
         }
     }
 

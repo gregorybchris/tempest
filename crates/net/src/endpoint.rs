@@ -174,7 +174,10 @@ impl Endpoint {
         };
         let ipv4 = config.ipv4.map(|addr| bind(addr.into())).transpose()?;
         let ipv6 = match config.ipv6.map(|addr| bind(addr.into())) {
-            Some(Err(e)) if ipv4.is_some() && e.kind() != io::ErrorKind::AddrInUse => None,
+            Some(Err(e)) if ipv4.is_some() && e.kind() != io::ErrorKind::AddrInUse => {
+                tracing::info!("no IPv6 socket, using IPv4 only: {e}");
+                None
+            }
             other => other.transpose()?,
         };
         if ipv4.is_none() && ipv6.is_none() {
@@ -183,6 +186,12 @@ impl Endpoint {
                 "no address to bind",
             ));
         }
+        tracing::info!(
+            "endpoint {} bound: IPv4 {:?}, IPv6 {:?}",
+            identity.peer_id(),
+            ipv4.as_ref().and_then(|s| s.quic.local_addr().ok()),
+            ipv6.as_ref().and_then(|s| s.quic.local_addr().ok())
+        );
         Ok(Self {
             identity,
             ipv4,

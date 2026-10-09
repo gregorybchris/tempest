@@ -506,6 +506,7 @@
 
 .ready {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: start;
   gap: var(--gap-2);
   margin-top: var(--gap-4);

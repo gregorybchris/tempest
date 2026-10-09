@@ -76,6 +76,12 @@ pub struct TrackerArgs {
     /// IP from the last `X-Forwarded-For` entry.
     #[arg(long)]
     behind_proxy: bool,
+    /// The URL people reach the tracker at, such as `https://tracker.example.org`. Sign-ins
+    /// are signed for it, so no other site can pass on this tracker's sign-in codes. Without
+    /// it, only this machine can sign in to the catalog. Required with `--behind-proxy` and
+    /// `--catalog`.
+    #[arg(long, value_name = "URL")]
+    public_url: Option<String>,
     #[command(flatten)]
     catalog: CatalogArgs,
 }
@@ -264,6 +270,12 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
     if args.min_interval > args.interval {
         anyhow::bail!("--min-interval must not be longer than --interval");
     }
+    // Behind a proxy, clients never reach the tracker at a loopback address.
+    if args.behind_proxy && args.catalog.catalog.is_some() && args.public_url.is_none() {
+        anyhow::bail!(
+            "--behind-proxy with --catalog needs --public-url, the URL people reach the tracker at"
+        );
+    }
     let catalog = args.catalog.open()?;
     let config = TrackerConfig {
         interval: Duration::from_secs(args.interval.max(1)),
@@ -280,8 +292,17 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         let address = listener.local_addr()?;
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
         let mut tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
+        if let Some(url) = &args.public_url {
+            tracker = tracker.public_url(url)?;
+        }
         if let Some(catalog) = catalog {
-            eprintln!("website at http://{address}/");
+            match &args.public_url {
+                Some(url) => eprintln!("website at {url}"),
+                None => {
+                    eprintln!("website at http://{address}/");
+                    eprintln!("note: only this machine can sign in; pass --public-url to let others");
+                }
+            }
             if TRACKER_WEB.is_empty() {
                 eprintln!("note: this binary was built without the tracker website; the page says how to add it");
             }

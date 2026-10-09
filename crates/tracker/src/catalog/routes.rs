@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use tempest_protocol::tracker::{API_PREFIX, ErrorCode};
 use tempest_protocol::{BundleId, PeerId};
 use tempest_tracker_api::SESSION_COOKIE;
-use tempest_tracker_api::account::{AccountEdit, Poll, PollResponse, SignIn, normalize_authority};
+use tempest_tracker_api::account::{AccountEdit, Poll, PollResponse, SignIn};
 use tempest_tracker_api::listing::{ListingEdit, NewComment, NewReport, VoteRequest};
 use tempest_tracker_api::query::{DEFAULT_LIMIT, ListingQuery};
 
@@ -183,12 +183,7 @@ fn viewer(tracker: &Tracker, headers: &HeaderMap) -> Option<PeerId> {
 
 /// A `Set-Cookie` value that stores `token` for `max_age` seconds, or clears the cookie.
 fn session_cookie(tracker: &Tracker, token: &str, max_age: u64) -> HeaderValue {
-    // Behind a proxy, the tracker is reached over HTTPS.
-    let secure = if tracker.is_behind_proxy() {
-        "; Secure"
-    } else {
-        ""
-    };
+    let secure = if tracker.is_https() { "; Secure" } else { "" };
     let cookie = format!(
         "{SESSION_COOKIE}={token}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Strict{secure}"
     );
@@ -213,10 +208,7 @@ async fn sign_in(
 ) -> Response {
     answer((|| {
         let request: SignIn = body(&headers, raw)?;
-        let authority = tracker.authority(&headers).ok_or_else(|| {
-            Refusal::new(ErrorCode::InvalidRequest, "the request has no Host header")
-        })?;
-        let authority = normalize_authority(&authority);
+        let authority = tracker.sign_in_authority(&headers)?;
         ok(&tracker.catalog().sign_in(now(), &authority, &request)?)
     })())
 }

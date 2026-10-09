@@ -3876,3 +3876,23 @@ This revises D-175, D-182 and D-189.
 **Decision:** `tempest-http` serves an axum router over HTTP/1.1 with a cap on open connections, which counts connections still in their handshake, a timeout on a connection's handshake and on each request's headers, and a timeout from a request's headers to its response's headers, answered with 408 in the JSON error shape both APIs share. `serve_with` takes a handshake, so the engine runs TLS through it. The engine's API uses it with limits of its own: a request timeout long enough for slow tracker calls, and no limit on how long an event stream lasts, since the timeout ends at the response's headers. Shutdown waits a short grace period for responses in progress instead of every one.
 
 **Rationale:** One implementation of the limits, tested once. `tempest-net` is the client's networking, and a server module would bring hyper's server into everything that uses it.
+
+---
+
+## D-239: Sign-ins are checked against the tracker's configured public URL
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A sign-in signs the tracker's authority with the code (D-128), so that a code passed on from another tracker can't be used there. The tracker checked the signature against the request's `Host`, or behind a proxy `X-Forwarded-Host`. Both come from the client: a malicious site could show a visitor another tracker's code, have the visitor's client sign it for the site, and replay the signature to that tracker with the site's name as the host. The check proved nothing.
+
+**Options:** keep reading the host from the request; a configured public URL (chosen); sign the tracker's own key instead of its URL, which trackers don't have.
+
+**Decision:**
+
+- `tempest-tracker --public-url URL` names the URL people reach the tracker at, `http` or `https`. A sign-in must be signed for its authority, whatever the request's headers say. A failed signature's message names the authority expected, for operators who set the wrong one.
+- Without it, a sign-in is accepted only for a `Host` on the tracker's own machine (`localhost` or a loopback address, any port), so trying a tracker locally, and the tests, need no flag. A client elsewhere is refused with 403 `sign_in_failed`, saying the operator must set `--public-url`. A malicious site can't use this: its visitors' clients sign for the site's name, never a loopback one.
+- `--behind-proxy` with `--catalog` requires `--public-url`, since clients behind a proxy never reach the tracker at a loopback address. `X-Forwarded-Host` is no longer read.
+- The session cookie is `Secure` behind a proxy or with an `https` public URL.
+- Clients are unchanged: they already sign the authority of the URL they use.
+
+**Rationale:** The operator is the only source of the tracker's name that a client can't forge. Refusing sign-ins without it, outside the local machine, is safe by default and still lets a tracker run with no configuration.

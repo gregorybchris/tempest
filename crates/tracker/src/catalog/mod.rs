@@ -305,8 +305,8 @@ impl Catalog {
         })
     }
 
-    /// Signs in with a signed challenge that reached the tracker at `authority` (see
-    /// [`tempest_tracker_api::account::normalize_authority`]).
+    /// Signs in with a challenge signed for the tracker at `authority`, its public URL's (see
+    /// [`crate::Tracker::public_url`]).
     pub fn sign_in(
         &mut self,
         now: u64,
@@ -323,9 +323,9 @@ impl Catalog {
         }
         let message = sign_in_message(authority, &code);
         if !verify(&request.key, &message, &request.sig) {
-            return Err(failed(
-                "the signature doesn't verify for this key, code and tracker address",
-            ));
+            return Err(failed(&format!(
+                "the signature doesn't verify for this key, code and the tracker address {authority}"
+            )));
         }
         let account = match self.store.account(&request.key)? {
             Some(_) => self.account(&request.key)?,

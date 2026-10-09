@@ -42,6 +42,8 @@ fn tracker() -> Tracker {
     let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
     Tracker::new(TrackerConfig::default())
         .unwrap()
+        .public_url(&format!("https://{HOST}"))
+        .unwrap()
         .with_catalog(catalog)
 }
 
@@ -51,7 +53,8 @@ struct Answer {
     body: Value,
 }
 
-/// Sends a request with `headers`, and a JSON body unless it is `Value::Null`.
+/// Sends a request with `headers`, and a JSON body unless it is `Value::Null`. `Host` is
+/// [`HOST`] unless `headers` has one.
 async fn call(
     router: &Router,
     method: Method,
@@ -59,10 +62,13 @@ async fn call(
     headers: &[(&str, &str)],
     body: Value,
 ) -> Answer {
-    let mut request = Request::builder()
-        .method(method)
-        .uri(path)
-        .header(header::HOST, HOST);
+    let mut request = Request::builder().method(method).uri(path);
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
+        request = request.header(header::HOST, HOST);
+    }
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
@@ -212,6 +218,8 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     assert_eq!(collected.body["session"]["account"]["key"], json!(key.id()));
     let set_cookie = collected.headers[header::SET_COOKIE].to_str().unwrap();
     assert!(set_cookie.contains("HttpOnly") && set_cookie.contains("SameSite=Strict"));
+    // The public URL is HTTPS.
+    assert!(set_cookie.contains("Secure"));
     let cookie = set_cookie.split(';').next().unwrap().to_owned();
     let me = call(
         &router,
@@ -262,20 +270,19 @@ async fn signing_in_through_a_browser_sets_a_cookie() {
     assert_eq!(me.status, StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-async fn behind_a_proxy_the_forwarded_host_is_signed() {
-    let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
-    let router = Tracker::new(TrackerConfig::default())
-        .unwrap()
-        .behind_proxy(true)
-        .with_catalog(catalog)
-        .router();
-    let key = Key::new(1);
+/// Asks for a code and signs it in as `key`, signed for `signed_for`, sending `headers`.
+/// Returns the challenge and the answer to signing in.
+async fn sign_in_as(
+    router: &Router,
+    key: &Key,
+    signed_for: &str,
+    headers: &[(&str, &str)],
+) -> (Value, Answer) {
     let challenge = call(
-        &router,
+        router,
         Method::POST,
         "/tempest/v1/session/challenges",
-        &[],
+        headers,
         Value::Null,
     )
     .await;
@@ -283,18 +290,89 @@ async fn behind_a_proxy_the_forwarded_host_is_signed() {
     let request = json!({
         "code": code,
         "key": key.id(),
-        "sig": key.sign(&sign_in_message("public.example.org", code)),
+        "sig": key.sign(&sign_in_message(signed_for, code)),
     });
-    let forwarded = [("x-forwarded-host", "public.example.org:443")];
-    let session = call(
-        &router,
+    let answer = call(
+        router,
         Method::POST,
         "/tempest/v1/session",
-        &forwarded,
+        headers,
         request,
     )
     .await;
-    assert_eq!(session.status, StatusCode::OK, "{}", session.body);
+    (challenge.body, answer)
+}
+
+#[tokio::test]
+async fn sign_ins_name_the_public_url_whatever_the_host_header_says() {
+    // A site that passed on this tracker's code to its visitor, whose client signed it for that
+    // site, can't sign in here by sending that site's name as the host.
+    let router = tracker().behind_proxy(true).router();
+    let key = Key::new(1);
+    let other = [
+        ("host", "other.example"),
+        ("x-forwarded-host", "other.example"),
+    ];
+    let (_, relayed) = sign_in_as(&router, &key, "other.example", &other).await;
+    assert_eq!(relayed.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(relayed.body["error"], "sign_in_failed");
+    assert!(relayed.body["message"].as_str().unwrap().contains(HOST));
+
+    let (_, honest) = sign_in_as(&router, &key, HOST, &other).await;
+    assert_eq!(honest.status, StatusCode::OK, "{}", honest.body);
+}
+
+#[tokio::test]
+async fn without_a_public_url_only_this_machine_signs_in() {
+    let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
+    let router = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .with_catalog(catalog)
+        .router();
+    let key = Key::new(1);
+    let (_, remote) = sign_in_as(&router, &key, HOST, &[]).await;
+    assert_eq!(remote.status, StatusCode::FORBIDDEN);
+    assert!(
+        remote.body["message"]
+            .as_str()
+            .unwrap()
+            .contains("--public-url")
+    );
+
+    for local in ["127.0.0.1:4777", "localhost:8080", "[::1]:4777"] {
+        let (challenge, answer) = sign_in_as(&router, &key, local, &[("host", local)]).await;
+        assert_eq!(answer.status, StatusCode::OK, "{local}: {}", answer.body);
+
+        // Over plain HTTP, the session cookie can't be marked Secure.
+        let poll = json!({ "code": challenge["code"], "poll": challenge["poll"] });
+        let collected = call(
+            &router,
+            Method::POST,
+            "/tempest/v1/session/challenges/poll",
+            &[("host", local)],
+            poll,
+        )
+        .await;
+        let cookie = collected.headers[header::SET_COOKIE].to_str().unwrap();
+        assert!(!cookie.contains("Secure"), "{cookie}");
+    }
+}
+
+#[test]
+fn public_urls_must_be_http() {
+    let tracker = || Tracker::new(TrackerConfig::default()).unwrap();
+    for bad in [
+        "tracker.example.org",
+        "ftp://tracker.example.org",
+        "https://",
+    ] {
+        assert!(tracker().public_url(bad).is_err(), "{bad}");
+    }
+    assert!(
+        tracker()
+            .public_url("HTTPS://Tracker.example.org:443/")
+            .is_ok()
+    );
 }
 
 #[tokio::test]
@@ -733,6 +811,8 @@ async fn requests_over_a_clients_limit_are_refused() {
     let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
     let router = Tracker::new(TrackerConfig::default())
         .unwrap()
+        .public_url(&format!("https://{HOST}"))
+        .unwrap()
         .behind_proxy(true)
         .catalog_limits(limits)
         .with_catalog(catalog)
@@ -771,6 +851,8 @@ async fn announces_over_the_limits_succeed_but_list_less() {
     limits.rates.insert(Action::Publish, Rate::new(1, 60));
     let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
     let tracker = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .public_url(&format!("https://{HOST}"))
         .unwrap()
         .catalog_limits(limits)
         .with_catalog(catalog);
@@ -846,6 +928,8 @@ async fn reports_are_rate_limited() {
     let catalog = Catalog::in_memory(CatalogConfig::default()).unwrap();
     let tracker = Tracker::new(TrackerConfig::default())
         .unwrap()
+        .public_url(&format!("https://{HOST}"))
+        .unwrap()
         .catalog_limits(limits)
         .with_catalog(catalog);
     let router = tracker.router();
@@ -870,6 +954,8 @@ async fn hiding_and_banning_take_effect_in_a_running_tracker() {
     let file = dir.path().join("catalog.db");
     let catalog = Catalog::open(&file, CatalogConfig::default()).unwrap();
     let tracker = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .public_url(&format!("https://{HOST}"))
         .unwrap()
         .with_catalog(catalog);
     let router = tracker.router();
@@ -943,6 +1029,8 @@ async fn hiding_and_banning_take_effect_in_a_running_tracker() {
     // A restart rebuilds the index without what is hidden.
     let restarted = Catalog::open(&file, CatalogConfig::default()).unwrap();
     let router = Tracker::new(TrackerConfig::default())
+        .unwrap()
+        .public_url(&format!("https://{HOST}"))
         .unwrap()
         .with_catalog(restarted)
         .router();

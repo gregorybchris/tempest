@@ -18,6 +18,7 @@ use tempest_protocol::tracker::{
     API_PREFIX, AnnounceEvent, AnnounceRequest, BundleStats, ErrorCode, listing_message,
 };
 use tempest_tracker_api::listing::Listing;
+use tempest_tracker_api::{account, codes};
 use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
@@ -40,10 +41,25 @@ pub struct Tracker {
     catalog: Option<Arc<Mutex<Catalog>>>,
     fetcher: FetcherConfig,
     behind_proxy: bool,
+    public: Option<PublicUrl>,
     limiter: Arc<Mutex<Limiter>>,
     http_limits: HttpLimits,
     pages: Option<Router>,
 }
+
+/// The URL clients reach the tracker at, which sign-ins name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublicUrl {
+    /// Its authority, as [`sign_in_message`](tempest_tracker_api::account::sign_in_message)
+    /// takes it.
+    authority: String,
+    https: bool,
+}
+
+/// A public URL that isn't an `http` or `https` URL with a host.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the public URL must be an http or https URL, such as https://tracker.example.org")]
+pub struct InvalidPublicUrl;
 
 impl Tracker {
     /// A tracker with no swarms yet.
@@ -54,6 +70,7 @@ impl Tracker {
             catalog: None,
             fetcher: FetcherConfig::default(),
             behind_proxy: false,
+            public: None,
             limiter: Arc::new(Mutex::new(Limiter::new(CatalogLimits::default()))),
             http_limits: HttpLimits::default(),
             pages: None,
@@ -98,6 +115,24 @@ impl Tracker {
     pub fn behind_proxy(mut self, behind_proxy: bool) -> Self {
         self.behind_proxy = behind_proxy;
         self
+    }
+
+    /// The URL clients reach the tracker at, such as `https://tracker.example.org`. A sign-in
+    /// must be signed for its host and port (D-239), whatever the request's headers say, so no
+    /// other site can pass on this tracker's codes and sign its visitors in here. Without one,
+    /// only clients on the tracker's own machine can sign in.
+    pub fn public_url(mut self, url: &str) -> Result<Self, InvalidPublicUrl> {
+        let scheme = url
+            .split_once("://")
+            .map(|(scheme, _)| scheme.to_ascii_lowercase());
+        let https = match scheme.as_deref() {
+            Some("https") => true,
+            Some("http") => false,
+            _ => return Err(InvalidPublicUrl),
+        };
+        let authority = account::authority(url).ok_or(InvalidPublicUrl)?;
+        self.public = Some(PublicUrl { authority, https });
+        Ok(self)
     }
 
     /// The tracker's routes. Serve them with connect info, as [`Tracker::serve`] does, so the
@@ -227,22 +262,34 @@ impl Tracker {
             .check(Instant::now(), action, ip)
     }
 
-    pub(crate) fn is_behind_proxy(&self) -> bool {
-        self.behind_proxy
+    /// Whether clients reach the tracker over HTTPS: through a proxy, or at an `https` public
+    /// URL.
+    pub(crate) fn is_https(&self) -> bool {
+        self.behind_proxy || self.public.as_ref().is_some_and(|public| public.https)
     }
 
-    /// The authority the client reached the tracker at: `Host`, or behind a proxy the last
-    /// `X-Forwarded-Host`, which the proxy sets.
-    pub(crate) fn authority(&self, headers: &HeaderMap) -> Option<String> {
-        let header = |name: &str| {
-            let value = headers.get_all(name).iter().next_back()?.to_str().ok()?;
-            Some(value.rsplit(',').next()?.trim().to_owned())
-        };
-        let forwarded = self
-            .behind_proxy
-            .then(|| header("x-forwarded-host"))
-            .flatten();
-        forwarded.or_else(|| header("host"))
+    /// The authority a sign-in must be signed for: the public URL's. Without one, the `Host`
+    /// the request reached, but only if it names this machine: a client elsewhere could have
+    /// been sent by another site with a `Host` of its choosing.
+    pub(crate) fn sign_in_authority(&self, headers: &HeaderMap) -> Result<String, Refusal> {
+        if let Some(public) = &self.public {
+            return Ok(public.authority.clone());
+        }
+        let host = headers
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok())
+            .map(account::normalize_authority);
+        match host {
+            Some(host) if is_loopback(&host) => Ok(host),
+            _ => {
+                let message = "this tracker takes sign-ins only from its own machine until its \
+                    operator sets its public URL (tempest-tracker --public-url)";
+                Err(Refusal {
+                    status: 403,
+                    ..Refusal::new(ErrorCode::Other(codes::SIGN_IN_FAILED.into()), message)
+                })
+            }
+        }
     }
 
     /// The IP address the request came from.
@@ -257,6 +304,15 @@ impl Tracker {
             false => peer.ip(),
         }
     }
+}
+
+/// Whether `authority`'s host is this machine: `localhost` or a loopback address.
+fn is_loopback(authority: &str) -> bool {
+    let host = match authority.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => authority.split(':').next().unwrap_or(authority),
+    };
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 async fn announce(

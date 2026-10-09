@@ -19,7 +19,7 @@ pub mod swarms;
 pub use catalog::{Catalog, CatalogConfig};
 pub use fetcher::FetcherConfig;
 pub use limits::{CatalogLimits, Rate};
-pub use server::Tracker;
+pub use server::{InvalidPublicUrl, Tracker};
 pub use swarms::{Refusal, Swarms, TrackerConfig};
 pub use tempest_http::HttpLimits;
 

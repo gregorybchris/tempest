@@ -22,9 +22,9 @@ use tokio::net::TcpListener;
 
 use crate::catalog::{self, Catalog};
 use crate::fetcher::{self, FetcherConfig};
-use crate::http::{self, HttpLimits};
 use crate::limits::{Action, CatalogLimits, Limiter};
 use crate::swarms::{Refusal, Swarms, TrackerConfig};
+use tempest_http::HttpLimits;
 
 /// The largest request body accepted. An announce with every field at its limit is far smaller.
 const MAX_BODY: usize = 16 * 1024;
@@ -141,7 +141,7 @@ impl Tracker {
                 None => std::future::pending().await,
             }
         };
-        let served = http::serve(listener, self.router(), self.http_limits, shutdown);
+        let served = tempest_http::serve(listener, self.router(), self.http_limits, shutdown);
         // The sweeper and the fetcher run until aborted; either ending early is a fault.
         let result = tokio::select! {
             () = served => Ok(()),

@@ -3862,3 +3862,17 @@ This revises D-175, D-182 and D-189.
 - The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
 
 **Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.
+
+---
+
+## D-238: One hardened HTTP server for the tracker and the engine API
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The tracker served its routes through hyper with a connection cap and timeouts on headers and requests. The engine's API used `axum::serve`, which has none of them, and completed TLS handshakes in tasks of its own without a cap. With remote access on (D-125), anyone who can reach the port could hold connections open.
+
+**Options:** copy the tracker's serving code into the engine; move it into `tempest-net`, which both use; a small crate of its own (chosen).
+
+**Decision:** `tempest-http` serves an axum router over HTTP/1.1 with a cap on open connections, which counts connections still in their handshake, a timeout on a connection's handshake and on each request's headers, and a timeout from a request's headers to its response's headers, answered with 408 in the JSON error shape both APIs share. `serve_with` takes a handshake, so the engine runs TLS through it. The engine's API uses it with limits of its own: a request timeout long enough for slow tracker calls, and no limit on how long an event stream lasts, since the timeout ends at the response's headers. Shutdown waits a short grace period for responses in progress instead of every one.
+
+**Rationale:** One implementation of the limits, tested once. `tempest-net` is the client's networking, and a server module would bring hyper's server into everything that uses it.

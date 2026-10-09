@@ -18,10 +18,9 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tempest_http::HttpLimits;
+use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
-use tokio_rustls::server::TlsStream;
 
 use super::{Access, router};
 use crate::Engine;
@@ -36,8 +35,16 @@ pub const CERT_FILE: &str = "api-cert.pem";
 /// The self-signed certificate's private key.
 pub const KEY_FILE: &str = "api-key.pem";
 
-/// How long a TLS handshake may take.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// The limits on the API's connections. Remote access exposes the API beyond this machine, so
+/// connections are capped and a client must finish its TLS handshake and each request's headers
+/// within a time limit. Event streams outlast the request timeout, which ends at a response's
+/// headers.
+const LIMITS: HttpLimits = HttpLimits {
+    max_connections: 1024,
+    header_timeout: Duration::from_secs(30),
+    request_timeout: Duration::from_secs(120),
+    shutdown_grace: Duration::from_secs(10),
+};
 
 /// Where a running engine's API is, as its discovery file records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,9 +92,6 @@ pub enum ServeError {
     /// The certificate or key is unusable.
     #[error("TLS: {0}")]
     Tls(String),
-    /// Serving failed.
-    #[error("serving the API: {0}")]
-    Serve(io::Error),
 }
 
 /// The API's listening socket, ready to serve. Clients can find it from the moment it is
@@ -127,7 +131,7 @@ impl Drop for Recorded {
 
 enum Listener {
     Plain(TcpListener),
-    Tls(TlsListener),
+    Tls(TcpListener, TlsAcceptor),
 }
 
 impl ApiServer {
@@ -187,11 +191,7 @@ impl ApiServer {
         .map_err(|error| ServeError::Tls(error.to_string()))?;
         let url = format!("https://{address}");
         Ok(Self {
-            listener: Listener::Tls(TlsListener::new(
-                tcp,
-                local,
-                TlsAcceptor::from(Arc::new(tls)),
-            )),
+            listener: Listener::Tls(tcp, TlsAcceptor::from(Arc::new(tls))),
             access: Access::Token(token.into()),
             _recorded: record(&url, Some(cert_path))?,
             url,
@@ -222,8 +222,8 @@ impl ApiServer {
         self
     }
 
-    /// Serves `engine` until `shutdown` completes and every response has ended. Event streams
-    /// end when the engine stops, so `shutdown` should stop it.
+    /// Serves `engine` until `shutdown` completes, then waits a moment for responses in
+    /// progress. Event streams end when the engine stops, so `shutdown` should stop it.
     pub async fn serve(
         self,
         engine: Engine,
@@ -233,77 +233,14 @@ impl ApiServer {
         if let Some(ui) = self.ui {
             app = app.merge(ui);
         }
-        let result = match self.listener {
-            Listener::Plain(listener) => {
-                axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown)
-                    .await
+        match self.listener {
+            Listener::Plain(listener) => tempest_http::serve(listener, app, LIMITS, shutdown).await,
+            Listener::Tls(listener, tls) => {
+                let handshake = move |stream| tls.accept(stream);
+                tempest_http::serve_with(listener, handshake, app, LIMITS, shutdown).await;
             }
-            Listener::Tls(listener) => {
-                axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown)
-                    .await
-            }
-        };
-        result.map_err(ServeError::Serve)
-    }
-}
-
-/// Accepts TCP connections and completes their TLS handshakes in tasks of their own, so a slow
-/// handshake holds up nobody else.
-struct TlsListener {
-    ready: mpsc::Receiver<(TlsStream<TcpStream>, SocketAddr)>,
-    local: SocketAddr,
-    acceptor: tokio::task::JoinHandle<()>,
-}
-
-impl TlsListener {
-    fn new(tcp: TcpListener, local: SocketAddr, tls: TlsAcceptor) -> Self {
-        let (sender, ready) = mpsc::channel(64);
-        let acceptor = tokio::spawn(async move {
-            loop {
-                let Ok((stream, peer)) = tcp.accept().await else {
-                    // Such as too many open files: give it a moment.
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    continue;
-                };
-                let (tls, sender) = (tls.clone(), sender.clone());
-                tokio::spawn(async move {
-                    let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, tls.accept(stream));
-                    if let Ok(Ok(stream)) = handshake.await {
-                        let _ = sender.send((stream, peer)).await;
-                    }
-                });
-            }
-        });
-        Self {
-            ready,
-            local,
-            acceptor,
         }
-    }
-}
-
-impl Drop for TlsListener {
-    fn drop(&mut self) {
-        self.acceptor.abort();
-    }
-}
-
-impl axum::serve::Listener for TlsListener {
-    type Io = TlsStream<TcpStream>;
-    type Addr = SocketAddr;
-
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        match self.ready.recv().await {
-            Some(connection) => connection,
-            // The acceptor runs as long as the listener does.
-            None => std::future::pending().await,
-        }
-    }
-
-    fn local_addr(&self) -> io::Result<Self::Addr> {
-        Ok(self.local)
+        Ok(())
     }
 }
 

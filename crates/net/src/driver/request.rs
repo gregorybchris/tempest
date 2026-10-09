@@ -4,7 +4,9 @@ use quinn::{ReadError, RecvStream, SendStream, VarInt, WriteError};
 use tempest_core::io::OutRequest;
 use tempest_core::{ConnId, RequestId, Response, StreamId};
 use tempest_protocol::Message;
-use tempest_protocol::message::{MessageType, Reject, RejectReason, max_data_frame_length};
+use tempest_protocol::message::{
+    ManifestMessage, MessageType, Reject, RejectReason, max_data_frame_length,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use super::bundle::Report;
@@ -19,13 +21,16 @@ const CANCELLED: VarInt = VarInt::from_u32(0);
 
 /// How a request stream is answered.
 pub(super) enum Answer {
-    /// Data for the chunks `[start, start + count)`, read from storage.
+    /// Data for the chunks `[start, start + count)`, read from storage: `bytes` of them.
     Data {
         storage: Storage,
         start: u32,
         count: u32,
+        bytes: u64,
     },
-    /// A ready message: a Manifest or a Reject.
+    /// The Manifest.
+    Manifest(ManifestMessage),
+    /// A ready message, such as a Reject.
     Message(Message),
 }
 
@@ -223,27 +228,36 @@ impl Incoming {
             },
         };
 
-        let (response, data) = match answer {
+        // Data and the Manifest wait for the speed limits before they are built, so a throttled
+        // connection doesn't hold whole responses in memory while it waits.
+        let (response, sent) = match answer {
             Answer::Message(message) => (message, false),
+            Answer::Manifest(manifest) => {
+                let bytes = manifest.manifest.len() as u64;
+                tokio::select! {
+                    biased;
+                    _ = &mut stopped => return self.abandon(&mut send).await,
+                    () = self.throttle.upload(bytes) => {}
+                }
+                (Message::Manifest(manifest), true)
+            }
             Answer::Data {
                 storage,
                 start,
                 count,
+                bytes,
             } => {
+                let read = async {
+                    self.throttle.upload(bytes).await;
+                    storage.read(start, count).await
+                };
                 let read = tokio::select! {
                     biased;
                     _ = &mut stopped => return self.abandon(&mut send).await,
-                    read = storage.read(start, count) => read,
+                    read = read => read,
                 };
                 match read {
-                    Ok(data) => {
-                        tokio::select! {
-                            biased;
-                            _ = &mut stopped => return self.abandon(&mut send).await,
-                            () = self.throttle.upload(data.chunks.len() as u64) => {}
-                        }
-                        (Message::Data(data), true)
-                    }
+                    Ok(data) => (Message::Data(data), true),
                     Err(error) => {
                         // Storage can't back what the session promised: refuse, and free the
                         // upload slot without counting the bytes as sent.
@@ -271,7 +285,7 @@ impl Incoming {
             return self.abandon(&mut send).await;
         }
         let _ = send.finish();
-        if data {
+        if sent {
             let sent = Report::DataSent {
                 conn: self.conn,
                 stream: self.stream,

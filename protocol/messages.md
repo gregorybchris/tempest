@@ -347,6 +347,7 @@ Asks the provider for the bundle's manifest.
 - The provider answers with Manifest, or with Reject: `dont_have` if it doesn't have the manifest, or `busy`.
 - A provider SHOULD answer ManifestRequest whether or not it is serving the requester, because a newcomer can do nothing without the manifest.
 - ManifestRequest counts toward `max_open_requests`.
+- A requester SHOULD ask for the manifest once per connection. A provider MAY refuse further ManifestRequests on a connection with `busy`, since a manifest can be large and the requester may not be one it serves.
 
 An empty Have doesn't tell a requester whether the provider has the manifest. A requester simply asks, and accepts `dont_have`.
 

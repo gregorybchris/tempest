@@ -12,8 +12,8 @@ use tempest_core::event::ServeReason;
 use tempest_core::io::{Closed, ConnInfo, Direction, OutRequest, PathKind};
 use tempest_core::upload::{ServeDecision, UploadContext, UploadStrategy};
 use tempest_core::{
-    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_PEER_ADDRESSES, OPENING_TIMEOUT,
-    Reply, RequestId, Response, Rng, Session, StreamId, Time,
+    Action, Config, ConnId, EventKind, Inbound, LocalPeer, MAX_MANIFESTS_PER_CONNECTION,
+    MAX_PEER_ADDRESSES, OPENING_TIMEOUT, Reply, RequestId, Response, Rng, Session, StreamId, Time,
 };
 use tempest_protocol::message::{
     Candidates, Data, GoodbyeReason, Have, HaveUpdate, Hello, ManifestMessage, PeerRecord, Peers,
@@ -408,6 +408,42 @@ fn a_peer_without_the_chunks_says_dont_have() {
     request(&mut session, 1, chunks(3, 1));
     let replies = replies(&session.poll_actions());
     assert_eq!(reject_reason(&replies[0].1), Some(RejectReason::DontHave));
+}
+
+#[test]
+fn manifests_are_sent_one_at_a_time_and_a_few_times_per_connection() {
+    let mut config = Config::default();
+    config.upload.max_open_requests = 1;
+    let mut session = complete(config);
+    open(&mut session, RangeList::new());
+    request(&mut session, 1, Message::ManifestRequest);
+    assert_eq!(replies(&session.poll_actions()), [(1, Reply::Manifest)]);
+    // The manifest being sent counts toward max_open_requests.
+    request(&mut session, 2, chunks(0, 1));
+    let busy = replies(&session.poll_actions());
+    assert_eq!(reject_reason(&busy[0].1), Some(RejectReason::Busy));
+
+    let sent = |session: &mut Session, stream| {
+        let sent = Inbound::DataSent {
+            stream: StreamId(stream),
+        };
+        session.handle_message(Time::ZERO, C, sent);
+    };
+    sent(&mut session, 1);
+    let mut stream = 3;
+    for _ in 1..MAX_MANIFESTS_PER_CONNECTION {
+        request(&mut session, stream, Message::ManifestRequest);
+        assert_eq!(
+            replies(&session.poll_actions()),
+            [(stream, Reply::Manifest)]
+        );
+        sent(&mut session, stream);
+        stream += 1;
+    }
+    // Enough: a peer can't fetch the manifest again and again.
+    request(&mut session, stream, Message::ManifestRequest);
+    let refused = replies(&session.poll_actions());
+    assert_eq!(reject_reason(&refused[0].1), Some(RejectReason::Busy));
 }
 
 #[test]

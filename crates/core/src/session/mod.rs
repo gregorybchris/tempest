@@ -17,6 +17,8 @@ mod manage;
 mod superseed;
 mod upload;
 
+pub use upload::MAX_MANIFESTS_PER_CONNECTION;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -272,6 +274,12 @@ impl Session {
     /// The manifest, once known.
     pub fn manifest(&self) -> Option<&Arc<Manifest>> {
         self.bundle.as_ref().map(|b| &b.manifest)
+    }
+
+    /// The payload bytes of Data answering `[start, start + count)`, once the manifest is known.
+    /// The request must be valid, as those the session answers with [`Reply::Data`] are.
+    pub fn data_len(&self, start: u32, count: u32) -> Option<u64> {
+        self.bundle.as_ref().map(|b| b.data_len(start, count))
     }
 
     /// The chunks this peer has, once the manifest is known.

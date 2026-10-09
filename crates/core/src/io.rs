@@ -75,7 +75,8 @@ pub enum Inbound {
         /// The stream.
         stream: StreamId,
     },
-    /// The driver has finished sending the Data the session asked for on a stream.
+    /// The driver has finished sending the Data, or the Manifest, the session asked for on a
+    /// stream.
     DataSent {
         /// The stream.
         stream: StreamId,
@@ -134,7 +135,8 @@ pub enum Reply {
         /// The number of chunks requested.
         count: u32,
     },
-    /// The Manifest, built by the driver from storage.
+    /// The Manifest, built by the driver from storage. The driver reports
+    /// [`Inbound::DataSent`] once it has sent it.
     Manifest,
     /// A Reject.
     Reject(Reject),

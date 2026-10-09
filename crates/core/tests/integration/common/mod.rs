@@ -359,9 +359,13 @@ impl Swarm {
                         );
                         return;
                     }
-                    Reply::Manifest => Response::Manifest(ManifestMessage {
-                        manifest: self.nodes[i].content.manifest_bytes(),
-                    }),
+                    Reply::Manifest => {
+                        let sent = Inbound::DataSent { stream };
+                        self.schedule(now, Delivery::Inbound(i, conn, sent));
+                        Response::Manifest(ManifestMessage {
+                            manifest: self.nodes[i].content.manifest_bytes(),
+                        })
+                    }
                     Reply::Reject(reject) => Response::Reject(reject),
                 };
                 let inbound = Inbound::Response { request, response };

@@ -3881,3 +3881,24 @@ This revises D-175, D-182 and D-189.
 - `PEER_ALPN` moved to `tempest_protocol::message`, as `RELAY_ALPN` is in `tempest_protocol::relay`.
 
 **Rationale:** The TUI builds without the engine's dependencies, and every fact about the client's identity and TLS trust has one source.
+
+---
+
+## D-251: Standalone runs have keys of their own; `get` has a timed-out exit code
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Standalone `share` and `get` loaded the installation's key, which the daemon uses, so a standalone run beside a daemon, or two standalone runs, presented one peer ID from two places. `get` exited with 1 whether it failed or gave up waiting, and a daemon that took long to stop could not be stopped sooner. Hidden `tempest sim`, `tracker` and `relay` commands remained only to point to the programs that replaced them (D-214, D-236).
+
+**Options for the key:** a new key for every run, which breaks a share's link on restart, since links name the peer ID and connecting checks it; one file per bundle; a key derived from the installation's key and the bundle (chosen for shares).
+
+**Decision:**
+
+- Without `--identity`, `get` uses a new key per run, and `share` an Ed25519 key whose seed hashes the installation's key with the bundle ID: stable across restarts, different for each bundle and from the daemon's. `share --publish` keeps the installation's key, since a tracker attributes a listing to the key that asks for it (`protocol/trackers.md`). The installation's key is the one in the engine's data directory, so `--data-dir` applies.
+- `get` exits with 0 on success, 1 on failure, 2 for wrong arguments, 3 when no progress came within `--timeout`, and 130 when interrupted; its help lists them.
+- While the daemon or `tempest web` stops, a second Ctrl-C exits at once with 130, without telling trackers and peers.
+- The hidden moved-command stubs are gone; `tempest sim`, `tracker` and `relay` are unknown commands.
+- In the TUI, the add, rename, tags, move, value and form modals stay open until the engine accepts what they sent, and show a refusal in place rather than as a notice. A saved view's name closes at once, since views apply locally first.
+
+**Rationale:** One peer ID per running process, which peers, trackers and LAN discovery assume, without breaking links a share has printed. Scripts can tell giving up from failing.
+

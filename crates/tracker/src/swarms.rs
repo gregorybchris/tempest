@@ -260,6 +260,37 @@ impl Swarm {
     }
 }
 
+/// Whether `ip` can only be reached from its own network or machine: loopback, private,
+/// link-local or unique local.
+fn is_local(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_unspecified()
+        }
+    }
+}
+
+/// `peers` as a requester at `requester` can use them. The address the tracker observed for a
+/// peer is often its router's or the tracker's own machine's, which means nothing to a requester
+/// elsewhere and costs it a dial timeout. A requester on a local network or machine keeps them.
+/// A peer left with no address and no relay is dropped, since nobody could dial it.
+fn reachable_by(requester: IpAddr, mut peers: Vec<PeerEntry>) -> Vec<PeerEntry> {
+    if is_local(requester) {
+        return peers;
+    }
+    for entry in &mut peers {
+        entry.addrs.retain(|addr| !is_local(addr.ip()));
+    }
+    peers.retain(|entry| !entry.addrs.is_empty() || entry.relay.is_some());
+    peers
+}
+
 /// Every swarm a tracker knows of.
 #[derive(Debug)]
 pub struct Swarms {
@@ -396,7 +427,7 @@ impl Swarms {
         }
         Ok(AnnounceResponse {
             interval_secs: config.interval.as_secs(),
-            peers,
+            peers: reachable_by(observed_ip, peers),
             complete: stats.complete,
             incomplete: stats.incomplete,
             your_ip: observed.ip(),
@@ -563,6 +594,43 @@ mod tests {
         let mapped: IpAddr = "::ffff:198.51.100.9".parse().unwrap();
         let response = s.announce(Instant::now(), &request(1, AnnounceEvent::Started), mapped);
         assert_eq!(response.unwrap().your_ip, ip());
+    }
+
+    #[test]
+    fn a_requester_elsewhere_is_not_given_local_addresses() {
+        let mut s = swarms();
+        let t = Instant::now();
+        let mut first = request(1, AnnounceEvent::Started);
+        first.addrs = vec![format!("{IP}:4773").parse().unwrap()];
+        // The seeder announced from the tracker's own machine.
+        s.announce(t, &first, "127.0.0.1".parse().unwrap()).unwrap();
+
+        let outside = s.announce(t, &request(2, AnnounceEvent::Started), ip());
+        let peers = outside.unwrap().peers;
+        assert_eq!(peers[0].addrs, vec![format!("{IP}:4773").parse().unwrap()]);
+
+        let local = s.announce(
+            t,
+            &request(3, AnnounceEvent::Started),
+            "192.168.1.5".parse().unwrap(),
+        );
+        let peers = local.unwrap().peers;
+        let wanted: Address = "127.0.0.1:4773".parse().unwrap();
+        assert!(peers.iter().any(|entry| entry.addrs.contains(&wanted)));
+    }
+
+    #[test]
+    fn a_peer_with_only_local_addresses_is_not_given_to_a_requester_elsewhere() {
+        let mut s = swarms();
+        let t = Instant::now();
+        s.announce(
+            t,
+            &request(1, AnnounceEvent::Started),
+            "10.0.0.7".parse().unwrap(),
+        )
+        .unwrap();
+        let response = s.announce(t, &request(2, AnnounceEvent::Started), ip());
+        assert!(response.unwrap().peers.is_empty());
     }
 
     #[test]

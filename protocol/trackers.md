@@ -57,6 +57,7 @@ POST /tempest/v1/announce
 **Tracker:**
 
 - The tracker MUST add the request's observed source IP, combined with `port`, to the peer's addresses. This is a best guess: it works when the peer's router keeps the same port, or when the peer has a port mapping.
+- The tracker SHOULD omit loopback, private, link-local and unique local addresses from the `peers` it returns to a requester whose own observed IP is none of those, and omit a peer left with no address and no relay. The observed IP is often a router's or the tracker's own machine's, and dialing it only costs the requester a timeout.
 - The tracker MAY refuse with `invalid_request` an announce with `port` 0 or with more `addrs` than it accepts.
 - The tracker MUST NOT include the requesting peer in `peers`. It SHOULD return at most `num_want` peers (and MAY cap `num_want`), chosen at random.
 - On `stopped`, the tracker SHOULD remove the peer immediately and MAY return an empty `peers` list.

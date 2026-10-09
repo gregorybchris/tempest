@@ -18,7 +18,7 @@ use crate::theme::bool_attr;
 pub mod listbox;
 mod select;
 
-pub use select::{CategoryField, Select, SelectField};
+pub use select::{Select, SelectField};
 
 /// A page-unique ID for an element, starting with `prefix`.
 fn unique_id(prefix: &str) -> String {

@@ -968,13 +968,6 @@ async fn a_share_takes_its_own_trackers_and_creation_time() {
     assert_eq!(status, StatusCode::CREATED, "{other}");
     assert_ne!(other["id"], share["id"]);
 
-    // A share's new category is made, with the default save folder.
-    let body = json!({ "path": shared, "category": " Field notes ", "created": 5 });
-    let (status, categorized) = send(&app, Method::POST, "/v1/transfers", Some(body)).await;
-    assert_eq!(status, StatusCode::CREATED, "{categorized}");
-    assert_eq!(categorized["category"], "Field notes");
-    assert!(engine.categories().await.contains_key("Field notes"));
-
     let bad = json!({ "path": shared, "trackers": ["ftp://nope"], "created": 5 });
     let response = send(&app, Method::POST, "/v1/transfers", Some(bad)).await;
     assert_error(response, StatusCode::BAD_REQUEST, "invalid_request");

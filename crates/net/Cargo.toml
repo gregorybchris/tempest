@@ -27,6 +27,7 @@ serde_json.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
 unicode-normalization.workspace = true
 
 [target.'cfg(unix)'.dependencies]

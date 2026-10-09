@@ -16,11 +16,25 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
-    match sim::sim(Cli::parse().command) {
+    let cli = Cli::parse();
+    init_logging();
+    match sim::sim(cli.command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error:#}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// Prints log events to stderr: warnings and errors, or what `RUST_LOG` asks for (D-239).
+fn init_logging() {
+    use std::io::IsTerminal;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
+        .init();
 }

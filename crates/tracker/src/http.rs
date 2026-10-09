@@ -81,7 +81,7 @@ pub(crate) async fn serve(
                 Ok(accepted) => accepted,
                 Err(error) => {
                     // Such as running out of file descriptors: wait for some to close.
-                    eprintln!("cannot accept a connection: {error}");
+                    tracing::warn!("cannot accept a connection: {error}");
                     tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
                     continue;
                 }

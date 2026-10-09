@@ -76,6 +76,10 @@ struct MovedArgs {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // The terminal UI draws on the terminal, which log lines would garble.
+    if !matches!(cli.command, Command::Tui(_)) {
+        init_logging();
+    }
     let result = match cli.command {
         Command::Share(args) => share::share(args),
         Command::Get(args) => get::get(args),
@@ -110,6 +114,18 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Prints log events to stderr: warnings and errors, or what `RUST_LOG` asks for (D-239).
+fn init_logging() {
+    use std::io::IsTerminal;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,quinn_udp=error"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
+        .init();
 }
 
 /// An error and its causes in one line, leaving out a cause its parent already ends with,

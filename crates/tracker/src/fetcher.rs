@@ -249,7 +249,7 @@ pub(crate) async fn run(
                 let pending = match lock().pending() {
                     Ok(pending) => pending,
                     Err(error) => {
-                        eprintln!("cannot read the pending listings: {error}");
+                        tracing::error!("cannot read the pending listings: {error}");
                         continue;
                     }
                 };
@@ -276,12 +276,12 @@ pub(crate) async fn run(
                 if let Some(manifest) = &manifest
                     && let Err(error) = lock().set_content(&bundle, &content(manifest))
                 {
-                    eprintln!("cannot list {bundle}: {error}");
+                    tracing::error!("cannot list {bundle}: {error}");
                     continue;
                 }
                 let outcome = schedule.record(Instant::now(), bundle, Some(manifest.is_some()));
                 if outcome == Outcome::GaveUp {
-                    eprintln!("gave up fetching the manifest of {bundle} to list it");
+                    tracing::info!("gave up fetching the manifest of {bundle} to list it");
                 }
             }
         }

@@ -3880,3 +3880,22 @@ This revises D-175, D-182 and D-189.
 - **A failed sync is final.** Once a sync fails, every later write, sync and checkpoint of that storage fails with that error, so the transfer stops and its last checkpoint, which only records synced chunks, is what it resumes from.
 
 **Rationale:** 1 TiB covers real bundles while keeping a download's memory in the low gigabytes; the limit can be raised once per-chunk state shrinks. Checking free space up front turns a disk filling up mid-download into an error the user sees before anything is written. Syncing a handle before it closes keeps a write's failure from going unreported, and treating a failed sync as final is how databases learned to handle Linux dropping dirty pages after an I/O error.
+
+---
+
+## D-239: Logging with tracing
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The architecture left logging conventions open. Libraries reported trouble with `eprintln!`, or not at all: the tracker printed failed catalog writes, the relay logged nothing, and the engine dropped failed state saves. The binaries' own stderr lines, such as `tracker listening on …`, are their interface, and tests read them.
+
+**Options:** `eprintln!` in libraries; the `log` facade; `tracing` (chosen).
+
+**Decision:**
+
+- Libraries (`net`, `engine`, `tracker`, `relay`) emit events with `tracing`, never print. `error` is something an operator or user must act on, such as the state database failing; `warn` is something that went wrong and was handled; `info` is a server's routine events, such as a relay registration; `debug` is detail, such as a connection refused at a limit.
+- Each binary prints events to stderr with `tracing-subscriber`, filtered by `RUST_LOG` (`EnvFilter` syntax). Without it, `tempest-tracker` and `tempest-relay` show `info` and above, `tempest` and `tempest-sim` `warn` and above, except quinn-udp's warnings about packets the network refused, which are routine. Colors only on a terminal.
+- `tempest tui` installs no subscriber, since the terminal UI owns the terminal; transfer errors reach it through the API.
+- What a command prints for its user stays plain `eprintln!`/`println!` in the binaries, unchanged.
+
+**Rationale:** `tracing` is what tokio, quinn and hyper already use, so their events can be switched on with the same filter, and its spans fit async tasks. Leaving user-facing lines alone keeps the binaries' output stable for people and tests.

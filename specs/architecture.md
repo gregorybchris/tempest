@@ -72,7 +72,8 @@ The last column lists the workspace crates each may use besides `protocol`, whic
 | Tracker's catalog | SQLite store, Tantivy search index in memory | D-206, D-130, D-209 |
 | Simulation results | DuckDB | D-075 |
 | Web UIs | Leptos 0.8 (client-side, with server rendering and islands where useful) | D-117 |
+| Logging | `tracing` in libraries; binaries print events to stderr with `tracing-subscriber`, filtered by `RUST_LOG` | D-239 |
 
 ## Open questions
 
-- Error handling, logging and metrics conventions.
+- Error handling and metrics conventions.

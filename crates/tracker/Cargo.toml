@@ -25,6 +25,7 @@ serde_json.workspace = true
 tantivy.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 tower.workspace = true
 
 [dev-dependencies]

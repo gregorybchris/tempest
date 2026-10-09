@@ -27,6 +27,7 @@ tempest-tracker-api.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing-subscriber.workspace = true
 
 [build-dependencies]
 tempest-assets.workspace = true

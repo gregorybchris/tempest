@@ -6,10 +6,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
-tempest-api.workspace = true
-tempest-engine.workspace = true
+tempest-api = { workspace = true, features = ["client"] }
 tempest-protocol.workspace = true
 
 ratatui.workspace = true
@@ -18,7 +18,8 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 unicode-width.workspace = true
 
 [dev-dependencies]
-tempest-api = { workspace = true, features = ["testing"] }
+tempest-api = { workspace = true, features = ["client", "testing"] }
+tempest-engine.workspace = true
 insta.workspace = true
 proptest.workspace = true
 tempfile.workspace = true

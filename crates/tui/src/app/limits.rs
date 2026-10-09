@@ -4,14 +4,14 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use tempest_engine::{Kind, TransferInfo};
+use tempest_api::{Kind, TransferInfo};
 
 use super::App;
 use super::modal::{FormKind, Modal};
 use super::request::{Action, Request, Target};
-use super::rows::{ValueKind, limit_input};
+use super::rows::ValueKind;
 use crate::form::{Field, Form};
-use crate::format;
+use crate::format::{self, limit_input};
 
 /// The settings the form edits, and its labels for them.
 const DOWNLOAD: (&str, &str) = ("limits.download", "Download");
@@ -45,7 +45,7 @@ impl App {
         let engine = self
             .settings
             .as_ref()
-            .map(|view| serde_json::to_value(view.settings.sharing).expect("settings serialize"));
+            .map(|view| serde_json::to_value(&view.settings.sharing).expect("settings serialize"));
         // A share has no limits unless it sets its own (D-224).
         let share = transfer.kind == Kind::Share;
         let engine_says = |key: &str| match engine.as_ref().map(|e| &e[key]) {

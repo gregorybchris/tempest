@@ -113,6 +113,7 @@ impl Permissions {
     }
 
     /// Whether the registered peer may send to `to`.
+    #[cfg(test)]
     pub fn allows(&self, to: Address, now: Instant) -> bool {
         self.granted
             .get(&to)

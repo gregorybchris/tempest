@@ -148,8 +148,11 @@ fn draw_shares(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Min(0),
     ];
     let table = Table::new(rows, widths).column_spacing(1);
-    let mut state = TableState::new().with_selected(cursor);
+    let mut state = TableState::new()
+        .with_offset(app.share.offset.get())
+        .with_selected(cursor);
     frame.render_stateful_widget(table, area, &mut state);
+    app.share.offset.set(state.offset());
 }
 
 /// The selected share's link, which the list cuts short, over as many lines as `area` has.

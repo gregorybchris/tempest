@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use tempest_api::client::{ApiClient, ClientError};
 use tempest_core::event::CloseCause;
 use tempest_core::{Event, EventKind};
 use tempest_engine::api::AddRequest;
-use tempest_engine::api::client::{ApiClient, ClientError};
 use tempest_engine::{Status as TransferStatus, TransferInfo};
 use tempest_net::{BundleHandle, Destination, Status};
 use tempest_protocol::link::ParseLinkError;
@@ -22,8 +22,17 @@ use tempest_api::units::{bytes, percent};
 use tempest_api::words::peers;
 
 use crate::engine::{EngineArgs, Target};
-use crate::peer::{Peer, PeerArgs};
-use crate::progress::{Interrupted, StatusLine, duration};
+use crate::peer::{Key, Peer, PeerArgs};
+use crate::progress::{Interrupted, StatusLine, TimedOut, duration};
+
+/// `tempest get --help`'s account of its exit codes.
+pub const EXIT_CODES: &str = "\
+Exit codes:
+  0    the bundle downloaded
+  1    the download failed
+  2    the arguments are wrong
+  3    no progress within --timeout
+  130  interrupted with Ctrl-C";
 
 #[derive(Debug, clap::Args)]
 pub struct GetArgs {
@@ -101,7 +110,7 @@ async fn download(
     record: Option<PeerRecord>,
     trackers: Vec<String>,
 ) -> Result<()> {
-    let peer = args.peer.start(args.port.unwrap_or(0), false)?;
+    let peer = (args.peer).start(args.port.unwrap_or(0), false, Key::Fresh, &args.engine)?;
     let sources = Sources {
         addresses: (record.iter())
             .flat_map(|r| r.addresses.iter().chain(&r.relay).copied())
@@ -237,10 +246,11 @@ async fn follow(
                     TransferStatus::Stalled { reason } => format!(": {reason}"),
                     _ => ".".to_owned(),
                 };
-                bail!(
+                return Err(TimedOut(format!(
                     "no progress for {} s{why} The daemon keeps trying; `tempest list` shows it.",
                     timeout.as_secs()
-                );
+                ))
+                .into());
             }
             interrupted = &mut interrupt => {
                 interrupted.context("cannot listen for Ctrl-C")?;
@@ -396,7 +406,7 @@ impl<'a> Watch<'a> {
             message.push_str(": ");
             message.push_str(trouble);
         }
-        anyhow!(message)
+        TimedOut(message).into()
     }
 }
 

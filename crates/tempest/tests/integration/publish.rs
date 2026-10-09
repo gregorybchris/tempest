@@ -1,7 +1,7 @@
 //! `tempest share --publish` against `tempest-tracker --catalog`, as separate processes on
 //! localhost: the bundle shows on the tracker with its content and the metadata given.
 
-use crate::common::{self, Running, lines};
+use crate::common::{self, COMMAND_LIMIT, OutputWithin, Running, lines};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
@@ -146,7 +146,7 @@ fn listing_fields_need_publish() {
     let output = tempest()
         .args(["share", "--dry-run", "--title", "Untitled"])
         .arg(dir.path())
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
@@ -162,7 +162,7 @@ fn publishing_to_a_tracker_without_listings_says_so() {
     let output = tempest()
         .args(["sign-in", &url, "--code", "AAAAA-AAAAA", "--data-dir"])
         .arg(dir.path().join("data"))
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(!output.status.success(), "{stderr}");
@@ -185,7 +185,7 @@ fn sign_in_signs_a_browsers_code() {
     let output = tempest()
         .args(["sign-in", &url, "--code", code, "--data-dir"])
         .arg(dir.path().join("data"))
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(output.status.success(), "{stderr}");

@@ -4772,6 +4772,7 @@ dependencies = [
  "clap",
  "ratatui",
  "serde_json",
+ "sha2",
  "tempest-api",
  "tempest-assets",
  "tempest-core",
@@ -4792,8 +4793,10 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "proptest",
+ "reqwest",
  "serde",
  "serde_json",
+ "tempest-http-client",
  "tempest-protocol",
  "tempest-tracker-api",
  "thiserror 2.0.21",
@@ -4829,10 +4832,8 @@ dependencies = [
  "getrandom 0.3.4",
  "proptest",
  "rcgen",
- "reqwest",
  "rusqlite",
  "rustls",
- "rustls-platform-verifier",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -4868,6 +4869,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tempest-http-client"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
+ "tempest-protocol",
+]
+
+[[package]]
 name = "tempest-net"
 version = "0.1.0"
 dependencies = [
@@ -4884,11 +4895,11 @@ dependencies = [
  "ring",
  "rustix 1.1.5",
  "rustls",
- "rustls-platform-verifier",
  "serde",
  "serde_json",
  "socket2",
  "tempest-core",
+ "tempest-http-client",
  "tempest-protocol",
  "tempest-tracker",
  "tempest-tracker-api",
@@ -4947,6 +4958,7 @@ name = "tempest-sim"
 version = "0.1.0"
 dependencies = [
  "duckdb",
+ "libm",
  "proptest",
  "rand 0.9.5",
  "rand_chacha",
@@ -4956,6 +4968,7 @@ dependencies = [
  "sha2",
  "tempest-core",
  "tempest-protocol",
+ "tempest-sim",
  "tempest-sim-api",
  "tempfile",
  "thiserror 2.0.21",
@@ -4995,11 +5008,8 @@ dependencies = [
  "console_error_panic_hook",
  "leptos",
  "serde",
- "serde_json",
  "tempest-sim-api",
  "tempest-ui-kit",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -5112,7 +5122,10 @@ dependencies = [
  "leptos-use",
  "proptest",
  "send_wrapper",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

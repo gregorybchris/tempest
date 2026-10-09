@@ -158,13 +158,14 @@ fn baselines_are_saved_then_checked() {
         assert!(stdout.contains("completion p50") && !stdout.contains("REGRESSED"));
     }
 
-    // A slower origin fails the check.
+    // An edited scenario isn't checked against the old one's baseline.
     let text = std::fs::read_to_string(&scenario).unwrap();
     std::fs::write(&scenario, text.replacen("up: 20Mbps", "up: 5Mbps", 1)).unwrap();
     let output = baseline(&[]);
     assert!(!output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("REGRESSED"), "{stdout}");
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("regressed: two-peers"), "{stderr}");
+    assert!(
+        stderr.contains("two-peers.yaml changed") && stderr.contains("--update"),
+        "{stderr}"
+    );
 }

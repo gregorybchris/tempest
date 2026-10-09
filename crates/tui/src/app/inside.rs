@@ -3,7 +3,7 @@
 
 use std::mem::discriminant;
 
-use tempest_engine::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
+use tempest_api::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use tempest_protocol::BundleId;
 
 use super::Reply;

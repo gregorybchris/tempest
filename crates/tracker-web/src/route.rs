@@ -68,6 +68,16 @@ impl Route {
     }
 }
 
+impl tempest_ui_kit::shell::Route for Route {
+    fn parse(hash: &str) -> Self {
+        Route::parse(hash)
+    }
+
+    fn hash(&self) -> String {
+        Route::hash(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempest_tracker_api::query::Sort;

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
-use tempest_engine::api::client::{ApiClient, ClientError};
+use tempest_api::client::{ApiClient, ClientError};
 use tempest_engine::api::server::{ApiServer, CERT_FILE, DISCOVERY_FILE, Discovery, TOKEN_FILE};
 use tempest_engine::api::{Access, AddRequest};
 use tempest_engine::config::{ApiSettings, LanSettings, PeerSettings};
@@ -161,7 +161,7 @@ async fn remote_access_is_https_with_the_token() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn clients_follow_and_resume_the_event_stream() {
-    use tempest_engine::api::client::ApiEvent;
+    use tempest_api::ApiEvent;
 
     let dir = tempfile::tempdir().unwrap();
     let api = ApiSettings {

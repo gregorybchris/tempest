@@ -47,3 +47,7 @@ pub use message::Message;
 pub use range::{ChunkRange, RangeList};
 pub use relay::{RelayDatagram, RelayIdentity, RelayMessage};
 pub use wire::{Decode, DecodeError, Encode, Reader, Writer};
+
+/// This implementation's name and version: what it sends as Hello's `client` and as the user
+/// agent of its HTTP requests.
+pub const CLIENT: &str = concat!("tempest/", env!("CARGO_PKG_VERSION"));

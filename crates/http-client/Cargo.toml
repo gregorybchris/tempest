@@ -1,0 +1,19 @@
+[package]
+name = "tempest-http-client"
+description = "The HTTPS client setup Tempest's tracker and engine API clients share"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+tempest-protocol.workspace = true
+
+reqwest.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+
+[lints]
+workspace = true

@@ -1,20 +1,26 @@
 //! The engine API's types, and what Tempest's clients make of them.
 //!
 //! The engine serves these types and its clients read them, so they build for WebAssembly as
-//! well as natively: they depend on serde and the protocol's types only.
+//! well as natively: they depend on serde and the protocol's types only, except the native
+//! client the `client` feature adds.
 //!
 //! - The API's data: [`TransferInfo`] and its [`Status`], [`inspect`] for what is inside a
 //!   transfer, [`requests`] for request bodies, [`events`] for the event stream, [`ApiError`],
-//!   [`settings`] for the settings clients show and [`ui`] for the clients' shared look, and
-//!   [`schedule`] for the alternative limits' schedule.
+//!   [`settings`] for the settings clients show, [`ui`] for the clients' shared look,
+//!   [`schedule`] for the alternative limits' schedule, and [`discovery`] for how local
+//!   clients find an engine's API.
 //! - What clients make of it, shared by the TUI and the web UI (D-119): [`model`] follows the
 //!   event stream, [`notices`] picks out what to tell the user, [`network`] says what the
 //!   network defaults share (D-227), [`finding`] filters and sorts (D-192), [`columns`] decides
 //!   which columns fit (D-138), [`explain`] says what a transfer is doing in plain language,
 //!   [`prefs`] reads and writes the `ui` settings, and [`units`] shows and reads byte counts
 //!   and limits.
+//! - With the `client` feature, [`client`]: a client for the API, for native clients.
 
+#[cfg(feature = "client")]
+pub mod client;
 pub mod columns;
+pub mod discovery;
 mod error;
 pub mod events;
 pub mod explain;

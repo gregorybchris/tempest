@@ -5,13 +5,16 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, Identity, Lan, LanConfig,
     Node, NodeConfig, PortMappingConfig, PortMappingStatus, RelayChoice, RelayStatus,
     TrackerClient,
 };
 use tempest_protocol::lan::LAN_PORT;
-use tempest_protocol::{Address, RelayIdentity};
+use tempest_protocol::{Address, BundleId, RelayIdentity};
+
+use crate::engine::EngineArgs;
 
 /// How long a tracker request may take.
 pub const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -25,8 +28,10 @@ pub const IDENTITY_ENV: &str = "TEMPEST_IDENTITY";
 /// Options for running a peer.
 #[derive(Debug, clap::Args)]
 pub struct PeerArgs {
-    /// The identity key file. Created if missing. Defaults to `identity.pem` in Tempest's folder
-    /// in the per-user data directory.
+    /// The identity key file. Created if missing. Without it, a download uses a new key, and a
+    /// share one derived from this installation's key and the bundle, so the peer ID its link
+    /// names lasts across restarts; a share with --publish uses the installation's key, which
+    /// listings are attributed to.
     #[arg(long, env = IDENTITY_ENV, value_name = "FILE")]
     pub identity: Option<PathBuf>,
     /// An address to bind instead of every interface, at most one per address family. Repeat for
@@ -158,6 +163,55 @@ impl Peer {
     }
 }
 
+/// Which key a standalone run uses when `--identity` names none. None is the daemon's own key
+/// unless it must be, so a standalone run beside a daemon never shares its peer ID.
+#[derive(Debug, Clone, Copy)]
+pub enum Key {
+    /// A new one for this run: a download needs no lasting identity.
+    Fresh,
+    /// One of its own for sharing this bundle, derived from the installation's key.
+    Share(BundleId),
+    /// The installation's, which the engine uses too: a listing is attributed to the key that
+    /// asks for it.
+    Installation,
+}
+
+impl Key {
+    /// The key, reading or making the installation's in `engine`'s data directory if needed.
+    fn identity(self, engine: &EngineArgs) -> Result<Identity> {
+        let installation = || {
+            let path = engine.load()?.data_dir()?.join(IDENTITY_FILE);
+            Identity::load_or_create(&path)
+                .with_context(|| format!("cannot load the identity {}", path.display()))
+        };
+        match self {
+            Self::Fresh => Identity::generate().context("cannot make a key"),
+            Self::Share(bundle) => Ok(share_identity(&installation()?, &bundle)),
+            Self::Installation => installation(),
+        }
+    }
+}
+
+/// The installation's identity file in the engine's data directory.
+const IDENTITY_FILE: &str = "identity.pem";
+
+/// The key a standalone share of `bundle` uses: an Ed25519 key whose seed hashes the
+/// installation's key with the bundle ID.
+fn share_identity(installation: &Identity, bundle: &BundleId) -> Identity {
+    /// A PKCS#8 version 1 document of an Ed25519 key, up to its 32-byte seed (RFC 8410).
+    const PKCS8_PREFIX: [u8; 16] = [
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
+        0x20,
+    ];
+    let seed = Sha256::new()
+        .chain_update(b"tempest standalone share v1\0")
+        .chain_update(installation.to_pem())
+        .chain_update(bundle.as_bytes())
+        .finalize();
+    let der = [&PKCS8_PREFIX[..], &seed[..]].concat();
+    Identity::from_pkcs8(&der).expect("any 32-byte seed is an Ed25519 key")
+}
+
 impl PeerArgs {
     /// Whether any option is given, each of which asks to run standalone rather than through
     /// the daemon.
@@ -170,15 +224,15 @@ impl PeerArgs {
             || self.lan_port.is_some()
     }
 
-    /// Loads the identity and starts a node on `port` (0 for any), advertising its direct
-    /// addresses if `advertise` is set. Must be called within a tokio runtime.
-    pub fn start(&self, port: u16, advertise: bool) -> Result<Peer> {
-        let identity_path = match &self.identity {
-            Some(path) => path.clone(),
-            None => default_identity_path()?,
+    /// Loads the identity, `--identity` or else `key`, and starts a node on `port` (0 for
+    /// any), advertising its direct addresses if `advertise` is set. Must be called within a
+    /// tokio runtime.
+    pub fn start(&self, port: u16, advertise: bool, key: Key, engine: &EngineArgs) -> Result<Peer> {
+        let identity = match &self.identity {
+            Some(path) => Identity::load_or_create(path)
+                .with_context(|| format!("cannot load the identity {}", path.display()))?,
+            None => key.identity(engine)?,
         };
-        let identity = Identity::load_or_create(&identity_path)
-            .with_context(|| format!("cannot load the identity {}", identity_path.display()))?;
 
         let mut config = NodeConfig::default();
         let endpoint_config = EndpointConfig {
@@ -248,11 +302,23 @@ impl PeerArgs {
     }
 }
 
-/// `identity.pem` in Tempest's folder in the per-user data directory, which the engine uses
-/// too.
-fn default_identity_path() -> Result<PathBuf> {
-    let data_dir = tempest_engine::config::default_data_dir().with_context(|| {
-        format!("cannot find the per-user data directory; pass --identity or set {IDENTITY_ENV}")
-    })?;
-    Ok(data_dir.join("identity.pem"))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_share_has_a_lasting_key_of_its_own_for_each_bundle() {
+        let installation = Identity::generate().unwrap();
+        let [a, b] = [[1; 32], [2; 32]].map(tempest_protocol::Hash::new);
+        let key = |bundle| share_identity(&installation, &bundle).peer_id();
+        assert_eq!(key(a), key(a), "the same bundle keeps its key");
+        assert_ne!(key(a), key(b), "another bundle gets another");
+        assert_ne!(
+            key(a),
+            installation.peer_id(),
+            "neither is the installation's"
+        );
+        let other = Identity::generate().unwrap();
+        assert_ne!(share_identity(&other, &a).peer_id(), key(a));
+    }
 }

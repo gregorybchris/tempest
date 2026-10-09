@@ -1,0 +1,148 @@
+/*
+ * Tempest's design system (D-076): the stylesheet every web UI links.
+ *
+ * The look evokes 1980s terminals while the layout stays modern (specs/interfaces.md): phosphor
+ * colors, a monospace face with tabular figures, box-drawn panels, and glow spent only on
+ * numbers, lines, cells and the wordmark. Components are named `.block__element--modifier`.
+ *
+ * Theme tokens are checked by the crate's tests: every theme defines each token, text colors
+ * keep 4.5:1 contrast and series colors 3:1. `--faint` is for rules and fills, never text.
+ */
+
+/* ---------- Themes (D-089, D-135) ---------- */
+
+:root,
+[data-theme="green"] {
+  /* Green phosphor (P1 terminal) */
+  --bg: #020b05;
+  --raise: #05140b;
+  --line: #164a28;
+  --fg: #8af2a4;
+  --dim: #5aae73;
+  --faint: #24603a;
+  --down: #57ff8e;
+  --up: #d2ffe0;
+  --up-dash: 5 4;
+  --hot: #e9fff0;
+  --warn: #d7ff6a;
+  --bad: #ff8a6a;
+  --cell-off: #0b2414;
+  --glow: rgba(87, 255, 142, 0.55);
+  --glow-size: 6px;
+  --select: rgba(87, 255, 142, 0.1);
+  --scrim: rgba(0, 6, 2, 0.72);
+  --series-1: #57ff8e;
+  --series-2: #ffd166;
+  --series-3: #5ad1ff;
+  --series-4: #ff8fab;
+  --series-5: #c3a6ff;
+  --series-6: #f4ff6a;
+  color-scheme: dark;
+}
+
+[data-theme="amber"] {
+  /* Amber phosphor (P3 terminal) */
+  --bg: #0d0700;
+  --raise: #170d01;
+  --line: #4a2c06;
+  --fg: #ffbf5c;
+  --dim: #c0832c;
+  --faint: #6b440c;
+  --down: #ffad33;
+  --up: #ffe3ad;
+  --up-dash: 5 4;
+  --hot: #fff4dc;
+  --warn: #fff07a;
+  --bad: #ff7a59;
+  --cell-off: #241503;
+  --glow: rgba(255, 173, 51, 0.5);
+  --glow-size: 6px;
+  --select: rgba(255, 173, 51, 0.1);
+  --scrim: rgba(8, 4, 0, 0.72);
+  --series-1: #ffad33;
+  --series-2: #5ad1ff;
+  --series-3: #c3e88d;
+  --series-4: #ff7a8a;
+  --series-5: #ffe3ad;
+  --series-6: #c792ea;
+  color-scheme: dark;
+}
+
+[data-theme="vector"] {
+  /* Neon vector (Atari Tempest, 1981) */
+  --bg: #04020d;
+  --raise: #090720;
+  --line: #2a2566;
+  --fg: #d9e3ff;
+  --dim: #8f99d6;
+  --faint: #3b3f80;
+  --down: #3ef3ff;
+  --up: #ff52d9;
+  --up-dash: none;
+  --hot: #f4ff4f;
+  --warn: #f4ff4f;
+  --bad: #ff5a3d;
+  --cell-off: #100d33;
+  --glow: rgba(62, 243, 255, 0.55);
+  --glow-size: 7px;
+  --select: rgba(62, 243, 255, 0.09);
+  --scrim: rgba(2, 1, 8, 0.74);
+  --series-1: #3ef3ff;
+  --series-2: #ff52d9;
+  --series-3: #f4ff4f;
+  --series-4: #7cff6b;
+  --series-5: #ff9f43;
+  --series-6: #a98bff;
+  color-scheme: dark;
+}
+
+[data-theme="beige"] {
+  /* Beige-era computing (light) */
+  --bg: #dcd5c1;
+  --raise: #e9e3d1;
+  --line: #a99f84;
+  --fg: #23201a;
+  --dim: #534e3f;
+  --faint: #918870;
+  --down: #22529e;
+  --up: #1b5e36;
+  --up-dash: none;
+  --hot: #8a4300;
+  --warn: #6b5200;
+  --bad: #9e2814;
+  --cell-off: #cbc3ab;
+  --glow: transparent;
+  --glow-size: 0px;
+  --select: rgba(34, 82, 158, 0.1);
+  --scrim: rgba(60, 52, 36, 0.45);
+  --series-1: #22529e;
+  --series-2: #9e2814;
+  --series-3: #1b5e36;
+  --series-4: #6d3f94;
+  --series-5: #8a4300;
+  --series-6: #00626b;
+  color-scheme: light;
+}
+
+/* ---------- Scale ---------- */
+
+:root {
+  --font: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text: 13px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 18px;
+  --gap-5: 26px;
+  --radius: 0;
+}
+
+/* The "clean" look turns every effect off (specs/interfaces.md). */
+[data-look="clean"] {
+  --glow: transparent;
+  --glow-size: 0px;
+}

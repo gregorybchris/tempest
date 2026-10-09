@@ -2362,7 +2362,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-158: Simulated network details
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided; how capacity is shared is superseded by D-245
 
 **Context:** D-069 sets a message-level network with fair sharing, but not how capacity is shared, how loss and ordering work, or what counts as a message.
 
@@ -3989,3 +3989,159 @@ This revises D-175, D-182 and D-189.
 - **Unpublishing stops asking first.** The engine first stops announcing the listing request, waits until no announce carrying it can still arrive, and only then removes the listing.
 
 **Rationale:** A seeder that writes to the user's originals can destroy work the user did after sharing, which no transfer is worth. Recording a move before and after it gives a restart one way to read the disk. A database that can't be written makes everything after it unrecoverable at the next start, so stopping and saying so beats carrying on silently.
+
+---
+
+## D-245: The simulated network shares capacity max-min fairly
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** D-158 gave each flow the smaller of its sender's upload and its receiver's download, each split evenly among that end's flows. Capacity a flow couldn't use because its other end was slower went unused, which contradicts `specs/simulation.md`'s "links share capacity fairly", and a flow's start or end changed rates only at its two ends.
+
+**Options:** keep processor sharing at each end; recompute global max-min fairness from scratch at every change (the cost D-158 avoided); compute max-min fairness incrementally (chosen).
+
+**Decision:**
+
+- Uploads, downloads and relay limits are resources. A flow gets as much as it can without taking from a flow that has less: max-min fairness, the allocation progressive filling gives.
+- Each resource has a level, the most any of its flows gets, and a flow's rate is the lowest level among its resources. When a flow starts or ends, the levels of its resources are worked out again, each by filling its capacity given what its flows' other resources allow. A changed level makes the resources sharing its flows work theirs out again, but only those it can move, so most changes stop at the flow's own two ends.
+- If a change hasn't settled after a bounded amount of work, every level is filled from scratch. The property test checks every rate against filling from scratch.
+- The network keeps one finish time per running flow, so the run loop no longer queues an event for every rate change and skips the stale ones.
+
+**Consequences:** the golden baselines were saved again (D-246 changed them too). Medians over 20 seeds moved by up to about 10%: `mixed` completes 10% sooner at the median, `routers` and `sessions` 6–7%, `crowd` 2% later; `crowd`'s rarest-chunk count fell from 10 to 8.5 and `strategic`'s fairness from 0.61 to 0.55. Strategic clients (D-166) now finish about 5% sooner than BitTorrent peers on the same seeds, down from the 15% recorded there, and the difference is no longer meaningful at 20 seeds (95% interval −26 s to +3 s), so `strategic::strategic_clients_download_faster_among_bittorrent_peers` fails: fast peers' spare upload now reaches everyone, which leaves less to gain by gaming them. **Open question for the owner:** whether to keep that test's claim, for example with more seeds or a more uneven swarm, or record the new result. Two validation tests (`rarest_first_keeps_every_chunk_when_the_origin_leaves` and `a_flash_crowd_finishes_near_the_bound`) already failed before this change.
+
+**Rationale:** Max-min fairness is what "share capacity fairly" means for flows, and what TCP and QUIC flows approach on access links. Working levels out only where they change keeps a change's cost near D-158's in large swarms.
+
+---
+
+## D-246: Golden baselines name their scenario file, and draws are the same everywhere
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A golden baseline (D-077) recorded only its scenario's name, so editing a golden scenario compared new runs with results of the old one. And world draws (arrivals, session lengths) used the platform's `ln`, `pow`, `exp` and `sin`, whose last bits differ between systems, so a seed could give different worlds on macOS and Linux.
+
+**Decision:**
+
+- A baseline saves the SHA-256 of its scenario file, as experiments record it. `tempest-sim baseline` refuses to check a scenario edited since its baseline was saved, and says to save new ones with `--update`. The results UI checks an experiment against a baseline only when both came from the same file; it lists the scenario's other experiments with the reason they weren't checked.
+- World draws use the pure-Rust `libm` crate, and a test pins exact draws.
+
+**Rationale:** A baseline is only meaningful for the scenario that produced it, and a seed should name the same world on every platform, including CI's.
+
+---
+
+## D-247: The transfers list draws only the rows in view
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The web UI's list drew a table row, with its signals, for every transfer. A client with ten thousand transfers built ten thousand rows.
+
+**Options:** keep every row; page the list; draw only the rows in view (chosen).
+
+**Decision:**
+
+- Rows have one fixed height (`web.css`), which the list measures from a drawn row. It draws the rows in view and ten either side, between a spacer row above and one below that stand in for the rest. Which rows show follows from the list body's place on screen, read on scroll, resize and when rows come or go.
+- The page keeps scrolling as a whole: the app bar and the hint bar stay where they are, and the list is not a scroll box of its own.
+- Moving the cursor scrolls the page just enough for its row to show clear of the app bar and the hint bar, or the navigation on phones; the first row scrolls to the top, bringing back the toolbar.
+- The table's `aria-rowcount` counts every transfer and each row has its `aria-rowindex`, so screen readers announce a row's place in the whole list. The spacers are hidden from them.
+
+**Rationale:** Paging would break "list first" and finding by scrolling. With fixed heights the window is a division, with no measuring per row, and a screenful of rows costs the same at any size: about 45 rows are drawn at any position, at 60 frames a second, with 10,000 transfers.
+
+---
+
+## D-248: Charts take the keyboard and touch
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The UI kit's charts answered only the mouse: hover for values, drag to zoom. The hint under each line chart said "drag to zoom" on phones too.
+
+**Decision:**
+
+- A chart's plot takes focus, as a group labeled with the chart's label and the role description "chart". The SVG is hidden from screen readers; a polite live region announces the sample a key or a tap chose, such as "-11s: download 12.9 MB/s, upload 1.19 MB/s".
+- Line chart keys: `←` `→` step the readout from sample to sample (ten with `shift`), `home` and `end` jump to either end and move a zoomed window to show the sample, `+` and `-` zoom about the readout, `0` shows all the data, and `esc` hides the readout (otherwise it closes the drawer, as before). Bar charts: `←` `→` `home` `end` move between bars.
+- Touch: a tap shows the readout and keeps it until another tap or the chart loses focus; two fingers pinch to zoom, keeping the values touched under the fingers; one finger pans a zoomed chart. Vertical scrolling stays the page's (`touch-action: pan-y`).
+- The hint names the gestures of the pointer in use (`hover: none` and `pointer: coarse` mean touch), and the keys while the chart has keyboard focus.
+- Stepping, zooming, panning and pinching are plain functions in `chart::navigate`, tested without a browser.
+
+**Rationale:** Every UI should work without a mouse (specs/interfaces.md). Pinching is what touch screens use for zooming, and keeping the touched values under the fingers makes it predictable.
+
+---
+
+## D-249: Errors are announced at once
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Every toast went into one `role="status"` region, which screen readers read only at a pause, so an error waited behind whatever was being read.
+
+**Decision:** Toasts with the bad tone go into a `role="alert"` region and are announced at once; the others stay in the polite `status` region. Both regions stay in the page while empty, so screen readers hear what is added, and they stack as one at the bottom right, errors nearest the corner.
+
+**Rationale:** An error needs the user's attention now; a confirmation can wait.
+
+---
+
+## D-250: The web UIs share their request layer and app shell through the UI kit
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The client web UI, the tracker website and the results UI each had a copy of the same `fetch`, decoding and error-sentence code. The tracker website and the results UI also copied their shell: the route kept in the address's `#`, the theme read from `?theme=` or the browser, fields synced to the address, the typing debounce and the rules a key passes before reaching the bindings table.
+
+**Decision:**
+
+- `tempest_ui_kit::request` holds the requests, generic over a `Server` each app names: its API's prefix, the body of its errors, what to call it and what to say when it doesn't answer. An app's `request` module is its `Server`, a `RequestError` alias and two thin wrappers.
+- Every write sends a JSON body, `{}` when it has nothing to say, as the tracker already required so that other sites' forms can't post to it.
+- `tempest_ui_kit::shell` holds the shared shell: `Address` (the route and the `#`, both ways), `use_theme`, `synced`, `debounce` and `page_keys`. Both apps now save the theme only once it is chosen, so the default applies until then, and wait 150 ms of quiet typing before searching.
+- The client web UI keeps its own shell: it has no address routes, and its keys depend on its focus scopes (D-202).
+
+**Rationale:** One copy of each rule, tested once, and the apps stay thin.
+
+---
+
+## D-251: The kit's stylesheet is one sheet per kind of component
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The UI kit's stylesheet had grown to 1,800 lines and the tracker website's to 1,000.
+
+**Options:** keep one file each; one sheet per component, linked by `@import` from an index sheet; one sheet per component, each linked by the apps' pages (chosen).
+
+**Decision:** The kit's sheets in `crates/ui-kit/style/` follow its modules: `themes`, `fonts`, `base`, `chrome`, `controls`, `fields`, `choices`, `marks`, `layout`, `tables`, `overlays`, `charts`, `chunkmap` and `effects`. The tracker website's, in `crates/tracker-web/style/`, are `frame`, `pages`, `browse`, `listing`, `account` and `narrow`. Each app's `index.html` links every sheet; trunk hashes each, so browsers cache them for good. A kit test checks that every app links every kit sheet in the same order, the themes first and the effects last.
+
+**Rationale:** `@import` chains a round trip after the first sheet, and trunk copies imported files without hashing them, so browsers would revalidate each on every load. Linking costs a line per sheet in four pages, which the test keeps in step.
+
+---
+
+## D-252: The API client lives in `tempest-api`, and the TUI no longer depends on the engine
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The TUI depended on `tempest-engine`, with SQLite, quinn and axum, only for the API client, `SettingsView` and the typed `EngineConfig`. The user agent was written out in four places, and the tracker client and the API client each built their own reqwest client with rustls and the platform verifier.
+
+**Options:** move `EngineConfig` into `tempest-api`, which would pull in `core` and `net` types; a separate client crate; the client in `tempest-api` behind a feature, with the TUI reading the settings clients already share (chosen).
+
+**Decision:**
+
+- `tempest-api`'s `client` feature adds `client`: `ApiClient`, its event stream and the server-sent events decoder. The web UI builds without it. The discovery file's format and names are in `tempest_api::discovery`, which the engine's server writes and the client reads.
+- `ApiClient`'s settings calls return `SettingsInfo`, the settings view the web UI already reads (D-200). The TUI uses it instead of `SettingsView` and `EngineConfig`. The engine keeps `SettingsView` as what it serves; the TUI's tests turn the engine's defaults into a `SettingsInfo` through JSON, which also checks that it reads what the engine sends.
+- `tempest-http-client` builds the HTTPS client both clients use: rustls on ring, trusting the platform's verifier or one pinned certificate, with Tempest's user agent. `tempest_protocol::CLIENT` is the one name and version string, sent in Hello and as the user agent.
+- `PEER_ALPN` moved to `tempest_protocol::message`, as `RELAY_ALPN` is in `tempest_protocol::relay`.
+
+**Rationale:** The TUI builds without the engine's dependencies, and every fact about the client's identity and TLS trust has one source.
+
+---
+
+## D-253: Standalone runs have keys of their own; `get` has a timed-out exit code
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Standalone `share` and `get` loaded the installation's key, which the daemon uses, so a standalone run beside a daemon, or two standalone runs, presented one peer ID from two places. `get` exited with 1 whether it failed or gave up waiting, and a daemon that took long to stop could not be stopped sooner. Hidden `tempest sim`, `tracker` and `relay` commands remained only to point to the programs that replaced them (D-214, D-236).
+
+**Options for the key:** a new key for every run, which breaks a share's link on restart, since links name the peer ID and connecting checks it; one file per bundle; a key derived from the installation's key and the bundle (chosen for shares).
+
+**Decision:**
+
+- Without `--identity`, `get` uses a new key per run, and `share` an Ed25519 key whose seed hashes the installation's key with the bundle ID: stable across restarts, different for each bundle and from the daemon's. `share --publish` keeps the installation's key, since a tracker attributes a listing to the key that asks for it (`protocol/trackers.md`). The installation's key is the one in the engine's data directory, so `--data-dir` applies.
+- `get` exits with 0 on success, 1 on failure, 2 for wrong arguments, 3 when no progress came within `--timeout`, and 130 when interrupted; its help lists them.
+- While the daemon or `tempest web` stops, a second Ctrl-C exits at once with 130, without telling trackers and peers.
+- The hidden moved-command stubs are gone; `tempest sim`, `tracker` and `relay` are unknown commands.
+- In the TUI, the add, rename, tags, move, value and form modals stay open until the engine accepts what they sent, and show a refusal in place rather than as a notice. A saved view's name closes at once, since views apply locally first.
+
+**Rationale:** One peer ID per running process, which peers, trackers and LAN discovery assume, without breaking links a share has printed. Scripts can tell giving up from failing.
+

@@ -1,24 +1,22 @@
-//! Modals drawn over the screen: help, the palette, the add form, confirmations, text prompts
-//! and pickers. The filter prompt lives in the footer instead (see `draw_footer`).
+//! Modals drawn over the screen: the add form, confirmations, text prompts, pickers and forms;
+//! help and the palette have modules of their own. The filter prompt lives in the footer instead (see `draw_footer`).
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use tempest_api::network;
 use unicode_width::UnicodeWidthStr;
 
+use super::help::draw_help;
+use super::palette::draw_palette;
 use super::{fit, form, rows};
 use crate::app::{AddField, AddForm, App, FormKind, Modal, PickKind, Target, TextKind, ValueEdit};
 use crate::columns::Column;
-use crate::commands::{self, Command};
 use crate::form::Form;
 use crate::input::Input;
 use crate::theme::Theme;
-use tempest_api::network;
-
-/// The most matches the palette lists at once.
-const PALETTE_ROWS: usize = 12;
 
 /// Draws the open modal over `area`, the whole screen.
 pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
@@ -196,201 +194,6 @@ pub(super) fn note_line<'a>(theme: &Theme, help: &'a str, error: Option<&'a str>
     match error {
         Some(error) => Line::styled(error, Style::new().fg(theme.bad)),
         None => Line::styled(help, Style::new().fg(theme.dim)),
-    }
-}
-
-/// The width of a column of help.
-const HELP_COLUMN: u16 = 36;
-
-/// The current screen's keys as blocks of lines, a section each.
-fn help_blocks(app: &App) -> Vec<Vec<Line<'static>>> {
-    const KEYS: usize = 9;
-    let theme = &app.theme;
-    let screen = app.screen();
-    app.help_sections()
-        .into_iter()
-        .map(|(section, commands)| {
-            let mut lines = vec![Line::styled(
-                section.title(),
-                Style::new().fg(theme.dim).add_modifier(Modifier::BOLD),
-            )];
-            lines.extend(
-                commands
-                    .into_iter()
-                    .filter_map(|c| c.help_line(screen))
-                    .map(|(keys, label)| {
-                        Line::from(vec![
-                            Span::styled(format!("{keys:>KEYS$}  "), Style::new().fg(theme.hot)),
-                            Span::styled(label, Style::new().fg(theme.fg)),
-                        ])
-                    }),
-            );
-            lines
-        })
-        .collect()
-}
-
-/// Help's columns for a screen of `area`, and how many rows of them show. As few columns as
-/// fit the screen, as even as whole sections allow; when even the most that fit side by side
-/// are taller than the screen, they scroll.
-fn help_columns(app: &App, area: Rect) -> (Vec<Vec<Line<'static>>>, usize) {
-    let blocks = help_blocks(app);
-    let rows = usize::from(area.height.saturating_sub(4)).max(1);
-    let most = usize::from(area.width.saturating_sub(3) / HELP_COLUMN).max(1);
-    let total: usize = blocks.iter().map(Vec::len).sum::<usize>() + blocks.len() - 1;
-    let count = pack(&blocks, rows).len();
-    if count <= most {
-        let even = (total.div_ceil(count)..rows)
-            .find(|rows| pack(&blocks, *rows).len() <= count)
-            .unwrap_or(rows);
-        return (pack(&blocks, even), rows);
-    }
-    let tall = (rows..=total)
-        .find(|rows| pack(&blocks, *rows).len() <= most)
-        .unwrap_or(total);
-    (pack(&blocks, tall), rows)
-}
-
-/// How many rows help can scroll on a screen of `area`.
-pub(super) fn help_overflow(app: &App, area: Rect) -> usize {
-    let (columns, rows) = help_columns(app, area);
-    let tallest = columns.iter().map(Vec::len).max().unwrap_or(0);
-    tallest.saturating_sub(rows)
-}
-
-fn draw_help(frame: &mut Frame, app: &App, area: Rect, scroll: usize) {
-    let theme = &app.theme;
-    let (columns, rows) = help_columns(app, area);
-    let tallest = columns.iter().map(Vec::len).max().unwrap_or(0);
-    let scroll = scroll.min(tallest.saturating_sub(rows));
-    let footnote = if tallest > rows {
-        "j/k scroll. Arrows, home, end and the page keys move too."
-    } else {
-        "Arrows, home, end and the page keys move too."
-    };
-    let height = tallest.min(rows) as u16 + 4;
-    let width = HELP_COLUMN * columns.len() as u16 + 3;
-    let title = format!("{} keys", app.screen_title());
-    let inner = popup(frame, theme, area, (width, height), &title);
-    let [body, _, footnote_area] = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(inner);
-    let areas = Layout::horizontal(vec![Constraint::Length(HELP_COLUMN); columns.len()])
-        .horizontal_margin(1)
-        .split(body);
-    for (column, area) in columns.into_iter().zip(areas.iter()) {
-        let lines: Vec<Line> = column.into_iter().skip(scroll).collect();
-        frame.render_widget(Paragraph::new(lines), *area);
-    }
-    frame.render_widget(
-        Paragraph::new(Line::styled(footnote, Style::new().fg(theme.dim))).centered(),
-        footnote_area,
-    );
-}
-
-/// `blocks` in columns of at most `rows` lines, a blank line between blocks, splitting none
-/// unless it is taller than a column.
-fn pack<'a>(blocks: &[Vec<Line<'a>>], rows: usize) -> Vec<Vec<Line<'a>>> {
-    let mut columns: Vec<Vec<Line>> = vec![Vec::new()];
-    for block in blocks {
-        let column = columns.last_mut().expect("there is a column");
-        if column.is_empty() {
-            column.extend(block.iter().cloned());
-        } else if column.len() + 1 + block.len() > rows {
-            columns.push(block.clone());
-        } else {
-            column.push(Line::raw(""));
-            column.extend(block.iter().cloned());
-        }
-    }
-    columns
-}
-
-fn draw_palette(frame: &mut Frame, app: &App, area: Rect, query: &Input, selected: usize) {
-    let theme = &app.theme;
-    let matches = commands::palette_matches(app.screen(), &query.text());
-    let rows = matches.len().clamp(1, PALETTE_ROWS);
-    let width = 56.min(area.width.saturating_sub(4));
-    let height = rows as u16 + 4;
-    // The palette sits near the top, where the eye already is after pressing `:`.
-    let top = Rect {
-        y: area.y + 2,
-        height: area.height.saturating_sub(2),
-        ..area
-    };
-    let [top] = Layout::vertical([Constraint::Length(height)]).areas(top);
-    let inner = popup(frame, theme, top, (width, height), "Commands");
-    let [input_row, rule_row, list] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(inner);
-    let [prompt, input_area] =
-        Layout::horizontal([Constraint::Length(2), Constraint::Min(1)]).areas(input_row);
-    frame.render_widget(
-        Paragraph::new(Span::styled(":", Style::new().fg(theme.hot))),
-        prompt,
-    );
-    draw_input(
-        frame,
-        theme,
-        input_area,
-        query,
-        "type to find a command",
-        true,
-    );
-    frame.render_widget(
-        Paragraph::new("─".repeat(usize::from(rule_row.width))).style(Style::new().fg(theme.line)),
-        rule_row,
-    );
-
-    if matches.is_empty() {
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                " No command matches.",
-                Style::new().fg(theme.dim),
-            )),
-            list,
-        );
-        return;
-    }
-    // Scroll so the highlighted match shows in the rows the popup has.
-    let shown = usize::from(list.height).clamp(1, rows);
-    let first = selected.saturating_sub(shown - 1);
-    let lines: Vec<Line> = matches
-        .iter()
-        .enumerate()
-        .skip(first)
-        .take(shown)
-        .map(|(index, command)| palette_row(app, *command, index == selected, list.width))
-        .collect();
-    frame.render_widget(Paragraph::new(lines), list);
-}
-
-fn palette_row(app: &App, command: Command, selected: bool, width: u16) -> Line<'static> {
-    let theme = &app.theme;
-    let keys = command.key_label(app.screen());
-    let label_width = usize::from(width).saturating_sub(keys.width() + 3);
-    let label = fit(command.label(), label_width);
-    let gap = usize::from(width).saturating_sub(label.width() + keys.width() + 2);
-    let color = if app.works(command) {
-        theme.fg
-    } else {
-        theme.faint
-    };
-    let line = Line::from(vec![
-        Span::styled(format!(" {label}"), Style::new().fg(color)),
-        Span::raw(" ".repeat(gap)),
-        Span::styled(format!("{keys} "), Style::new().fg(theme.dim)),
-    ]);
-    if selected {
-        line.style(highlight(theme))
-    } else {
-        line
     }
 }
 

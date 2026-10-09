@@ -192,10 +192,6 @@ enum Event {
         conn: ConnId,
         closed: Closed,
     },
-    FlowDone {
-        flow: FlowId,
-        stamp: u64,
-    },
 }
 
 /// One end of a connection.
@@ -474,7 +470,13 @@ impl<'a, 's> Simulation<'a, 's> {
         let interval = self.scenario.sample_interval;
         let mut next_sample = Time::ZERO + interval;
         while self.waiting > 0 {
-            let time = match self.queue.peek_time() {
+            // A flow finishing goes before events at the same time.
+            let finish = self.network.next_finish();
+            let next = match (finish, self.queue.peek_time()) {
+                (Some((at, _)), Some(time)) => Some(at.min(time)),
+                (finish, time) => finish.map(|(at, _)| at).or(time),
+            };
+            let time = match next {
                 Some(time) if time <= limit => time,
                 _ => {
                     self.now = limit;
@@ -490,10 +492,18 @@ impl<'a, 's> Simulation<'a, 's> {
                 self.sample(next_sample);
                 next_sample += interval;
             }
-            let (time, event) = self.queue.pop().expect("peeked");
             self.now = time;
             self.events += 1;
-            self.handle(event);
+            match finish {
+                Some((at, flow)) if at == time => {
+                    let transfer = self.network.end(time, flow);
+                    self.transfer_done(transfer);
+                }
+                _ => {
+                    let (_, event) = self.queue.pop().expect("peeked");
+                    self.handle(event);
+                }
+            }
         }
         self.finish()
     }
@@ -628,7 +638,6 @@ impl<'a, 's> Simulation<'a, 's> {
                     && let Some(flow) = self.uploads.remove(&(conn, stream))
                 {
                     self.network.end(now, flow);
-                    self.schedule_completions();
                 }
                 self.session(peer).handle_message(now, conn, inbound);
                 self.after(peer);
@@ -654,13 +663,6 @@ impl<'a, 's> Simulation<'a, 's> {
                 self.close_end(conn);
                 self.session(peer).handle_closed(now, conn, closed);
                 self.after(peer);
-            }
-            Event::FlowDone { flow, stamp } => {
-                if self.network.is_current(flow, stamp) {
-                    let transfer = self.network.end(now, flow);
-                    self.schedule_completions();
-                    self.transfer_done(transfer);
-                }
             }
         }
     }
@@ -1136,7 +1138,6 @@ impl<'a, 's> Simulation<'a, 's> {
             self.record(peer, now, Record::Upgraded { to: to as u32 });
             peers.push((peer, end, to));
         }
-        self.schedule_completions();
         // Each session measures the shorter round trip.
         for (peer, end, to) in peers {
             if self.present(peer) {
@@ -1243,7 +1244,6 @@ impl<'a, 's> Simulation<'a, 's> {
             .network
             .start_limited(self.now, from, to, bytes as u64, limit, transfer);
         self.uploads.insert((conn, stream), flow);
-        self.schedule_completions();
     }
 
     fn reject(&mut self, conn: ConnId, request: RequestId, reject: Reject) {
@@ -1305,17 +1305,6 @@ impl<'a, 's> Simulation<'a, 's> {
         for key in streams {
             let flow = self.uploads.remove(&key).expect("listed");
             self.network.end(self.now, flow);
-        }
-        self.schedule_completions();
-    }
-
-    fn schedule_completions(&mut self) {
-        for completion in self.network.take_completions() {
-            let event = Event::FlowDone {
-                flow: completion.flow,
-                stamp: completion.stamp,
-            };
-            self.queue.push(completion.at, event);
         }
     }
 }

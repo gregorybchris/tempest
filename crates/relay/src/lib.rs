@@ -3,14 +3,14 @@
 //! each peer its address as seen from the internet.
 //!
 //! - [`server`]: the [`Relay`] itself, over QUIC.
-//! - [`registry`]: who may register and which lent socket each holds, without I/O.
-//! - [`permissions`]: the forwarding rule, without I/O.
+//! - `registry`: who may register and which lent socket each holds, without I/O.
+//! - `permissions`: the forwarding rule, without I/O.
 //!
 //! The relay never sees inside the traffic it forwards, which stays end-to-end encrypted
 //! between the peers.
 
-pub mod permissions;
-pub mod registry;
+mod permissions;
+mod registry;
 pub mod server;
 
 pub use server::{DEFAULT_RATE_LIMIT, Relay, RelayConfig};

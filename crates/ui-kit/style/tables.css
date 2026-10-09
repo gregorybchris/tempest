@@ -1,0 +1,82 @@
+/* Tables and their sortable headers (`components::table`). */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  padding: 0 12px 6px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  white-space: nowrap;
+}
+
+/* Room for the selected row's accent bar, so the first column never touches it. */
+.table th:first-child,
+.table td:first-child {
+  padding-left: 10px;
+}
+
+.table th.num,
+.table td.num {
+  text-align: right;
+}
+
+.table tbody tr {
+  box-shadow: inset 2px 0 0 transparent;
+}
+
+.table tbody tr:hover {
+  background: var(--select);
+}
+
+.table tbody tr[aria-selected="true"] {
+  background: var(--select);
+  box-shadow: inset 2px 0 0 var(--down);
+}
+
+.table__clip {
+  max-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sort {
+  color: inherit;
+  white-space: nowrap;
+}
+
+.sort:hover,
+th[aria-sort] .sort {
+  color: var(--fg);
+}
+
+.sort::after {
+  display: inline-block;
+  width: 1.2em;
+  content: "";
+  text-align: center;
+}
+
+.sort[data-sort="ascending"]::after {
+  content: "▴";
+}
+
+.sort[data-sort="descending"]::after {
+  content: "▾";
+}

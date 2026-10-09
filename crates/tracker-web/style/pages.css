@@ -1,0 +1,123 @@
+/* What every page of the website shares. */
+
+.page {
+  display: grid;
+  gap: var(--gap-5);
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  padding: var(--gap-4) var(--gap-4) var(--gap-5);
+}
+
+.page__head {
+  display: grid;
+  gap: var(--gap-2);
+}
+
+.page__head p {
+  margin: 0;
+  max-width: 78ch;
+}
+
+.page__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 500;
+  color: var(--hot);
+  overflow-wrap: anywhere;
+}
+
+.section-title {
+  margin: 0 0 var(--gap-3);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.crumbs a {
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.crumbs__sep {
+  color: var(--faint);
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px var(--gap-4);
+  margin: 0 0 var(--gap-2);
+}
+
+.meta > div {
+  display: contents;
+}
+
+.meta dt {
+  color: var(--dim);
+}
+
+.meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: var(--gap-2) var(--gap-3);
+  border: 1px dashed var(--line);
+  color: var(--dim);
+}
+
+.linkish {
+  color: var(--down);
+  text-decoration: underline;
+}
+
+.tag {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+a.tag:hover {
+  color: var(--down);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.row--link {
+  cursor: pointer;
+}
+
+.row--link:hover {
+  background: var(--select);
+}
+
+.row--link a {
+  text-decoration: none;
+}

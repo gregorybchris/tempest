@@ -3,7 +3,7 @@
 //! The engine summarizes the chunks into as many cells as the client asks for (D-193). Each
 //! terminal cell shows two of them, one above the other, as a half block.
 
-use tempest_engine::inspect::CellInfo;
+use tempest_api::inspect::CellInfo;
 
 /// The screen's rows the full-screen map leaves for other things: the header, the rule below it,
 /// the title, the legend, the blank line under them and the hint bar.

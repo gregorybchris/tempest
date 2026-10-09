@@ -8,7 +8,6 @@
 
 use std::time::Duration;
 
-use rustls_platform_verifier::BuilderVerifierExt;
 use serde::de::DeserializeOwned;
 use tempest_protocol::message::PeerRecord;
 use tempest_protocol::tracker::{
@@ -93,14 +92,8 @@ impl TrackerClient {
     /// A client whose requests give up after `timeout`. HTTPS certificates are checked against
     /// the platform's trust store.
     pub fn new(timeout: Duration) -> Result<Self, TrackerError> {
-        let tls = rustls::ClientConfig::builder_with_provider(crate::tls::provider())
-            .with_safe_default_protocol_versions()?
-            .with_platform_verifier()?
-            .with_no_client_auth();
-        let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
+        let http = tempest_http_client::client_builder(tempest_http_client::Trust::Platform)?
             .timeout(timeout)
-            .user_agent(concat!("tempest/", env!("CARGO_PKG_VERSION")))
             .build()?;
         Ok(Self { http })
     }

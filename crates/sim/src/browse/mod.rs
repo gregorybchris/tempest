@@ -21,6 +21,7 @@ use tempest_sim_api::data::{
 };
 use tempest_sim_api::query::{ExperimentQuery, RunQuery};
 
+use crate::results::{Database, DatabaseError};
 use crate::summary::RunMetrics;
 
 pub use compare::{compare, compare_series};
@@ -31,7 +32,7 @@ pub use golden::{Baselines, baseline_report, baselines};
 pub enum BrowseError {
     /// DuckDB failed.
     #[error("results database: {0}")]
-    Database(#[from] duckdb::Error),
+    Database(#[from] DatabaseError),
     /// Something asked for isn't in the database.
     #[error("{0}")]
     NotFound(String),
@@ -40,23 +41,31 @@ pub enum BrowseError {
     Baseline(#[from] crate::baseline::BaselineError),
 }
 
+impl From<duckdb::Error> for BrowseError {
+    fn from(error: duckdb::Error) -> Self {
+        Self::Database(error.into())
+    }
+}
+
 type Result<T> = std::result::Result<T, BrowseError>;
 
 /// Experiments, filtered and sorted as `query` asks.
 pub fn experiments(
-    conn: &Connection,
+    db: &Database,
     query: &ExperimentQuery,
     baselines: &Baselines,
 ) -> Result<Vec<ExperimentInfo>> {
+    let conn = &*db.conn();
     let sql = sql::experiments(query);
-    let names = baselines.names()?;
+    let scenarios = baselines.scenarios()?;
     let mut statement = conn.prepare(&sql.text)?;
     let rows = statement.query_map(params_from_iter(&sql.params), read_experiment)?;
     let mut experiments = Vec::new();
     for row in rows {
         let (mut experiment, run_ids) = row?;
         experiment.logged = logged(conn, run_ids)?;
-        experiment.baseline = names.contains(&experiment.name);
+        experiment.baseline =
+            scenarios.checks(&experiment.name, experiment.scenario_sha256.as_deref());
         experiments.push(experiment);
     }
     Ok(experiments)
@@ -103,10 +112,11 @@ fn logged(conn: &Connection, run_ids: Option<(i64, i64)>) -> Result<bool> {
 
 /// An experiment with its variants and scenario, if there is one with ID `id`.
 pub fn experiment(
-    conn: &Connection,
+    db: &Database,
     id: i64,
     baselines: &Baselines,
 ) -> Result<Option<ExperimentDetail>> {
+    let conn = &*db.conn();
     let sql = format!(
         "SELECT {} FROM experiments e LEFT JOIN runs r USING (experiment_id)
          WHERE e.experiment_id = ?
@@ -119,7 +129,9 @@ pub fn experiment(
         return Ok(None);
     };
     experiment.logged = logged(conn, run_ids)?;
-    experiment.baseline = baselines.names()?.contains(&experiment.name);
+    experiment.baseline = baselines
+        .scenarios()?
+        .checks(&experiment.name, experiment.scenario_sha256.as_deref());
     let scenario: String = conn.query_row(
         "SELECT scenario::VARCHAR FROM experiments WHERE experiment_id = ?",
         [id],
@@ -164,7 +176,8 @@ fn settings(vary: &str) -> Vec<Setting> {
 }
 
 /// A page of runs, filtered and sorted as `query` asks.
-pub fn runs(conn: &Connection, query: &RunQuery) -> Result<RunList> {
+pub fn runs(db: &Database, query: &RunQuery) -> Result<RunList> {
+    let conn = &*db.conn();
     let (page, count) = sql::runs(query);
     let total: i64 = conn.query_row(&count.text, params_from_iter(&count.params), |row| {
         row.get(0)
@@ -221,7 +234,8 @@ fn run_info(conn: &Connection, id: i64) -> Result<Option<RunInfo>> {
 
 /// A run with its variant's settings, its peers by class and its traffic, if there is one
 /// with ID `id`.
-pub fn run(conn: &Connection, id: i64) -> Result<Option<RunDetail>> {
+pub fn run(db: &Database, id: i64) -> Result<Option<RunDetail>> {
+    let conn = &*db.conn();
     let Some(run) = run_info(conn, id)? else {
         return Ok(None);
     };
@@ -274,7 +288,8 @@ pub fn run(conn: &Connection, id: i64) -> Result<Option<RunDetail>> {
 }
 
 /// A run's peers, in order, if there is a run with ID `id`.
-pub fn peers(conn: &Connection, id: i64) -> Result<Option<Vec<PeerInfo>>> {
+pub fn peers(db: &Database, id: i64) -> Result<Option<Vec<PeerInfo>>> {
+    let conn = &*db.conn();
     if run_info(conn, id)?.is_none() {
         return Ok(None);
     }
@@ -312,7 +327,8 @@ const THROUGHPUT_BINS: f64 = 120.0;
 
 /// A run over time, if there is a run with ID `id`: its chunks' availability, its
 /// completions, and, when its event log was recorded, the Data it sent per second.
-pub fn series(conn: &Connection, id: i64) -> Result<Option<RunSeries>> {
+pub fn series(db: &Database, id: i64) -> Result<Option<RunSeries>> {
+    let conn = &*db.conn();
     let Some(run) = run_info(conn, id)? else {
         return Ok(None);
     };

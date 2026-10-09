@@ -1,8 +1,8 @@
 //! Experiments checked against the golden baselines (D-077, D-171): an experiment whose
-//! scenario has a baseline's name is compared with it on the seeds both have, as
-//! `tempest-sim baseline` would.
+//! scenario has a baseline's name, and came from the same version of its file, is compared
+//! with it on the seeds both have, as `tempest-sim baseline` would.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use duckdb::Connection;
@@ -12,6 +12,7 @@ use tempest_sim_api::data::{
 
 use super::{BrowseError, Result, measured};
 use crate::baseline::{self, Baseline, BaselineError, QUICK_SEEDS};
+use crate::results::Database;
 use crate::stats::Bootstrap;
 
 /// Where the golden baselines are, if anywhere. They are read afresh for every answer, so an
@@ -48,31 +49,59 @@ impl Baselines {
         Ok(baselines)
     }
 
-    /// The scenarios that have baselines.
-    pub fn names(&self) -> Result<BTreeSet<String>> {
-        Ok(self.load()?.into_keys().collect())
+    /// The scenario files that have baselines: each scenario's name and its file's hash.
+    pub(super) fn scenarios(&self) -> Result<Scenarios> {
+        let baselines = self.load()?;
+        Ok(Scenarios(
+            baselines
+                .into_iter()
+                .map(|(name, (_, baseline))| (name, baseline.scenario_sha256))
+                .collect(),
+        ))
     }
 }
+
+/// The scenario files that have baselines, by name, with their hashes.
+pub(super) struct Scenarios(BTreeMap<String, String>);
+
+impl Scenarios {
+    /// Whether an experiment of the scenario `name`, from a file with hash `sha256`, has a
+    /// baseline: one of the same name saved from the same file.
+    pub(super) fn checks(&self, name: &str, sha256: Option<&str>) -> bool {
+        self.0
+            .get(name)
+            .is_some_and(|saved| sha256 == Some(saved.as_str()))
+    }
+}
+
+/// What keeps an experiment from being checked against the baseline of its scenario's name.
+const EDITED: &str = "its scenario file differs from the one the baseline was saved from";
 
 fn display(path: &Path) -> String {
     path.display().to_string()
 }
 
 /// Experiment `id` checked against the baseline of its scenario's name, or `None` if it has
-/// none. A missing experiment is [`BrowseError::NotFound`].
+/// none or the baseline was saved from another version of its scenario file. A missing
+/// experiment is [`BrowseError::NotFound`].
 pub fn baseline_report(
-    conn: &Connection,
+    db: &Database,
     id: i64,
     baselines: &Baselines,
 ) -> Result<Option<BaselineReport>> {
-    let name: Option<String> = duckdb::OptionalExt::optional(conn.query_row(
-        "SELECT name FROM experiments WHERE experiment_id = ?",
+    let conn = &*db.conn();
+    let found: Option<(String, Option<String>)> = duckdb::OptionalExt::optional(conn.query_row(
+        "SELECT name, scenario_sha256 FROM experiments WHERE experiment_id = ?",
         [id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     ))?;
-    let name = name.ok_or_else(|| BrowseError::NotFound(format!("there is no experiment {id}")))?;
+    let (name, sha256) =
+        found.ok_or_else(|| BrowseError::NotFound(format!("there is no experiment {id}")))?;
     let mut all = baselines.load()?;
-    let Some((path, baseline)) = all.remove(&name) else {
+    let Some((path, baseline)) = all
+        .remove(&name)
+        .filter(|(_, b)| sha256.as_deref() == Some(b.scenario_sha256.as_str()))
+    else {
         return Ok(None);
     };
     Ok(Some(report(conn, id, &name, &path, &baseline)?))
@@ -145,20 +174,34 @@ fn report(
 }
 
 /// Every golden baseline, with the experiments of its scenario and how each fared.
-pub fn baselines(conn: &Connection, baselines: &Baselines) -> Result<Vec<BaselineInfo>> {
+pub fn baselines(db: &Database, baselines: &Baselines) -> Result<Vec<BaselineInfo>> {
+    let conn = &*db.conn();
     let mut statement = conn.prepare(
-        "SELECT experiment_id, strftime(created_at, '%Y-%m-%d %H:%M:%S'), git_commit
+        "SELECT experiment_id, strftime(created_at, '%Y-%m-%d %H:%M:%S'), git_commit,
+            scenario_sha256
          FROM experiments WHERE name = ? ORDER BY experiment_id DESC",
     )?;
     let mut infos = Vec::new();
     for (scenario, (path, baseline)) in baselines.load()? {
-        let found: Vec<(i64, String, Option<String>)> = statement
+        type Found = (i64, String, Option<String>, Option<String>);
+        let found: Vec<Found> = statement
             .query_map([&scenario], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?
             .collect::<duckdb::Result<_>>()?;
         let mut experiments = Vec::new();
-        for (id, created_at, git_commit) in found {
+        for (id, created_at, git_commit, sha256) in found {
+            if sha256.as_deref() != Some(baseline.scenario_sha256.as_str()) {
+                experiments.push(BaselineOutcome {
+                    experiment: id,
+                    created_at,
+                    git_commit,
+                    regressed: 0,
+                    improved: 0,
+                    problem: Some(EDITED.to_owned()),
+                });
+                continue;
+            }
             let report = report(conn, id, &scenario, &path, &baseline)?;
             let checks = || report.variants.iter().flat_map(|v| &v.checks);
             let compared = report.variants.iter().any(|v| !v.seeds.is_empty());

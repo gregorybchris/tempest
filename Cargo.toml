@@ -13,20 +13,21 @@ authors = ["Chris Gregory"]
 rust-version = "1.99"
 
 [workspace.dependencies]
-tempest-protocol = { path = "crates/protocol", version = "0.1.0" }
-tempest-api = { path = "crates/api", version = "0.1.0" }
-tempest-sim-api = { path = "crates/sim-api", version = "0.1.0" }
-tempest-tracker-api = { path = "crates/tracker-api", version = "0.1.0" }
-tempest-core = { path = "crates/core", version = "0.1.0" }
-tempest-sim = { path = "crates/sim", version = "0.1.0" }
-tempest-assets = { path = "crates/assets", version = "0.1.0" }
-tempest-net = { path = "crates/net", version = "0.1.0" }
-tempest-tracker = { path = "crates/tracker", version = "0.1.0" }
-tempest-engine = { path = "crates/engine", version = "0.1.0" }
-tempest-http = { path = "crates/http", version = "0.1.0" }
-tempest-relay = { path = "crates/relay", version = "0.1.0" }
-tempest-tui = { path = "crates/tui", version = "0.1.0" }
-tempest-ui-kit = { path = "crates/ui-kit", version = "0.1.0" }
+tempest-protocol = { path = "crates/protocol" }
+tempest-api = { path = "crates/api" }
+tempest-sim-api = { path = "crates/sim-api" }
+tempest-tracker-api = { path = "crates/tracker-api" }
+tempest-core = { path = "crates/core" }
+tempest-http-client = { path = "crates/http-client" }
+tempest-sim = { path = "crates/sim" }
+tempest-assets = { path = "crates/assets" }
+tempest-net = { path = "crates/net" }
+tempest-tracker = { path = "crates/tracker" }
+tempest-engine = { path = "crates/engine" }
+tempest-http = { path = "crates/http" }
+tempest-relay = { path = "crates/relay" }
+tempest-tui = { path = "crates/tui" }
+tempest-ui-kit = { path = "crates/ui-kit" }
 
 anyhow = "1"
 # Local time for the alternative speed limits' schedule.
@@ -54,6 +55,8 @@ thiserror = "2"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 unicode-normalization = "0.1"
+# Pure-Rust math, so the simulator draws the same worlds on every platform.
+libm = "0.2"
 
 # Network interfaces' addresses, to advertise in links.
 if-addrs = "0.15"

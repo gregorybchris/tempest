@@ -1,16 +1,15 @@
 //! The page: the app bar, the view the address names, the hint bar, and the keyboard, theme,
 //! tracker info and session behind them.
 
-use leptos::ev;
 use leptos::html::Input;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use tempest_tracker_api::TrackerInfo;
 use tempest_tracker_api::account::Account;
+use tempest_ui_kit::Theme;
 use tempest_ui_kit::components::*;
-use tempest_ui_kit::theme::{ThemeButton, apply_look};
-use tempest_ui_kit::{Look, Theme};
-use wasm_bindgen::JsCast;
+use tempest_ui_kit::shell::{Address, PageKey, page_keys, use_theme};
+use tempest_ui_kit::theme::ThemeButton;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::browse::BrowsePage;
@@ -52,8 +51,7 @@ impl Me {
 pub struct Ctx {
     /// The view shown, as the address names it.
     pub route: RwSignal<Route>,
-    /// Whether the next change of route replaces the browser's history entry.
-    replace_next: StoredValue<bool>,
+    address: Address<Route>,
     /// The theme.
     pub theme: RwSignal<Theme>,
     /// The tracker's categories and rules, once it answers.
@@ -73,15 +71,12 @@ pub struct Ctx {
 impl Ctx {
     /// Shows `route`, as a new entry in the browser's history.
     pub fn go(&self, route: Route) {
-        self.route.set(route);
+        self.address.go(route);
     }
 
     /// Shows `route` in place of the current entry, as the search does while it is typed.
     pub fn replace(&self, route: Route) {
-        if self.route.with_untracked(|r| *r != route) {
-            self.replace_next.set_value(true);
-            self.route.set(route);
-        }
+        self.address.replace(route);
     }
 
     /// Opens the sign-in view, returning to the current view once signed in.
@@ -144,53 +139,9 @@ pub fn use_ctx() -> Ctx {
     expect_context()
 }
 
-/// A local signal that follows `from`, and hands its own changes to `to`: for a field that
-/// edits part of the address.
-pub fn synced<T>(from: Memo<T>, to: impl Fn(T) + 'static) -> RwSignal<T>
-where
-    T: Clone + PartialEq + Send + Sync + 'static,
-{
-    let local = RwSignal::new(from.get_untracked());
-    Effect::new(move |_| {
-        let value = from.get();
-        if local.with_untracked(|l| *l != value) {
-            local.set(value);
-        }
-    });
-    Effect::new(move |_| {
-        let value = local.get();
-        if from.with_untracked(|f| *f != value) {
-            to(value);
-        }
-    });
-    local
-}
-
-/// Runs `then` a moment after the last call, so typing doesn't ask the tracker at every key.
-pub fn debounce(then: impl FnOnce() + 'static) {
-    thread_local! {
-        static PENDING: std::cell::Cell<Option<TimeoutHandle>> = const { std::cell::Cell::new(None) };
-    }
-    PENDING.with(|pending| {
-        if let Some(handle) = pending.take() {
-            handle.clear();
-        }
-        let handle = set_timeout_with_handle(then, std::time::Duration::from_millis(120)).ok();
-        pending.set(handle);
-    });
-}
-
 /// Now, in seconds since the Unix epoch.
 pub fn unix_now() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
-}
-
-fn storage() -> Option<web_sys::Storage> {
-    window().local_storage().ok().flatten()
-}
-
-fn current_hash() -> String {
-    window().location().hash().unwrap_or_default()
 }
 
 /// The whole page.
@@ -205,10 +156,11 @@ pub fn App() -> impl IntoView {
 
 #[component]
 fn Shell() -> impl IntoView {
+    let address = Address::follow();
     let ctx = Ctx {
-        route: RwSignal::new(Route::parse(&current_hash())),
-        replace_next: StoredValue::new(false),
-        theme: RwSignal::new(initial_theme()),
+        route: address.route,
+        address,
+        theme: use_theme(THEME_KEY),
         info: RwSignal::new(None),
         me: RwSignal::new(Me::Unknown),
         after_sign_in: StoredValue::new(Route::default()),
@@ -217,8 +169,6 @@ fn Shell() -> impl IntoView {
         now: RwSignal::new(unix_now()),
     };
     provide_context(ctx);
-    follow_address(ctx);
-    keep_look(ctx);
     keyboard(ctx);
     load_info(ctx);
     ctx.refresh_me();
@@ -332,67 +282,6 @@ fn load_info(ctx: Ctx) {
     });
 }
 
-/// Keeps the route and the address's `#` in step, both ways.
-fn follow_address(ctx: Ctx) {
-    let handle = window_event_listener(ev::hashchange, move |_| {
-        let route = Route::parse(&current_hash());
-        if ctx.route.with_untracked(|r| *r != route) {
-            ctx.route.set(route);
-        }
-    });
-    on_cleanup(move || handle.remove());
-    Effect::new(move |_| {
-        let hash = ctx.route.with(Route::hash);
-        let replace = ctx.replace_next.get_value();
-        ctx.replace_next.set_value(false);
-        if current_hash() == hash {
-            return;
-        }
-        let location = window().location();
-        let _ = if replace {
-            location.replace(&hash)
-        } else {
-            location.set_hash(&hash)
-        };
-    });
-}
-
-/// The theme: `?theme=` in the address, or the one last chosen in this browser, or else the
-/// default, green (D-135).
-fn initial_theme() -> Theme {
-    let search = window().location().search().unwrap_or_default();
-    let asked = search
-        .trim_start_matches('?')
-        .split('&')
-        .find_map(|p| p.strip_prefix("theme="))
-        .and_then(Theme::named);
-    let saved = || {
-        storage()?
-            .get_item(THEME_KEY)
-            .ok()
-            .flatten()
-            .and_then(|n| Theme::named(&n))
-    };
-    asked.or_else(saved).unwrap_or_default()
-}
-
-fn keep_look(ctx: Ctx) {
-    apply_look(Signal::derive(move || Look {
-        theme: ctx.theme.get(),
-        ..Look::default()
-    }));
-    // Saved only once chosen, so the default applies until then.
-    Effect::new(move |previous: Option<Theme>| {
-        let theme = ctx.theme.get();
-        if previous.is_some_and(|p| p != theme)
-            && let Some(storage) = storage()
-        {
-            let _ = storage.set_item(THEME_KEY, theme.name());
-        }
-        theme
-    });
-}
-
 /// Focuses the search field once it exists.
 pub fn focus_search(ctx: Ctx) {
     request_animation_frame(move || {
@@ -405,33 +294,17 @@ pub fn focus_search(ctx: Ctx) {
 
 /// The keyboard: one listener, reading the bindings table.
 fn keyboard(ctx: Ctx) {
-    let handle = window_event_listener(ev::keydown, move |e| {
-        if e.ctrl_key() || e.meta_key() || e.alt_key() || e.default_prevented() {
-            return;
-        }
-        let target = e
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-        let typing = target.as_ref().is_some_and(takes_keys);
-        if e.key() == "Escape" {
-            if typing {
-                if let Some(field) = target.and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
-                {
-                    let _ = field.blur();
+    page_keys(move |e, key| {
+        let key = match key {
+            PageKey::Back => {
+                if let Some(up) = ctx.route.with_untracked(Route::up) {
+                    ctx.go(up);
                 }
-            } else if let Some(up) = ctx.route.with_untracked(Route::up) {
-                ctx.go(up);
+                return;
             }
-            return;
-        }
-        // Enter on a link or button is the browser's.
-        let on_control = target
-            .as_ref()
-            .is_some_and(|t| matches!(t.tag_name().as_str(), "A" | "BUTTON"));
-        if typing || (e.key() == "Enter" && on_control) {
-            return;
-        }
-        let Some(command) = ctx.route.with_untracked(|r| keys::command(r, &e.key())) else {
+            PageKey::Key(key) => key,
+        };
+        let Some(command) = ctx.route.with_untracked(|r| keys::command(r, &key)) else {
             return;
         };
         e.prevent_default();
@@ -450,7 +323,6 @@ fn keyboard(ctx: Ctx) {
             command => ctx.pressed.update(|p| *p = (Some(command), p.1 + 1)),
         }
     });
-    on_cleanup(move || handle.remove());
 }
 
 /// Runs `then` with each key command a view handles, as it is pressed.

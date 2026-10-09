@@ -1,6 +1,6 @@
 //! `tempest share` and `tempest get` as separate processes on localhost.
 
-use crate::common::{self, Running, lines};
+use crate::common::{self, COMMAND_LIMIT, OutputWithin, Running, lines};
 use std::fs;
 use std::net::UdpSocket;
 use std::path::Path;
@@ -90,7 +90,7 @@ fn get(link: &str, output: &Path, identity: &Path, extra: &[&str]) -> Output {
         .arg("--identity")
         .arg(identity)
         .args(extra)
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap()
 }
 
@@ -286,7 +286,7 @@ fn get_gives_up_on_an_unreachable_sharer() {
         &identity,
         &["--timeout", "1", "--no-lan"],
     );
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(3), "timing out has its own code");
     let message = stderr(&output);
     assert!(
         message.contains(&format!(
@@ -320,8 +320,29 @@ fn get_gives_up_when_nobody_on_the_local_network_has_the_bundle() {
 }
 
 #[test]
+fn get_documents_its_exit_codes() {
+    let output = tempest()
+        .args(["get", "--help"])
+        .output_within(COMMAND_LIMIT)
+        .unwrap();
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(help.contains("3    no progress within --timeout"), "{help}");
+}
+
+#[test]
+fn the_moved_server_commands_are_gone() {
+    for command in ["sim", "tracker", "relay"] {
+        let output = tempest().arg(command).output_within(COMMAND_LIMIT).unwrap();
+        assert_eq!(output.status.code(), Some(2), "{command} is unknown");
+    }
+}
+
+#[test]
 fn the_default_port_is_4773() {
-    let output = tempest().args(["share", "--help"]).output().unwrap();
+    let output = tempest()
+        .args(["share", "--help"])
+        .output_within(COMMAND_LIMIT)
+        .unwrap();
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("[default: 4773]"), "{help}");
 }

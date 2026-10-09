@@ -6,12 +6,16 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 leptos.workspace = true
 leptos-use.workspace = true
 send_wrapper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = [
   "Document",
   "DomRect",
@@ -20,16 +24,21 @@ web-sys = { workspace = true, features = [
   "Event",
   "File",
   "FileList",
+  "Headers",
   "HtmlCollection",
   "HtmlElement",
   "HtmlInputElement",
   "KeyboardEvent",
+  "Location",
   "MouseEvent",
   "Node",
   "NodeList",
   "PointerEvent",
+  "RequestInit",
   "ResizeObserver",
   "ResizeObserverEntry",
+  "Response",
+  "Storage",
   "Window",
 ] }
 

@@ -7,7 +7,21 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// The first line `stdout` prints, read on another thread so a server that prints nothing fails
+/// the test instead of hanging it.
+fn first_line(stdout: impl Read + Send + 'static) -> String {
+    let (sent, printed) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = sent.send(line);
+    });
+    printed
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the server prints its address")
+}
 
 /// Stops the server when the test ends, however it ends.
 struct Server(Child);
@@ -63,8 +77,7 @@ fn serves_the_api_and_the_page() {
         .unwrap();
     let stdout = child.stdout.take().unwrap();
     let _server = Server(child);
-    let mut url = String::new();
-    BufReader::new(stdout).read_line(&mut url).unwrap();
+    let url = first_line(stdout);
     let address = url
         .trim()
         .strip_prefix("http://")
@@ -85,4 +98,34 @@ fn serves_the_api_and_the_page() {
     let (status, body) = get(&address, "/");
     assert_eq!(status, 200);
     assert!(body.contains("<html"), "{body}");
+}
+
+#[test]
+fn stops_on_sigterm() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tempest-sim"))
+        .args(["web", "--no-open", "--listen", "127.0.0.1:0", "--db"])
+        .arg(dir.path().join("results.duckdb"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // The address is printed once the server listens, after the signal handler is set.
+    let stdout = child.stdout.take().unwrap();
+    let mut server = Server(child);
+    let line = first_line(stdout);
+    assert!(line.starts_with("http://"), "{line:?}");
+
+    let pid = server.0.id().to_string();
+    let killed = Command::new("kill").args(["-TERM", &pid]).status().unwrap();
+    assert!(killed.success());
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(status) = server.0.try_wait().unwrap() {
+            assert!(status.success(), "{status:?}");
+            return;
+        }
+        assert!(Instant::now() < deadline, "still serving after SIGTERM");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

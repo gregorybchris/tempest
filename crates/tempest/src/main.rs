@@ -30,6 +30,7 @@ enum Command {
     /// served from here until Ctrl-C.
     Share(share::ShareArgs),
     /// Download a bundle from a link, through the daemon if one is running.
+    #[command(after_help = get::EXIT_CODES)]
     Get(get::GetArgs),
     /// Show the engine's transfers.
     List(transfers::ListArgs),
@@ -48,9 +49,6 @@ enum Command {
     /// Run the engine, which does every transfer and serves the API that the CLI and UIs use,
     /// and the web UI.
     Daemon(daemon::DaemonArgs),
-    /// Moved to the `tempest-sim` binary (D-214).
-    #[command(hide = true)]
-    Sim(MovedArgs),
     /// List a transfer on a tracker, or change its listing.
     Publish(publish::PublishArgs),
     /// Remove a transfer's listing from a tracker, and stop asking the tracker to list it.
@@ -58,20 +56,6 @@ enum Command {
     /// Sign a browser in to a tracker's website: sign the code the website shows with this
     /// installation's key.
     SignIn(publish::SignInArgs),
-    /// Moved to the `tempest-tracker` binary (D-236).
-    #[command(hide = true)]
-    Tracker(MovedArgs),
-    /// Moved to the `tempest-relay` binary (D-236).
-    #[command(hide = true)]
-    Relay(MovedArgs),
-}
-
-/// What `tempest sim`, `tempest tracker` and `tempest relay` were given; they only point to the
-/// program that replaced them.
-#[derive(Debug, clap::Args)]
-struct MovedArgs {
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
-    _args: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -90,24 +74,19 @@ fn main() -> ExitCode {
         Command::Tui(args) => tui::tui(args),
         Command::Web(args) => web::web(args),
         Command::Daemon(args) => daemon::daemon(args),
-        Command::Sim(_) => Err(anyhow::anyhow!(
-            "the simulator is now its own program: run `tempest-sim` with the same arguments"
-        )),
         Command::Publish(args) => publish::publish(args),
         Command::Unpublish(args) => publish::unpublish(args),
         Command::SignIn(args) => publish::sign_in(args),
-        Command::Tracker(_) => Err(anyhow::anyhow!(
-            "the tracker is now its own program: run `tempest-tracker` with the same arguments"
-        )),
-        Command::Relay(_) => Err(anyhow::anyhow!(
-            "the relay is now its own program: run `tempest-relay` with the same arguments"
-        )),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) if error.is::<progress::Interrupted>() => {
             eprintln!("{error}");
             ExitCode::from(130)
+        }
+        Err(error) if error.is::<progress::TimedOut>() => {
+            eprintln!("error: {}", message(&error));
+            ExitCode::from(progress::TimedOut::EXIT_CODE)
         }
         Err(error) => {
             eprintln!("error: {}", message(&error));

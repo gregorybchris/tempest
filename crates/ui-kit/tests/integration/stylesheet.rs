@@ -1,13 +1,19 @@
-//! Checks on the stylesheet that no compiler makes: every theme defines the same tokens, text
-//! keeps 4.5:1 contrast and chart colors 3:1 (WCAG 2.2, 1.4.3 and 1.4.11), and the fonts it
-//! names exist.
+//! Checks on the stylesheets that no compiler makes: every theme defines the same tokens, text
+//! keeps 4.5:1 contrast and chart colors 3:1 (WCAG 2.2, 1.4.3 and 1.4.11), the fonts they name
+//! exist, and every app links every sheet, in the same order.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use tempest_ui_kit::Theme;
 
-const CSS: &str = include_str!("../../style/tempest.css");
+const CSS: &str = include_str!("../../style/themes.css");
+
+/// The kit's sheets.
+fn style() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("style")
+}
 
 /// Colors that text is drawn in.
 const TEXT: [&str; 7] = ["fg", "dim", "down", "up", "hot", "warn", "bad"];
@@ -93,8 +99,8 @@ fn text_and_series_colors_keep_their_contrast() {
 
 #[test]
 fn the_fonts_exist() {
-    let style = Path::new(env!("CARGO_MANIFEST_DIR")).join("style");
-    let urls: Vec<_> = CSS
+    let css = fs::read_to_string(style().join("fonts.css")).unwrap();
+    let urls: Vec<_> = css
         .split("url(\"")
         .skip(1)
         .filter_map(|rest| rest.split_once('"'))
@@ -102,6 +108,50 @@ fn the_fonts_exist() {
         .collect();
     assert!(!urls.is_empty());
     for url in urls {
-        assert!(style.join(url).is_file(), "{url} is missing");
+        assert!(style().join(url).is_file(), "{url} is missing");
+    }
+}
+
+/// The kit's sheets an app's page links, in order.
+fn linked(page: &str) -> Vec<String> {
+    page.split("href=\"../ui-kit/style/")
+        .skip(1)
+        .filter_map(|rest| rest.split_once('"'))
+        .map(|(sheet, _)| sheet.to_owned())
+        .filter(|sheet| sheet.ends_with(".css"))
+        .collect()
+}
+
+#[test]
+fn every_app_links_every_sheet_in_the_same_order() {
+    let sheets: BTreeSet<String> = fs::read_dir(style())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.ends_with(".css"))
+        .collect();
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut orders = BTreeMap::new();
+    for entry in fs::read_dir(crates).unwrap() {
+        let page = entry.unwrap().path().join("index.html");
+        let Ok(text) = fs::read_to_string(&page) else {
+            continue;
+        };
+        let order = linked(&text);
+        if !order.is_empty() {
+            orders.insert(page.display().to_string(), order);
+        }
+    }
+    assert!(orders.len() >= 4, "{orders:?}");
+    let (first, order) = orders.iter().next().unwrap();
+    assert_eq!(
+        order.iter().cloned().collect::<BTreeSet<_>>(),
+        sheets,
+        "{first} doesn't link every sheet"
+    );
+    // The themes' tokens come first and the effects, over everything, last.
+    assert_eq!(order.first().map(String::as_str), Some("themes.css"));
+    assert_eq!(order.last().map(String::as_str), Some("effects.css"));
+    for (page, other) in &orders {
+        assert_eq!(other, order, "{page} and {first} differ");
     }
 }

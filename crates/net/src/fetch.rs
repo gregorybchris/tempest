@@ -129,7 +129,7 @@ async fn request(
     let hello = Hello {
         bundle_id: bundle,
         capabilities: Vec::new(),
-        client: concat!("tempest/", env!("CARGO_PKG_VERSION")).to_owned(),
+        client: tempest_protocol::CLIENT.to_owned(),
         max_request_chunks: 1,
         max_open_requests: 1,
         addresses: Vec::new(),

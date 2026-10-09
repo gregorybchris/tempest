@@ -1,5 +1,6 @@
 //! `tempest share --dry-run` on a real folder.
 
+use crate::common::{COMMAND_LIMIT, OutputWithin};
 use std::fs::{self, File};
 use std::path::Path;
 use std::process::{Command, Output};
@@ -11,7 +12,7 @@ fn tempest(args: &[&str], path: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_tempest"))
         .args(args)
         .arg(path)
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap()
 }
 

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use tempest_engine::api::client::{ApiClient, ClientError};
+use tempest_api::client::{ApiClient, ClientError};
 use tempest_engine::config::default_data_dir;
 use tempest_engine::{Engine, EngineConfig, EngineError, TransferInfo};
 use tempest_protocol::BundleId;

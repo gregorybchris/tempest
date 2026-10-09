@@ -30,7 +30,7 @@ Protocol-level alternatives, such as a flat-hash variant for comparison with Mer
 
 ## Network model
 
-- **Message-level (first):** each link has bandwidth, latency and loss. A message arrives after `size ÷ available bandwidth + latency`, and links share capacity fairly. It scales to about 10,000 peers on one machine (D-069, D-071). How capacity is shared, and how loss and ordering work, is in D-158.
+- **Message-level (first):** each link has bandwidth, latency and loss. A message arrives after `size ÷ available bandwidth + latency`, and flows share capacity max-min fairly (D-245). It scales to about 10,000 peers on one machine (D-069, D-071). How loss and ordering work is in D-158.
 - **Packet-level (later):** real QUIC (`quinn-proto`, itself sans-IO) runs through the simulated network, for small validation scenarios.
 
 ## What the first version models (D-070)
@@ -98,7 +98,7 @@ A varied key is either a setting for every peer, as above, or a field of one cla
 ## Quality checks
 
 - **Validation milestone (D-078):** reproduce the classic results of Bharambe et al. and Legout et al. before trusting new conclusions. The scenarios are in [`crates/sim/scenarios/validation/`](../crates/sim/scenarios/validation/), and `crates/sim/tests/integration/validation.rs` checks each result with the statistics above; the outcome is under [Validation](#validation).
-- **Regression scenarios (D-077):** a small set of fast golden scenarios, one per model feature, in [`crates/sim/scenarios/golden/`](../crates/sim/scenarios/golden/), each checked against its saved baseline. A quick check of a few seeds runs with every change; `tempest-sim baseline --long` runs every saved seed and compares seed by seed, and `--update` rewrites the baselines after a deliberate change (D-163, D-171).
+- **Regression scenarios (D-077):** a small set of fast golden scenarios, one per model feature, in [`crates/sim/scenarios/golden/`](../crates/sim/scenarios/golden/), each checked against its saved baseline, which names the version of the scenario file it came from (D-246). A quick check of a few seeds runs with every change; `tempest-sim baseline --long` runs every saved seed and compares seed by seed, and `--update` rewrites the baselines after a deliberate change (D-163, D-171).
 - **Determinism check:** same seed, same event log. CI runs the 1,000-peer swarm, an example of the router model and every golden scenario twice in separate processes and compares the digests of their logs (D-163).
 
 ## Validation

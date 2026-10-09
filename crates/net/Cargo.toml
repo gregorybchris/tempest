@@ -6,10 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 tempest-tracker-api.workspace = true
 tempest-core.workspace = true
+tempest-http-client.workspace = true
 tempest-protocol.workspace = true
 
 fs4.workspace = true
@@ -21,7 +23,6 @@ quinn.workspace = true
 reqwest.workspace = true
 ring.workspace = true
 rustls.workspace = true
-rustls-platform-verifier.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true

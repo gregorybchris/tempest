@@ -1,7 +1,7 @@
 //! Tempest's engine: the long-running part of the client that does every transfer (D-079).
 //!
 //! - [`config`]: the YAML config file, with session settings as a profile plus overrides.
-//! - [`store`]: saved state in SQLite: transfers, verified chunks, categories, settings and
+//! - `store`: saved state in SQLite: transfers, verified chunks, categories, settings and
 //!   known peers.
 //! - [`Engine`]: a handle to the engine task, which owns one [`Node`](tempest_net::Node), LAN
 //!   discovery and a tracker client, and runs transfers through the queue.
@@ -22,6 +22,8 @@ mod queue;
 pub mod reveal;
 pub mod schedule;
 mod status;
+// Public only so integration tests can set up states a crash would leave.
+#[doc(hidden)]
 pub mod store;
 
 pub use config::EngineConfig;

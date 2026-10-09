@@ -1,11 +1,13 @@
 //! Random draws for the simulated world, each made from one uniform sample in `[0, 1)` so that
-//! the world's generator draws the same numbers whatever the distributions used (D-073).
+//! the world's generator draws the same numbers whatever the distributions used (D-073). The
+//! math is `libm`'s rather than the platform's, whose results differ in the last bits between
+//! systems, so a seed gives the same world everywhere.
 
 use std::time::Duration;
 
 /// A sample from the exponential distribution with mean `mean`.
 pub fn exponential(mean: Duration, u: f64) -> Duration {
-    from_secs(mean.as_secs_f64() * -(1.0 - u).ln())
+    from_secs(mean.as_secs_f64() * -libm::log(1.0 - u))
 }
 
 /// A sample from the Weibull distribution with mean `mean` and shape `shape`. Shape 1 is the
@@ -15,7 +17,7 @@ pub fn weibull(mean: Duration, shape: f64, u: f64) -> Duration {
         return exponential(mean, u);
     }
     let scale = mean.as_secs_f64() / gamma(1.0 + 1.0 / shape);
-    from_secs(scale * (-(1.0 - u).ln()).powf(1.0 / shape))
+    from_secs(scale * libm::pow(-libm::log(1.0 - u), 1.0 / shape))
 }
 
 fn from_secs(secs: f64) -> Duration {
@@ -39,7 +41,7 @@ pub fn gamma(x: f64) -> f64 {
     ];
     if x < 0.5 {
         // The reflection formula.
-        return std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * gamma(1.0 - x));
+        return std::f64::consts::PI / (libm::sin(std::f64::consts::PI * x) * gamma(1.0 - x));
     }
     let x = x - 1.0;
     let mut sum = C[0];
@@ -47,7 +49,7 @@ pub fn gamma(x: f64) -> f64 {
         sum += c / (x + i as f64);
     }
     let t = x + G + 0.5;
-    (2.0 * std::f64::consts::PI).sqrt() * t.powf(x + 0.5) * (-t).exp() * sum
+    (2.0 * std::f64::consts::PI).sqrt() * libm::pow(t, x + 0.5) * libm::exp(-t) * sum
 }
 
 #[cfg(test)]
@@ -87,6 +89,20 @@ mod tests {
                 "shape {shape}: {sample}"
             );
         }
+    }
+
+    /// Exact draws, the same on every platform, so a seed gives the same world everywhere.
+    #[test]
+    fn draws_are_exact() {
+        let mean = Duration::from_secs(600);
+        let draws = [
+            exponential(mean, 0.3),
+            weibull(mean, 0.5, 0.3),
+            weibull(mean, 2.5, 0.77),
+        ];
+        let nanos = draws.map(|d| d.as_nanos());
+        assert_eq!(nanos, [214_004_966_363, 38_165_104_690, 788_836_715_775]);
+        assert_eq!(gamma(0.3).to_bits(), 4_613_918_833_289_118_890);
     }
 
     #[test]

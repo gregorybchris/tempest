@@ -17,7 +17,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use tempest_sim::browse::{self, Baselines, BrowseError};
-use tempest_sim::results::duckdb::Connection;
 use tempest_sim::results::{self, Database};
 use tempest_sim_api::query::{CompareQuery, ExperimentQuery, QueryError, RunQuery};
 use tempest_sim_api::{ApiError, PREFIX};
@@ -61,7 +60,7 @@ pub struct SimWebArgs {
     no_open: bool,
 }
 
-/// `tempest-sim web`: serves the results UI and its API until Ctrl-C.
+/// `tempest-sim web`: serves the results UI and its API until Ctrl-C or SIGTERM.
 pub fn web(args: SimWebArgs) -> Result<()> {
     if ASSETS.is_empty() {
         eprintln!(
@@ -93,12 +92,29 @@ pub fn web(args: SimWebArgs) -> Result<()> {
         let address = listener.local_addr()?;
         show(&format!("http://{address}/"), !args.no_open);
         axum::serve(listener, router(sources))
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
+            .with_graceful_shutdown(interrupted())
             .await
             .context("serving the results UI")
     })
+}
+
+/// Waits for Ctrl-C, or on Unix for SIGTERM too, which service managers and containers send.
+///
+/// `tempest_net::signal::interrupted` does the same for the client and the servers; the
+/// simulator doesn't depend on the network stack for it.
+async fn interrupted() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut terminate) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = terminate.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 /// Where the answers come from.
@@ -178,15 +194,14 @@ fn id(text: &str) -> Result<i64, Failure> {
 async fn answer<T: Serialize + Send + 'static>(
     sources: Arc<Sources>,
     missing: &'static str,
-    read: impl FnOnce(&Connection, &Baselines) -> Result<Option<T>, BrowseError> + Send + 'static,
+    read: impl FnOnce(&Database, &Baselines) -> Result<Option<T>, BrowseError> + Send + 'static,
 ) -> Response {
     let task = tokio::task::spawn_blocking(move || {
         let db = match Database::open_read_only(&sources.db) {
             Ok(db) => db,
             Err(e) => return Err(unavailable(&sources, e)),
         };
-        let conn = db.connection();
-        read(&conn, &sources.baselines).map_err(|e| match e {
+        read(&db, &sources.baselines).map_err(|e| match e {
             BrowseError::NotFound(why) => error(StatusCode::NOT_FOUND, "not_found", why),
             other => error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -221,8 +236,7 @@ fn unavailable(sources: &Sources, e: results::Error) -> Failure {
             "schema",
             format!("{path}: {e}"),
         ),
-        // DuckDB lets one process write a file or many read it, so a recording run locks it.
-        results::Error::Database(e) if e.to_string().contains("lock") => error(
+        results::Error::Database(e) if e.is_locked() => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "busy",
             format!(

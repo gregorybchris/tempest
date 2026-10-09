@@ -48,7 +48,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            client: concat!("tempest/", env!("CARGO_PKG_VERSION")).to_owned(),
+            client: tempest_protocol::CLIENT.to_owned(),
             strategies: Strategies::default(),
             selection: SelectionSettings::default(),
             requests: RequestSettings::default(),

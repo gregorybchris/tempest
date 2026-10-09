@@ -23,8 +23,7 @@ use tempest_protocol::spki::{decode_spki, encode_spki};
 
 use crate::identity::Identity;
 
-/// The ALPN identifier of peer connections.
-pub const PEER_ALPN: &[u8] = b"tempest/1";
+pub use tempest_protocol::message::PEER_ALPN;
 
 /// The server name a dialing peer gives TLS. SNI is never sent, so it never reaches the wire.
 pub(crate) const SERVER_NAME: &str = "tempest";

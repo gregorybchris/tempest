@@ -2,7 +2,7 @@
 
 #![cfg(unix)]
 
-use crate::common::{self, Running, lines};
+use crate::common::{self, COMMAND_LIMIT, OutputWithin, Running, lines};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ fn tempest(data_dir: &Path) -> Command {
 
 /// Runs a command to completion, asserting that it succeeded.
 fn run(command: &mut Command) -> Output {
-    let output = command.output().unwrap();
+    let output = command.output_within(COMMAND_LIMIT).unwrap();
     assert!(
         output.status.success(),
         "{:?} failed: {}\n{}",
@@ -245,7 +245,10 @@ fn transfers_run_through_daemons_and_the_cli_controls_them() {
     wait_for_state(&b, &id, "stopped");
     run(tempest(&b).args(["start", &id[..6]]));
     wait_for_state(&b, &id, "sharing");
-    let missing = tempest(&b).args(["start", "nothing"]).output().unwrap();
+    let missing = tempest(&b)
+        .args(["start", "nothing"])
+        .output_within(COMMAND_LIMIT)
+        .unwrap();
     assert!(!missing.status.success());
     assert!(
         stderr(&missing).contains("no transfer matches"),
@@ -301,7 +304,7 @@ fn the_cli_reaches_a_daemon_with_remote_access_through_its_data_directory() {
     // Another engine can't open the same state while the daemon runs.
     let second = tempest(&dir)
         .args(["daemon", "--set", "api.port=0"])
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap();
     assert!(!second.status.success());
     assert!(
@@ -437,4 +440,77 @@ fn stopping_an_engine_that_runs_for_a_ui_leaves_its_shares_stopped() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["status"]["state"], "stopped");
     daemon.interrupt();
+}
+
+/// A tracker on 127.0.0.1 that answers the first announce and never answers another, so a
+/// daemon announcing to it takes a while to stop. Returns its URL.
+fn stalling_tracker() -> String {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for (index, stream) in listener.incoming().enumerate() {
+            let Ok(mut stream) = stream else { return };
+            if index > 0 {
+                held.push(stream);
+                continue;
+            }
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request);
+            let body = serde_json::json!({
+                "interval_secs": 1800,
+                "peers": [],
+                "complete": 1,
+                "incomplete": 0,
+                "your_ip": "127.0.0.1",
+                "relays": [],
+            })
+            .to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+                 connection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    url
+}
+
+/// A second Ctrl-C stops a daemon at once, while the first is still telling trackers.
+#[test]
+fn a_second_interrupt_stops_the_daemon_at_once() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("notes.txt");
+    fs::write(&source, contents(1 << 16, 3)).unwrap();
+    let a = root.path().join("a");
+    let trackers = format!(r#"trackers=["{}"]"#, stalling_tracker());
+    let mut daemon = Daemon::start(&a, &["--set", &trackers]);
+    let shared = run(tempest(&a).arg("share").arg(&source));
+    let id = field(&shared, "bundle");
+    wait_for_state(&a, &id, "sharing");
+    // Let the tracker hear `started`, so stopping tells it `stopped`, which it never answers.
+    std::thread::sleep(Duration::from_secs(1));
+
+    let pid = daemon.child.0.id().to_string();
+    run(Command::new("kill").args(["-INT", &pid]));
+    let started = Instant::now();
+    loop {
+        let line = (daemon.stderr)
+            .recv_timeout(LIMIT.saturating_sub(started.elapsed()))
+            .expect("the daemon says it is stopping");
+        if line.starts_with("stopping") {
+            assert!(line.contains("Ctrl-C again"), "{line}");
+            break;
+        }
+    }
+    run(Command::new("kill").args(["-INT", &pid]));
+    let status = daemon.child.0.wait().unwrap();
+    assert_eq!(status.code(), Some(130), "{status}");
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "it stopped at once"
+    );
 }

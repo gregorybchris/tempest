@@ -1,0 +1,99 @@
+/* Buttons, toggles and rows of options (`components::controls`). */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--dim);
+  background: var(--select);
+}
+
+.btn--primary {
+  border-color: var(--down);
+  color: var(--down);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--down);
+  color: var(--bg);
+}
+
+.btn--danger {
+  border-color: color-mix(in srgb, var(--bad) 60%, transparent);
+  color: var(--bad);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--bg);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  color: var(--dim);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: transparent;
+}
+
+.btn--small {
+  padding: 1px 8px;
+  font-size: var(--text-xs);
+}
+
+/* `[x] label` toggles, like a terminal checkbox. */
+.toggle {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.toggle:hover {
+  color: var(--fg);
+}
+
+.toggle[aria-pressed="true"] {
+  color: var(--fg);
+}
+
+.toggle::before {
+  content: "[ ] ";
+  white-space: pre;
+}
+
+.toggle[aria-pressed="true"]::before {
+  content: "[x] ";
+  color: var(--down);
+}
+
+/* A row of exclusive options, such as the theme picker. */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.segmented__option {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  color: var(--dim);
+}
+
+.segmented__option:hover {
+  color: var(--fg);
+}
+
+.segmented__option[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: var(--line);
+  background: var(--select);
+}

@@ -3,15 +3,13 @@
 //! - [`router`]: the routes under `/v1`, over an [`Engine`].
 //! - [`server`]: listening on TCP, with HTTPS and the access token for remote access (D-125),
 //!   and the file that tells local clients where the API is.
-//! - [`client`]: a client for the API, as the CLI and the TUI use it, with [`sse`] decoding its
-//!   event stream.
+//!
+//! Its client is [`tempest_api::client`].
 
 mod access;
-pub mod client;
 mod error;
 mod events;
 pub mod server;
-pub mod sse;
 
 use std::collections::BTreeMap;
 use std::path::Path as FsPath;

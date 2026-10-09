@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use tempest_engine::Kind;
+use tempest_api::Kind;
 
 use super::tests::{app_with, categories, load, press, settings, three, type_keys};
 use super::*;
@@ -18,6 +18,14 @@ fn changes(request: Option<Request>) -> BTreeMap<String, Value> {
 
 fn change(key: &str, value: Value) -> BTreeMap<String, Value> {
     BTreeMap::from([(key.to_owned(), value)])
+}
+
+/// The open value modal's error.
+fn edit_error(app: &App) -> Option<String> {
+    match &app.modal {
+        Some(Modal::Value(edit)) => edit.error.clone(),
+        other => panic!("no value modal: {other:?}"),
+    }
 }
 
 /// The Settings area, with the default settings and categories `films` and `music`.
@@ -56,11 +64,28 @@ fn values_are_typed_checked_and_sent() {
     assert!(edit.error.is_some(), "a bad speed is refused in place");
     app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
     type_keys(&mut app, "1.5M");
+    let request = press(&mut app, KeyCode::Enter);
     assert_eq!(
-        changes(press(&mut app, KeyCode::Enter)),
+        changes(request.clone()),
         change("limits.download", json!(1_500_000))
     );
+    let request = request.unwrap();
+
+    // The modal waits for the engine, and shows its refusal in place.
+    assert!(matches!(app.modal, Some(Modal::Value(_))));
+    app.finished(&request, Err("The limit is too low.".to_owned()));
+    let Some(Modal::Value(edit)) = &app.modal else {
+        panic!("{:?}", app.modal)
+    };
+    assert_eq!(edit.error.as_deref(), Some("The limit is too low."));
+    assert_eq!(app.notice, None, "the modal shows it, not a notice");
+
+    // Sent again and accepted, it closes.
+    assert_eq!(press(&mut app, KeyCode::Enter), Some(request.clone()));
+    assert_eq!(edit_error(&app), None, "sending again clears the error");
+    app.finished(&request, Ok(Reply::Settings(Box::new(settings()))));
     assert_eq!(app.modal, None);
+    assert!(app.notice.as_ref().is_some_and(|notice| !notice.error));
 
     go_to(&mut app, "Active uploads");
     press(&mut app, KeyCode::Enter);
@@ -158,14 +183,14 @@ fn categories_are_added_changed_and_removed() {
     press(&mut app, KeyCode::Enter);
     app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
     type_keys(&mut app, "/media/music");
-    assert_eq!(
-        press(&mut app, KeyCode::Enter),
-        Some(Request::SetCategory {
-            name: "music".to_owned(),
-            folder: PathBuf::from("/media/music"),
-            new: false,
-        })
-    );
+    let request = Request::SetCategory {
+        name: "music".to_owned(),
+        folder: PathBuf::from("/media/music"),
+        new: false,
+    };
+    assert_eq!(press(&mut app, KeyCode::Enter), Some(request.clone()));
+    app.finished(&request, Ok(Reply::Done));
+    assert_eq!(app.modal, None, "accepted, it closes");
 
     press(&mut app, KeyCode::Char('x'));
     assert!(matches!(app.modal, Some(Modal::Confirm { .. })));
@@ -205,13 +230,15 @@ fn trackers_and_relays_are_added_and_removed() {
     assert_eq!(press(&mut app, KeyCode::Enter), None, "already listed");
     app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
     type_keys(&mut app, "https://b.example");
+    let request = press(&mut app, KeyCode::Enter);
     assert_eq!(
-        changes(press(&mut app, KeyCode::Enter)),
+        changes(request.clone()),
         change(
             "trackers",
             json!(["https://a.example", "https://b.example"])
         )
     );
+    app.finished(&request.unwrap(), Ok(Reply::Done));
 
     assert_eq!(
         changes(press(&mut app, KeyCode::Char('x'))),
@@ -453,8 +480,8 @@ fn help_scrolls_only_as_far_as_it_overflows() {
     );
 }
 
-fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
-    tempest_engine::TransferInfo::example(seed, name, position)
+fn transfer(seed: u8, name: &str, position: u32) -> tempest_api::TransferInfo {
+    tempest_api::TransferInfo::example(seed, name, position)
 }
 
 #[test]

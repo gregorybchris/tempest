@@ -6,7 +6,7 @@ use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
-use tempest_engine::{Status, TransferInfo};
+use tempest_api::{Status, TransferInfo};
 
 use super::{detail, fit, rule, status_color, status_label};
 use crate::app::{App, View};
@@ -112,8 +112,11 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     let table = Table::new(rows, widths)
         .header(header)
         .column_spacing(SPACING);
-    let mut state = TableState::new().with_selected(cursor);
+    let mut state = TableState::new()
+        .with_offset(app.list_offset.get())
+        .with_selected(cursor);
     frame.render_stateful_widget(table, area, &mut state);
+    app.list_offset.set(state.offset());
 
     if visible.is_empty() {
         let filters = Finding {

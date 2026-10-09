@@ -3,24 +3,27 @@
 
 mod hints;
 mod inside;
+mod kept;
 mod keys;
 mod limits;
 mod modal;
 mod request;
 mod rows;
 mod screen;
+mod settings;
 mod share;
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use serde_json::json;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use tempest_engine::api::QueueStep;
-use tempest_engine::api::client::ApiEvent;
-use tempest_engine::config::SavedView;
-use tempest_engine::{SettingsView, Status, TransferInfo};
+use tempest_api::ApiEvent;
+use tempest_api::requests::QueueStep;
+use tempest_api::ui::SavedView;
+use tempest_api::{Status, TransferInfo, settings::SettingsInfo};
 use tempest_protocol::BundleId;
 
 pub use self::inside::{Fetched, Inside, Look};
@@ -93,6 +96,9 @@ pub struct App {
     pub finding: Finding,
     /// The transfer the cursor is on.
     pub selected: Option<BundleId>,
+    /// The first row the list showed when last drawn. Drawing keeps it, so the list scrolls
+    /// only when the cursor leaves the rows on screen.
+    pub list_offset: Cell<usize>,
     /// How far into the selected transfer the Transfers area goes.
     pub view: View,
     /// The detail's tab.
@@ -106,10 +112,13 @@ pub struct App {
     pub size: (u16, u16),
     /// What is open over the list.
     pub modal: Option<Modal>,
+    /// What the open modal sent and waits on: it closes once the engine accepts it, and shows
+    /// a refusal.
+    submitted: Option<Request>,
     /// Every category's save folder by name, once fetched.
     pub categories: Option<BTreeMap<String, PathBuf>>,
     /// The engine's settings, once fetched.
-    pub settings: Option<SettingsView>,
+    pub settings: Option<SettingsInfo>,
     /// Why the settings couldn't be fetched, if they couldn't.
     pub settings_error: Option<String>,
     /// Whether the settings are being fetched.
@@ -150,12 +159,14 @@ impl App {
             theme,
             finding: Finding::default(),
             selected: None,
+            list_offset: Cell::new(0),
             view: View::List,
             tab: Tab::Summary,
             scroll: 0,
             inside: Inside::default(),
             size: (80, 24),
             modal: None,
+            submitted: None,
             categories: None,
             settings: None,
             settings_error: None,
@@ -301,7 +312,7 @@ impl App {
     /// Takes in the engine's settings. What the user keeps (D-195) is taken in once, at the
     /// start, and again whenever no change to it is waiting for an answer, so a fetch never
     /// undoes a change just made.
-    fn take_settings(&mut self, view: SettingsView) {
+    fn take_settings(&mut self, view: SettingsInfo) {
         let ui = &view.settings.ui;
         if !self.prefs_loaded {
             // A theme changed before the settings arrived stays.
@@ -413,6 +424,10 @@ impl App {
         request: &Request,
         result: Result<Reply, String>,
     ) -> Option<Request> {
+        let from_modal = self.submitted.as_ref() == Some(request);
+        if from_modal {
+            self.submitted = None;
+        }
         match request {
             Request::Look(id, look) => {
                 let result = result.map_err(|error| request.failure(&error));
@@ -450,6 +465,9 @@ impl App {
                 next = self.explain_network();
             }
             Ok(reply) => {
+                if from_modal {
+                    self.modal = None;
+                }
                 if let Reply::Settings(view) = &reply {
                     self.take_settings((**view).clone());
                 }
@@ -462,7 +480,10 @@ impl App {
             }
             Err(_) if matches!(request, Request::Settings) => {}
             Err(error) => {
-                self.notify(request.failure(&error), true);
+                let shown = from_modal && self.modal.as_mut().is_some_and(|m| m.refused(&error));
+                if !shown {
+                    self.notify(request.failure(&error), true);
+                }
                 // A refused change to what the user keeps: show what the engine has.
                 if matches!(request, Request::ChangeSettings { .. }) && self.ui_pending == 0 {
                     next = self.load_settings();

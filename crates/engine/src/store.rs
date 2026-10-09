@@ -192,6 +192,7 @@ impl Store {
     }
 
     /// A database in memory, for tests.
+    #[cfg(test)]
     pub fn in_memory() -> Result<Self, StoreError> {
         Self::init(Connection::open_in_memory()?)
     }

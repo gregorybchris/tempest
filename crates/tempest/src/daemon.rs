@@ -109,7 +109,12 @@ pub async fn run(
                     }
                 }
             }
-            eprintln!("stopping");
+            eprintln!("stopping; press Ctrl-C again to stop at once");
+            tokio::spawn(async {
+                tempest_net::signal::interrupted().await;
+                eprintln!("stopped at once, without telling trackers and peers");
+                std::process::exit(130);
+            });
             // Stops every transfer, tells trackers and peers, and saves where each got to.
             // Event streams end with it, so the API can finish.
             stopping.shutdown().await;

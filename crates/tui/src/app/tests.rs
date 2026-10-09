@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use tempest_engine::api::{AddRequest, RemovedInfo};
+use tempest_api::{events::RemovedInfo, requests::AddRequest};
 
 use super::*;
 use crate::finding::{SortKey, StatusFilter};
@@ -30,20 +30,21 @@ pub(super) fn categories(names: &[&str]) -> BTreeMap<String, PathBuf> {
         .collect()
 }
 
-/// The engine's default settings.
-pub(super) fn settings() -> SettingsView {
+/// The engine's default settings, as it sends them.
+pub(super) fn settings() -> SettingsInfo {
     let mut settings = tempest_engine::EngineConfig::default();
     settings.ui.network_explained = true;
-    SettingsView {
+    let view = tempest_engine::SettingsView {
         settings,
         changed: BTreeMap::new(),
         restart_required: Vec::new(),
         alternative_limits_active: false,
-    }
+    };
+    serde_json::from_value(serde_json::to_value(view).unwrap()).unwrap()
 }
 
 /// Answers the settings fetch the app starts with.
-pub(super) fn load(app: &mut App, view: SettingsView, names: &[&str]) {
+pub(super) fn load(app: &mut App, view: SettingsInfo, names: &[&str]) {
     // Answers the fetch under way, or a new one.
     let _ = app.load_settings();
     let reply = Reply::Loaded(Box::new(view), categories(names));
@@ -190,7 +191,9 @@ fn the_add_modal_sends_every_field() {
             ..AddRequest::default()
         }
     );
-    assert_eq!(app.modal, None);
+    assert!(matches!(app.modal, Some(Modal::Add(_))), "it waits");
+    app.finished(&Request::Add(request), Ok(Reply::Added("thing".to_owned())));
+    assert_eq!(app.modal, None, "accepted, it closes");
 }
 
 #[test]
@@ -759,7 +762,7 @@ fn the_detail_scrolls_within_its_rows() {
     // Decisions count back from the newest: up scrolls back, down toward the newest.
     let id = app.selected.unwrap();
     for n in 0..5 {
-        app.apply(ApiEvent::Decision(tempest_engine::api::DecisionInfo {
+        app.apply(ApiEvent::Decision(tempest_api::events::DecisionInfo {
             id,
             time: f64::from(n),
             kind: "requested".to_owned(),
@@ -803,8 +806,8 @@ fn hints_follow_the_screen() {
     assert_eq!(app.help_sections()[0].0, Section::View);
 }
 
-fn transfer(seed: u8, name: &str, position: u32) -> tempest_engine::TransferInfo {
-    tempest_engine::TransferInfo::example(seed, name, position)
+fn transfer(seed: u8, name: &str, position: u32) -> tempest_api::TransferInfo {
+    tempest_api::TransferInfo::example(seed, name, position)
 }
 
 #[test]

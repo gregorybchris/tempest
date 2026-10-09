@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
+use tempest_api::client::ApiClient;
 use tempest_engine::api::AddRequest;
-use tempest_engine::api::client::ApiClient;
 use tempest_engine::manifest::{BundleInfo, base_dir, build_manifest, unix_millis};
 use tempest_net::{DEFAULT_PORT, Storage, StorageConfig, TrackerClient};
 use tempest_protocol::{BundleId, Link, Manifest};
@@ -16,7 +16,7 @@ use tempest_api::units::{self, bytes};
 use tempest_api::words::{self, peers};
 
 use crate::engine::{EngineArgs, Target};
-use crate::peer::{Peer, PeerArgs, TRACKER_TIMEOUT};
+use crate::peer::{Key, Peer, PeerArgs, TRACKER_TIMEOUT};
 use crate::progress::StatusLine;
 use crate::publish::{ListingArgs, print_listing};
 
@@ -180,7 +180,12 @@ async fn serve(args: ShareArgs, manifest: Manifest, mut link: Link) -> Result<()
     let storage = Storage::open_shared(base, Arc::new(manifest), StorageConfig::default())
         .await
         .context("cannot open the shared files")?;
-    let peer = args.peer.start(args.port.unwrap_or(DEFAULT_PORT), true)?;
+    let key = match args.publish {
+        Some(_) => Key::Installation,
+        None => Key::Share(link.bundle),
+    };
+    let port = args.port.unwrap_or(DEFAULT_PORT);
+    let peer = args.peer.start(port, true, key, &args.engine)?;
     if let Some(tracker) = &args.publish {
         let published = publish(&peer, tracker, &args.listing, link.bundle).await;
         if let Err(error) = published {

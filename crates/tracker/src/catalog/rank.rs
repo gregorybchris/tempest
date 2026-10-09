@@ -123,7 +123,8 @@ impl PartialOrd for Keyed {
 }
 
 /// Sorts `listings` by `sort`. Ties go to the newer listing, then to the lower bundle ID, so the
-/// order is the same on every page.
+/// order is the same on every page. Tests check the bounded ranking against it.
+#[cfg(test)]
 pub fn sort(listings: &mut Vec<Ranked>, sort: Sort) {
     let mut keyed: Vec<Keyed> = listings.drain(..).map(|r| Keyed::new(r, sort)).collect();
     keyed.sort();

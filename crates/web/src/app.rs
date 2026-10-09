@@ -514,11 +514,6 @@ fn focus(element: Option<web_sys::HtmlElement>) {
     }
 }
 
-/// The DOM ID of transfer `id`'s row.
-pub fn row_id(id: &BundleId) -> String {
-    format!("row-{id}")
-}
-
 /// The app bar's ↓ and ↑ meters, over every transfer.
 #[component]
 fn Meters() -> impl IntoView {

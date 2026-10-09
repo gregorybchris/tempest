@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use unicode_normalization::UnicodeNormalization;
+
 /// The longest title.
 pub const MAX_TITLE: usize = 120;
 /// The longest description.
@@ -42,9 +44,91 @@ pub fn clean_title(title: &str) -> Result<String, TextError> {
 /// An account name: one line, not empty.
 pub fn clean_name(name: &str) -> Result<String, TextError> {
     let name = line(name, "the name", MAX_NAME)?;
+    if let Some(c) = name.chars().find(|c| is_invisible(*c)) {
+        return Err(TextError(format!(
+            "the name has the invisible character {c:?}, which could hide who is who"
+        )));
+    }
     match name.is_empty() {
         true => Err(TextError("the name is empty".into())),
         false => Ok(name),
+    }
+}
+
+/// Whether `c` is a format character that shows nothing or reorders text around it: zero-width
+/// spaces and joiners, direction marks and overrides, isolates, the byte order mark and the
+/// like. A name with one could look like another.
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00ad}'
+            | '\u{034f}'
+            | '\u{061c}'
+            | '\u{115f}'..='\u{1160}'
+            | '\u{17b4}'..='\u{17b5}'
+            | '\u{180b}'..='\u{180f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{feff}'
+            | '\u{ffa0}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{e0000}'..='\u{e0fff}'
+    )
+}
+
+/// What two account names must differ in to be different names (D-261): the name with accents,
+/// case, spacing and punctuation removed, and letters that look alike made the same. `None` if
+/// nothing is left, as in a name of only symbols.
+///
+/// ```
+/// use tempest_tracker_api::text::name_key;
+/// assert_eq!(name_key("CGreg"), name_key("c_greg"));
+/// assert_eq!(name_key("cgreg"), name_key("cgrég"));
+/// assert_eq!(name_key("paul"), name_key("pauI"));
+/// assert_eq!(name_key("★"), None);
+/// ```
+pub fn name_key(name: &str) -> Option<String> {
+    let folded: String = name
+        .nfkd()
+        .flat_map(char::to_lowercase)
+        // Accents split off by NFKD, spaces and punctuation are not alphanumeric.
+        .filter(|c| c.is_alphanumeric())
+        .map(look_alike)
+        .collect();
+    // Two letters can pass for one.
+    let folded = folded.replace("rn", "m").replace("vv", "w");
+    (!folded.is_empty()).then_some(folded)
+}
+
+/// The letter that `c` can pass for, or `c`: Cyrillic and Greek letters like Latin ones, and
+/// `l`, `i`, `I`, `1` and `0` like each other and `o`.
+fn look_alike(c: char) -> char {
+    match c {
+        'i' | '1' | 'ı' | 'і' | 'ι' | 'ӏ' => 'l',
+        '0' | 'ο' | 'о' | 'օ' => 'o',
+        'а' | 'α' => 'a',
+        'е' | 'ε' => 'e',
+        'р' | 'ρ' => 'p',
+        'с' | 'ϲ' => 'c',
+        'у' | 'γ' => 'y',
+        'х' | 'χ' => 'x',
+        'ѕ' => 's',
+        'ј' => 'j',
+        'һ' => 'h',
+        'ԁ' => 'd',
+        'ԛ' => 'q',
+        'ԝ' | 'ѡ' => 'w',
+        'ν' => 'v',
+        'κ' | 'к' => 'k',
+        'τ' | 'т' => 't',
+        'υ' => 'u',
+        'м' => 'm',
+        'н' => 'h',
+        'в' => 'b',
+        _ => c,
     }
 }
 
@@ -146,6 +230,49 @@ fn within(text: String, what: &str, max: usize) -> Result<String, TextError> {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn names_refuse_invisible_and_direction_characters() {
+        for name in [
+            "a\u{200b}b",
+            "evil\u{202e}gnp",
+            "x\u{feff}",
+            "\u{2066}y\u{2069}",
+        ] {
+            assert!(clean_name(name).is_err(), "{name:?}");
+        }
+        assert_eq!(clean_name("Zoë 🙂").unwrap(), "Zoë 🙂");
+    }
+
+    #[test]
+    fn names_that_look_alike_share_a_key() {
+        let key = name_key("cgreg").unwrap();
+        for twin in [
+            "CGreg",
+            "c greg",
+            "c_g.r.e.g",
+            "cgrég",
+            "сgrеg",
+            "cgreg\u{200b}",
+        ] {
+            assert_eq!(name_key(twin).as_deref(), Some(key.as_str()), "{twin}");
+        }
+        assert_eq!(name_key("rnoon"), name_key("moon"));
+        assert_eq!(name_key("Alice"), name_key("AIice"));
+        assert_eq!(name_key("A1ice"), name_key("Alice"));
+        assert_ne!(name_key("alice"), name_key("alicia"));
+        assert_eq!(name_key("   "), None);
+        assert_eq!(name_key("---"), None);
+    }
+
+    proptest! {
+        #[test]
+        fn a_name_key_is_stable(name in "\\PC{1,40}") {
+            if let Some(key) = name_key(&name) {
+                prop_assert_eq!(name_key(&key), Some(key));
+            }
+        }
+    }
 
     #[test]
     fn tags_are_lowercase_words_joined_by_dashes() {

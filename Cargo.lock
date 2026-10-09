@@ -5049,6 +5049,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempest-protocol",
+ "unicode-normalization",
 ]
 
 [[package]]

@@ -125,6 +125,10 @@ struct CatalogArgs {
     /// comment, report, download. Repeat for more. See specs/tracker.md for the defaults.
     #[arg(long, value_name = "ACTION=RATE", value_parser = parse_limit, requires = "catalog")]
     catalog_limit: Vec<(Action, Option<Rate>)>,
+    /// A name accounts can't pick for themselves, besides the built-in ones such as `admin`.
+    /// Repeat for more. Names that look alike count as one.
+    #[arg(long, value_name = "NAME", requires = "catalog")]
+    reserve_name: Vec<String>,
     /// The most sign-in codes outstanding for one IP address.
     #[arg(long, default_value_t = CatalogConfig::default().max_challenges_per_ip,
         value_name = "N", requires = "catalog")]
@@ -162,6 +166,22 @@ enum TrackerCommand {
     },
     /// Lift a key's ban, which shows its listings again.
     Unban {
+        /// The key, as 64 hexadecimal characters.
+        key: PeerId,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+    /// Give an account a name, even a reserved one. Fails if another account has one like it.
+    Rename {
+        /// The key, as 64 hexadecimal characters.
+        key: PeerId,
+        /// The name to show.
+        name: String,
+        #[command(flatten)]
+        file: CatalogFile,
+    },
+    /// Clear an account's name, so it shows its key and the name is free to take.
+    ClearName {
         /// The key, as 64 hexadecimal characters.
         key: PeerId,
         #[command(flatten)]
@@ -236,6 +256,11 @@ impl CatalogArgs {
                 false => self.category.clone(),
             },
             max_challenges_per_ip: self.challenges_per_ip,
+            reserved_names: CatalogConfig::default()
+                .reserved_names
+                .into_iter()
+                .chain(self.reserve_name.iter().cloned())
+                .collect(),
             ..CatalogConfig::default()
         };
         let catalog = Catalog::open(path, config)
@@ -417,6 +442,20 @@ fn operate(command: &TrackerCommand, out: &mut impl std::io::Write) -> Result<()
             let done = if ban { "banned" } else { "unbanned" };
             tracing::info!("operator {done} {key}");
             writeln!(out, "{done} {key}")?;
+        }
+        TrackerCommand::Rename { key, name, file } => {
+            open_existing(&file.catalog)?
+                .set_account_name(key, Some(name))
+                .map_err(refused)?;
+            tracing::info!("operator named {key} {name:?}");
+            writeln!(out, "named {key} {name:?}")?;
+        }
+        TrackerCommand::ClearName { key, file } => {
+            open_existing(&file.catalog)?
+                .set_account_name(key, None)
+                .map_err(refused)?;
+            tracing::info!("operator cleared the name of {key}");
+            writeln!(out, "cleared the name of {key}")?;
         }
         TrackerCommand::Reports { bundle, file } => {
             let catalog = open_existing(&file.catalog)?;

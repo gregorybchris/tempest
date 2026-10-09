@@ -4265,5 +4265,23 @@ This revises D-175, D-182 and D-189.
 - A key can claim any unlisted bundle first, and a listing signature binds no tracker and never expires.
 - Announced addresses are unauthenticated, so a tracker can point downloaders at a third party.
 - Tracker and asset responses carry no CSP.
-- Unicode bidi and format characters are allowed in names.
+- Unicode bidi and format characters are allowed in names. (Account names refuse them as of D-261; titles, descriptions and comments still allow them.)
 - Relay routes can be evicted by spoofed traffic.
+
+
+## D-261: Account names are unique
+
+**Date:** 2026-10-09 · **Status:** Decided
+
+**Context:** Account names were free text, so anyone could take the name of a publisher and pass for them. A key can't be faked, but people recognize names.
+
+**Decision:**
+
+- **One account per name.** Each name has a key (`name_key` in `tempest-tracker-api`): the name in Unicode compatibility decomposition, lowercased, with everything but letters and digits removed (so accents, spaces and punctuation don't count), with Cyrillic and Greek letters mapped to the Latin ones they resemble, `i`, `I`, `l`, `1` mapped together and `0` to `o`, and `rn` read as `m` and `vv` as `w`. A tracker refuses a name whose key another account has, or that has none (a name of only symbols), with `name_taken` (409). The key is unique in the catalog's database, so racing requests can't both win.
+- **Reserved names.** `admin`, `moderator`, `operator`, `tempest` and a few like them can't be picked, nor anything that looks like them. `--reserve-name` adds more. The operator can still give one to an account.
+- **Invisible characters.** A name can't hold zero-width, direction-control or other invisible format characters.
+- **Operator commands.** `rename` gives an account a name and `clear-name` removes it, which frees the name. Like `ban`, they act on the catalog file, whether or not a tracker runs on it.
+- **Upgrade.** A catalog from before this change keeps the earliest account's name where several have names with one key, and the others show their keys.
+- **Not decided here:** a name history, and glyphs beside names.
+
+**Rationale:** First come, first served is the simplest rule people understand, and the operator can undo it. A lookalike check catches the common tricks without a full confusables table, whose size and upkeep aren't worth it here. Names only help people who read them, so a name is meant to be read next to its key.

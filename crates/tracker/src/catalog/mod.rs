@@ -66,7 +66,26 @@ pub struct CatalogConfig {
     /// The most sign-in challenges outstanding for one client IP (an IPv6 /64), so no one
     /// client can fill the table.
     pub max_challenges_per_ip: usize,
+    /// Names no account can pick for itself, such as `admin` (D-261). The operator can still
+    /// give one to an account. Names are compared as [`text::name_key`] does.
+    pub reserved_names: Vec<String>,
 }
+
+/// The names that look like the operator's or the project's.
+pub const DEFAULT_RESERVED_NAMES: &[&str] = &[
+    "admin",
+    "administrator",
+    "moderator",
+    "mod",
+    "operator",
+    "owner",
+    "root",
+    "staff",
+    "support",
+    "system",
+    "tempest",
+    "tracker",
+];
 
 impl Default for CatalogConfig {
     fn default() -> Self {
@@ -75,6 +94,10 @@ impl Default for CatalogConfig {
             invites_required: false,
             session_lifetime: Duration::from_secs(30 * 24 * 60 * 60),
             max_challenges_per_ip: 16,
+            reserved_names: DEFAULT_RESERVED_NAMES
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
         }
     }
 }
@@ -152,6 +175,10 @@ fn not_found(what: &str) -> Refusal {
 
 fn forbidden(message: &str) -> Refusal {
     refusal(403, codes::FORBIDDEN, message)
+}
+
+fn name_taken(message: &str) -> Refusal {
+    refusal(409, codes::NAME_TAKEN, message)
 }
 
 fn banned() -> Refusal {
@@ -499,8 +526,61 @@ impl Catalog {
             .map(text::clean_name)
             .transpose()
             .map_err(invalid)?;
-        self.store.set_name(key, name.as_deref())?;
+        self.assign_name(key, name.as_deref(), true)?;
         self.account(key)
+    }
+
+    /// Gives `key`'s account `name`, or none. Unless the operator does it, the name must not be
+    /// reserved. Either way no other account may have a name like it (D-261).
+    fn assign_name(
+        &self,
+        key: &PeerId,
+        name: Option<&str>,
+        check_reserved: bool,
+    ) -> Result<(), Refusal> {
+        let named = match name {
+            Some(name) => {
+                let name_key = text::name_key(name).ok_or_else(|| {
+                    invalid(text::TextError("the name needs a letter or a digit".into()))
+                })?;
+                let reserved = self
+                    .config
+                    .reserved_names
+                    .iter()
+                    .any(|reserved| text::name_key(reserved).as_ref() == Some(&name_key));
+                if check_reserved && reserved {
+                    tracing::info!("name refused: {name:?} is reserved");
+                    return Err(name_taken("that name is reserved"));
+                }
+                Some((name, name_key))
+            }
+            None => None,
+        };
+        let saved = self.store.set_name(
+            key,
+            named
+                .as_ref()
+                .map(|(name, name_key)| (*name, name_key.as_str())),
+        )?;
+        if !saved {
+            tracing::info!("name refused: {name:?} is taken or too like a name that is");
+            return Err(name_taken(
+                "that name is taken, or too much like a name that is",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Renames `key`'s account, or clears its name, for the operator. The name may be a
+    /// reserved one. Fails if there is no such account, or another has a name like it.
+    pub fn set_account_name(&mut self, key: &PeerId, name: Option<&str>) -> Result<(), Refusal> {
+        if self.store.account(key)?.is_none() {
+            return Err(not_found("account"));
+        }
+        let name = name.map(text::clean_name).transpose().map_err(invalid)?;
+        self.assign_name(key, name.as_deref(), false)?;
+        tracing::info!("the name of {key} is now {name:?}");
+        Ok(())
     }
 
     // Listings.

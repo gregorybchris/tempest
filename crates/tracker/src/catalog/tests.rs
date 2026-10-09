@@ -645,3 +645,103 @@ fn one_client_cannot_hold_every_challenge() {
     catalog.challenge(0, other).unwrap();
     catalog.challenge(10 * 60, CLIENT).unwrap();
 }
+
+/// Gives `key` an account named `name`, or says why not.
+fn name_account(
+    catalog: &mut Catalog,
+    key: &Key,
+    name: Option<&str>,
+) -> Result<(), super::Refusal> {
+    catalog
+        .edit_account(
+            &key.id(),
+            &AccountEdit {
+                name: name.map(str::to_owned),
+            },
+        )
+        .map(|_| ())
+}
+
+#[test]
+fn account_names_are_unique_up_to_look_alikes() {
+    let mut catalog = catalog(false);
+    let (alice, bob) = (Key::new(1), Key::new(2));
+    sign_in(&mut catalog, &alice, 0);
+    sign_in(&mut catalog, &bob, 0);
+    name_account(&mut catalog, &alice, Some("cgreg")).unwrap();
+    for twin in ["CGreg", "c_greg", "cgrég", "сgrеg"] {
+        let refused = name_account(&mut catalog, &bob, Some(twin)).unwrap_err();
+        assert_eq!(
+            (refused.status, refused.body.error.as_str()),
+            (409, codes::NAME_TAKEN)
+        );
+    }
+    assert_eq!(catalog.account(&bob.id()).unwrap().name, None);
+    // The owner can change its own name's spelling, and a different name is fine.
+    name_account(&mut catalog, &alice, Some("CGreg")).unwrap();
+    name_account(&mut catalog, &bob, Some("bob")).unwrap();
+    // Clearing a name frees it.
+    name_account(&mut catalog, &alice, None).unwrap();
+    name_account(&mut catalog, &bob, Some("cgreg")).unwrap();
+    assert_eq!(catalog.account(&alice.id()).unwrap().name, None);
+}
+
+#[test]
+fn a_name_needs_a_letter_or_a_digit() {
+    let mut catalog = catalog(false);
+    let alice = Key::new(1);
+    sign_in(&mut catalog, &alice, 0);
+    let refused = name_account(&mut catalog, &alice, Some("★★")).unwrap_err();
+    assert_eq!(refused.status, 400);
+}
+
+#[test]
+fn reserved_names_are_the_operators_to_give() {
+    let mut catalog = catalog(false);
+    let (alice, bob) = (Key::new(1), Key::new(2));
+    sign_in(&mut catalog, &alice, 0);
+    sign_in(&mut catalog, &bob, 0);
+    for reserved in [
+        "admin",
+        "Moderator",
+        "tempest",
+        "tеmpest",
+    ] {
+        let refused = name_account(&mut catalog, &alice, Some(reserved)).unwrap_err();
+        assert_eq!(refused.body.error.as_str(), codes::NAME_TAKEN, "{reserved}");
+    }
+    catalog
+        .set_account_name(&alice.id(), Some("Admin"))
+        .unwrap();
+    assert_eq!(
+        catalog.account(&alice.id()).unwrap().name.as_deref(),
+        Some("Admin")
+    );
+    // The operator's choice is taken like any other.
+    let refused = catalog
+        .set_account_name(&bob.id(), Some("admin"))
+        .unwrap_err();
+    assert_eq!(refused.body.error.as_str(), codes::NAME_TAKEN);
+    catalog.set_account_name(&alice.id(), None).unwrap();
+    assert_eq!(catalog.account(&alice.id()).unwrap().name, None);
+    assert_eq!(
+        catalog
+            .set_account_name(&Key::new(9).id(), Some("x"))
+            .unwrap_err()
+            .status,
+        404
+    );
+}
+
+#[test]
+fn an_operators_reserved_names_add_to_the_defaults() {
+    let config = CatalogConfig {
+        reserved_names: vec!["Founder".into()],
+        ..CatalogConfig::default()
+    };
+    let mut catalog = Catalog::in_memory(config).unwrap();
+    let alice = Key::new(1);
+    sign_in(&mut catalog, &alice, 0);
+    assert!(name_account(&mut catalog, &alice, Some("founder")).is_err());
+    assert!(name_account(&mut catalog, &alice, Some("alice")).is_ok());
+}

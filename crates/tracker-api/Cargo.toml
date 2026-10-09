@@ -12,6 +12,7 @@ publish = false
 tempest-protocol.workspace = true
 
 serde.workspace = true
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

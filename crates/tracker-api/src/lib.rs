@@ -36,6 +36,8 @@ pub mod codes {
     pub const INVITE_REQUIRED: &str = "invite_required";
     /// A sign-in's code is unknown, used or expired, or its signature doesn't verify (401).
     pub const SIGN_IN_FAILED: &str = "sign_in_failed";
+    /// The account name is taken, or reserved, or too much like one that is (409).
+    pub const NAME_TAKEN: &str = "name_taken";
     /// No such listing, comment or endpoint (404).
     pub const NOT_FOUND: &str = "not_found";
 }

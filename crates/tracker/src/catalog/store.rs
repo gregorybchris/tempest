@@ -14,6 +14,7 @@ use tempest_protocol::{BundleId, Hash, PeerId};
 use tempest_tracker_api::listing::{
     Comment, Content, Listing, ListingStatus, Person, Vote, VoteCounts,
 };
+use tempest_tracker_api::text::name_key;
 
 /// The migrations, in order. Migration `i` takes the schema from version `i` to `i + 1`.
 const MIGRATIONS: &[&str] = &[
@@ -120,7 +121,14 @@ ALTER TABLE listings_new RENAME TO listings;
 CREATE INDEX listings_by_publisher ON listings (publisher, updated);
 CREATE INDEX listings_by_status ON listings (status, created);
 ",
+    // Account names are unique by their `name_key` (D-261). The key can't be computed in SQL, so
+    // `migrate` fills it in between this migration and the next, which enforces it.
+    "ALTER TABLE accounts ADD COLUMN name_key TEXT;",
+    "CREATE UNIQUE INDEX accounts_by_name_key ON accounts (name_key) WHERE name_key IS NOT NULL;",
 ];
+
+/// The migration that enforces unique name keys, which the keys are filled in before.
+const ENFORCE_NAME_KEYS: usize = 5;
 
 /// SQL over `listings l` that holds when the operator has taken the listing down: hidden, or
 /// its publisher banned.
@@ -208,6 +216,33 @@ fn to_u64(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
 
+/// Gives every account name its key, for a database from before they were unique. Where
+/// several accounts have names with one key, the earliest to join keeps its name and the others
+/// show their keys instead.
+fn fill_name_keys(conn: &Connection) -> Result<(), StoreError> {
+    let mut named =
+        conn.prepare("SELECT key, name FROM accounts WHERE name IS NOT NULL ORDER BY joined, key")?;
+    let rows = named
+        .query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut taken = HashSet::new();
+    for (key, name) in rows {
+        match name_key(&name).filter(|name_key| taken.insert(name_key.clone())) {
+            Some(name_key) => conn.execute(
+                "UPDATE accounts SET name_key = ?2 WHERE key = ?1",
+                params![key, name_key],
+            )?,
+            None => {
+                tracing::warn!("cleared the name {name:?} of an account: another has one like it");
+                conn.execute("UPDATE accounts SET name = NULL WHERE key = ?1", [key])?
+            }
+        };
+    }
+    Ok(())
+}
+
 fn hash_of(bytes: Vec<u8>) -> Result<Hash, StoreError> {
     let bytes = <[u8; 32]>::try_from(bytes)
         .map_err(|_| StoreError::Corrupt("a key or bundle ID isn't 32 bytes".into()))?;
@@ -291,7 +326,10 @@ impl Store {
         if found > known {
             return Err(StoreError::TooNew { found, known });
         }
-        for migration in &MIGRATIONS[found as usize..] {
+        for (index, migration) in MIGRATIONS.iter().enumerate().skip(found as usize) {
+            if index == ENFORCE_NAME_KEYS {
+                fill_name_keys(&tx)?;
+            }
             tx.execute_batch(migration)?;
         }
         tx.pragma_update(None, "user_version", known)?;
@@ -331,13 +369,22 @@ impl Store {
         Ok(())
     }
 
-    /// Sets the name `key`'s account shows.
-    pub fn set_name(&self, key: &PeerId, name: Option<&str>) -> Result<(), StoreError> {
-        self.conn.execute(
-            "UPDATE accounts SET name = ?2 WHERE key = ?1",
-            params![key.as_bytes(), name],
-        )?;
-        Ok(())
+    /// Sets the name `key`'s account shows, with its [`name_key`], or clears it. Returns `false`
+    /// and changes nothing if another account has a name with that key.
+    pub fn set_name(&self, key: &PeerId, name: Option<(&str, &str)>) -> Result<bool, StoreError> {
+        let (name, name_key) = name.unzip();
+        match self.conn.execute(
+            "UPDATE accounts SET name = ?2, name_key = ?3 WHERE key = ?1",
+            params![key.as_bytes(), name, name_key],
+        ) {
+            Ok(_) => Ok(true),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// Saves a session for `key`, identified by its token's hash, and forgets expired ones.
@@ -1086,5 +1133,43 @@ mod tests {
         // Foreign keys are back on: a listing's rows still go with it.
         store.conn.execute("DELETE FROM listings", []).unwrap();
         assert_eq!((count("votes"), count("listing_tags")), (0, 0));
+    }
+
+    /// A database from before names were unique keeps the earliest of several like names and
+    /// clears the rest, and then refuses new duplicates.
+    #[test]
+    fn migrating_makes_names_unique_by_keeping_the_earliest() {
+        let conn = Connection::open_in_memory().unwrap();
+        for migration in &MIGRATIONS[..4] {
+            conn.execute_batch(migration).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        for (n, name, joined) in [
+            (1u8, Some("Zed"), 30),
+            (2, Some("zed"), 10),
+            (3, Some("z-e-d"), 20),
+            (4, Some("★"), 5),
+            (5, None, 1),
+            (6, Some("Amy"), 2),
+        ] {
+            conn.execute(
+                "INSERT INTO accounts (key, name, joined) VALUES (?1, ?2, ?3)",
+                params![[n; 32].to_vec(), name, joined],
+            )
+            .unwrap();
+        }
+        let store = Store::init(conn).unwrap();
+        let name = |n: u8| store.account(&PeerId::new([n; 32])).unwrap().unwrap().0;
+        assert_eq!(name(2).as_deref(), Some("zed"));
+        assert_eq!(
+            [name(1), name(3), name(4), name(5)],
+            [None, None, None, None]
+        );
+        assert_eq!(name(6).as_deref(), Some("Amy"));
+        assert!(
+            !store
+                .set_name(&PeerId::new([1; 32]), Some(("ZED", "zed")))
+                .unwrap()
+        );
     }
 }

@@ -7,8 +7,8 @@
 //! - The API's data: [`TransferInfo`] and its [`Status`], [`inspect`] for what is inside a
 //!   transfer, [`requests`] for request bodies, [`events`] for the event stream, [`ApiError`],
 //!   [`settings`] for the settings clients show, [`ui`] for the clients' shared look,
-//!   [`schedule`] for the alternative limits' schedule, and [`discovery`] for how local
-//!   clients find an engine's API.
+//!   [`schedule`] for the alternative limits' schedule, [`folders`] for browsing the engine's
+//!   folders, and [`discovery`] for how local clients find an engine's API.
 //! - What clients make of it, shared by the TUI and the web UI (D-119): [`model`] follows the
 //!   event stream, [`notices`] picks out what to tell the user, [`network`] says what the
 //!   network defaults share (D-227), [`finding`] filters and sorts (D-192), [`columns`] decides
@@ -25,6 +25,7 @@ mod error;
 pub mod events;
 pub mod explain;
 pub mod finding;
+pub mod folders;
 pub mod inspect;
 pub mod model;
 pub mod network;

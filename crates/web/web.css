@@ -818,3 +818,529 @@
   gap: var(--gap-2);
   flex: none;
 }
+
+/* ---------- Path picker (`picker`, D-258) ---------- */
+
+/* A dialog's form of several fields. */
+.form-stack {
+  display: grid;
+  gap: var(--gap-3);
+}
+
+/* A path field and its Browse button. */
+.path-field {
+  display: flex;
+  gap: var(--gap-2);
+  min-width: 0;
+}
+
+.path-field .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.browse {
+  flex: none;
+}
+
+.dialog--picker {
+  top: 5vh;
+  width: min(980px, calc(100vw - 32px));
+  height: min(700px, 90vh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dialog--picker .dialog__body {
+  display: block;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dialog--picker .dialog__actions {
+  align-items: center;
+  gap: var(--gap-3);
+  padding: var(--gap-3) var(--gap-4);
+  border-top: 1px solid var(--line);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* The path, as a prompt would show it: `engine:/Users/chris`. */
+.pathbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  min-height: 40px;
+  padding: 4px var(--gap-4);
+  background: var(--raise);
+  border-bottom: 1px solid var(--line);
+}
+
+.pathbar__host {
+  flex: none;
+  color: var(--dim);
+}
+
+.pathbar__crumbs {
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  cursor: text;
+}
+
+.pathbar__crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.pathbar__crumb {
+  display: flex;
+  flex: none;
+}
+
+.pathbar__step {
+  padding: 1px 2px;
+}
+
+.pathbar__step:hover {
+  color: var(--down);
+  background: var(--select);
+}
+
+.pathbar__step[aria-current] {
+  color: var(--down);
+}
+
+.pathbar__sep {
+  color: var(--dim);
+}
+
+.pathbar__form {
+  display: flex;
+  flex: 1;
+  gap: var(--gap-2);
+  min-width: 0;
+}
+
+.pathbar__input {
+  flex: 1;
+}
+
+.pathbar__edit {
+  flex: none;
+}
+
+/* While a path is typed, the field stands in for the steps. */
+.pathbar__crumbs[hidden],
+.pathbar__edit[hidden] {
+  display: none;
+}
+
+.pathbar__error,
+.picker__remote {
+  margin: 0;
+  padding: 4px var(--gap-4) 0;
+  font-size: var(--text-xs);
+}
+
+.picker__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  padding: var(--gap-2) var(--gap-4);
+}
+
+.picker__filter {
+  flex: 1;
+  max-width: 320px;
+}
+
+.picker__count {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.picker__place-menu {
+  display: none;
+}
+
+.picker__main {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+
+.picker__places {
+  padding: var(--gap-2) 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+}
+
+.picker__places-title {
+  padding: 0 var(--gap-3) 4px;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.picker__places ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker__place {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 3px var(--gap-3);
+  color: var(--dim);
+  text-align: left;
+}
+
+.picker__place:hover {
+  color: var(--fg);
+  background: var(--select);
+}
+
+.picker__place[aria-current] {
+  color: var(--down);
+  background: var(--select);
+  box-shadow: inset 2px 0 0 var(--down);
+}
+
+.picker__place-glyph {
+  flex: none;
+  width: 1.4em;
+  text-align: center;
+}
+
+.picker__place-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__entries {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.picker__head,
+.picker__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 80px 128px;
+  gap: var(--gap-3);
+  align-items: center;
+  padding: 0 var(--gap-4) 0 var(--gap-3);
+}
+
+.picker__head {
+  height: 26px;
+  flex: none;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  border-bottom: 1px solid var(--line);
+}
+
+.picker__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+  transition: opacity 0.15s 0.12s;
+}
+
+.picker__list:focus {
+  outline: none;
+}
+
+.picker__list:focus-visible {
+  box-shadow: inset 2px 0 0 var(--hot);
+}
+
+.picker__entries[aria-busy="true"] .picker__list {
+  opacity: 0.55;
+}
+
+/* One fixed height, so the list can draw only the rows in view (`viewport`). */
+.picker__row {
+  height: 30px;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.picker__row:hover {
+  background: var(--select);
+}
+
+.picker__row[data-kind="folder"] .picker__name {
+  color: var(--down);
+}
+
+.picker__row[aria-disabled],
+.picker__row[aria-disabled] .picker__name,
+.picker__row[data-hidden] .picker__name {
+  color: var(--dim);
+}
+
+.picker__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker__slash,
+.picker__link,
+.picker__size,
+.picker__date {
+  color: var(--dim);
+}
+
+.picker__row .picker__size,
+.picker__row .picker__date {
+  font-size: var(--text-sm);
+}
+
+/* The cursor: a bar in reverse video, as on a terminal's file manager. */
+.picker__list .picker__row[aria-selected="true"],
+.picker__list .picker__row[aria-selected="true"] * {
+  color: var(--bg);
+}
+
+.picker__row[aria-selected="true"] {
+  background: var(--down);
+}
+
+.picker__list:not(:focus) .picker__row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--down) 78%, var(--bg));
+}
+
+/* Drawn glyphs, in the theme's colors: a folder with its tab, a page with its corner turned. */
+.glyph {
+  position: relative;
+  justify-self: center;
+}
+
+.glyph--folder {
+  width: 14px;
+  height: 10px;
+  margin-top: 3px;
+  color: var(--down);
+  border: 1px solid currentColor;
+}
+
+.glyph--folder::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -4px;
+  width: 6px;
+  height: 3px;
+  border: 1px solid currentColor;
+  border-bottom: 0;
+}
+
+.glyph--file {
+  width: 10px;
+  height: 13px;
+  color: var(--dim);
+  border: 1px solid currentColor;
+  clip-path: polygon(0 0, 55% 0, 100% 40%, 100% 100%, 0 100%);
+}
+
+.glyph--file::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: -1px;
+  width: 6px;
+  height: 6px;
+  border-left: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+}
+
+.picker__empty {
+  position: absolute;
+  inset: 26px 0 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: var(--gap-4);
+  color: var(--dim);
+  text-align: center;
+  pointer-events: none;
+}
+
+.picker__empty > * {
+  pointer-events: auto;
+}
+
+.picker__empty p {
+  margin: 0;
+}
+
+.picker__empty-title {
+  color: var(--fg);
+  font-size: var(--text-lg);
+}
+
+.picker__empty--bad .picker__empty-title {
+  color: var(--bad);
+}
+
+.picker__caret {
+  display: inline-block;
+  width: 0.6em;
+  height: 1em;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: currentColor;
+  animation: caret 1s steps(1) infinite;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.picker__loading {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 2px;
+  overflow: hidden;
+}
+
+.picker__loading::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  background: var(--down);
+  box-shadow: 0 0 var(--glow-size) var(--glow);
+  animation: building 1.1s ease-in-out infinite;
+}
+
+.picker__truncated {
+  margin: 0;
+  padding: 4px var(--gap-4);
+  font-size: var(--text-xs);
+  border-top: 1px dashed var(--line);
+}
+
+.picker__hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--gap-4);
+  margin: 0;
+  padding: 6px var(--gap-4);
+  color: var(--dim);
+  font-size: var(--text-xs);
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.picker__statement {
+  display: flex;
+  flex: 1;
+  gap: 1ch;
+  min-width: 0;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.picker__verb {
+  flex: none;
+  color: var(--dim);
+}
+
+/* A long path loses its start, not the name at its end. */
+.picker__chosen {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* Phones: the picker fills the screen, and the places fold into a menu. */
+@media (max-width: 640px) {
+  .dialog--picker {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    transform: none;
+    border: 0;
+  }
+
+  .dialog--picker .dialog__actions {
+    flex-wrap: wrap;
+  }
+
+  .picker__statement {
+    flex-basis: 100%;
+  }
+
+  .picker__main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .picker__places,
+  .picker__date,
+  .picker__hints,
+  .pathbar__host {
+    display: none;
+  }
+
+  .picker__place-menu {
+    display: block;
+    flex: none;
+    width: 140px;
+  }
+
+  .picker__toolbar {
+    flex-wrap: wrap;
+    gap: var(--gap-2) var(--gap-3);
+  }
+
+  .picker__filter {
+    order: 1;
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .picker__head,
+  .picker__row {
+    grid-template-columns: 16px minmax(0, 1fr) 72px;
+  }
+
+  .picker__row {
+    height: 40px;
+  }
+}

@@ -159,6 +159,13 @@ pub fn folder_problem(folder: &str) -> Option<&'static str> {
     (!absolute(folder)).then_some("The folder must be an absolute path on the engine's machine.")
 }
 
+/// Why `folder` can't take a new download, if it can't. Empty leaves it to the engine.
+pub fn save_folder_problem(folder: &str) -> Option<&'static str> {
+    let folder = folder.trim();
+    (!folder.is_empty() && !absolute(folder))
+        .then_some("The folder must be an absolute path on the engine's machine.")
+}
+
 /// Why `name` can't name a view or category, if it can't.
 pub fn name_problem(name: &str) -> Option<&'static str> {
     name.trim().is_empty().then_some("Give it a name.")
@@ -232,6 +239,9 @@ mod tests {
         assert_eq!(request.tags.len(), 2);
         assert_eq!(folder_problem("/srv"), None);
         assert!(folder_problem("srv").is_some());
+        assert_eq!(save_folder_problem("  "), None);
+        assert_eq!(save_folder_problem("/srv"), None);
+        assert!(save_folder_problem("srv").is_some());
         assert!(name_problem("  ").is_some());
     }
 

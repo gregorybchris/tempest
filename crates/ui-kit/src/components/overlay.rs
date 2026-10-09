@@ -61,15 +61,19 @@ pub fn Dialog(
     /// Its buttons, at the bottom right.
     #[prop(optional, into)]
     actions: Option<ViewFn>,
+    /// A class beside `dialog`, for a dialog laid out its own way.
+    #[prop(optional)]
+    class: &'static str,
     /// Its contents.
     children: ChildrenFn,
 ) -> impl IntoView {
     close_on_escape(open, on_close);
     let actions = StoredValue::new(actions);
+    let class = format!("dialog {class}").trim_end().to_owned();
     view! {
         <Show when=move || open.get()>
             <div class="scrim" on:click=move |_| on_close.run(())></div>
-            <div class="dialog" role="dialog" aria-modal="true" aria-label=move || title.get()
+            <div class=class.clone() role="dialog" aria-modal="true" aria-label=move || title.get()
                 tabindex="-1" node_ref={focus_scope::<html::Div>()} on:keydown=keep_tab_inside>
                 <header class="dialog__head">
                     <h2 class="dialog__title">{title}</h2>

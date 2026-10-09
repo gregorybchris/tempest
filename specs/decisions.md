@@ -4202,3 +4202,23 @@ This revises D-175, D-182 and D-189.
 
 **Rationale:** The protocol isn't frozen, so the programs are only known to work built from the same commit. A tap would need a second repository to maintain.
 
+---
+
+## D-258: The engine lists its own folders, and the web UI picks paths from them
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Sharing, saving and moving take absolute paths on the engine's machine, which the web UI asked people to type. A browser's file picker can't help: it never reveals real absolute paths, and with remote access it shows the browser's disk, not the engine's.
+
+**Options:** keep typed paths only; a browser upload or drag and drop, which gives names but no paths; the engine listing its own folders for a picker the web UI draws (chosen).
+
+**Decision:**
+
+- `GET /v1/folder` lists a folder on the engine's machine: its resolved path, its parent, and its entries, folders first in natural order, cut short past a cap with `truncated`. With no path it starts at the save folder, or home. `GET /v1/places` names where to start: home, the save folder, the home folder's usual folders, mounted volumes or drive letters, and the root. Symbolic links count as their target's kind and are flagged. Errors add `not_a_folder` and `permission_denied`. The work runs off the async executor.
+- Both routes take the same access as every other, and remote clients may use them. They can already share any path they type, so listing folders grants nothing new.
+- The path is resolved by its text alone, without following links, so a folder reached through a link keeps the path it was reached by.
+- In the web UI, every field that takes a path on the engine's machine keeps its text and gains a Browse button: sharing (a file or folder), a new download's folder, Move, the default save folder and category folders (folders only). Choosing fills the field; Settings save it at once, and Share moves the focus to its Share button.
+- The picker opens at the field's path, else where that kind of field last picked from (remembered in the browser's storage), else where the engine starts. It has a path bar of steps that also takes a typed path, the places, a filter, and a footer that says what choosing does. With nothing selected, a folder picker chooses the folder shown.
+- It is keyboard-first: arrows, page keys, home and end move; enter or → opens a folder, and enter chooses a file; ← or backspace goes up; typing filters and esc clears the filter, then closes; `.` shows hidden entries; ctrl or cmd with L types a path, and with enter chooses. Its list draws only the rows in view, as the transfers list does. Remotely, it says the folders are the engine's, not the device's.
+
+**Rationale:** Only the engine can see its own disk, and a picker that shows it keeps the paths exact without making people type them. Keeping the text fields means a pasted path still works.

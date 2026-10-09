@@ -19,7 +19,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 
 - Every route is under `/v1`. A later, incompatible version gets a new prefix.
 - Request bodies are JSON and must be sent as `application/json`; anything else gets 415. Browsers can't send such requests to another origin without asking first, and the API never says yes.
-- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `no_files` (409, nothing on disk to show yet), `local_only` (403, the action works only on the engine's own machine), `reveal_failed` (500, the file manager didn't start), `unsupported_media_type` (415), `tracker` (502, a tracker refused or couldn't be reached while publishing, unpublishing or signing in), `internal` (500) and `unavailable` (503, the engine is shutting down, or another engine holds its data directory).
+- Every error has the same body: `{"error": "<code>", "message": "<sentence>"}`. The codes are `invalid_request` (400), `unknown_category` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `method_not_allowed` (405), `already_added` (409), `removing` (409), `moving` (409, its files are being moved), `no_data` (409, nothing on disk to check yet), `no_files` (409, nothing on disk to show yet), `local_only` (403, the action works only on the engine's own machine), `not_a_folder` (400, a file is where a folder was asked for), `permission_denied` (403, the engine's user may not read the folder), `reveal_failed` (500, the file manager didn't start), `unsupported_media_type` (415), `tracker` (502, a tracker refused or couldn't be reached while publishing, unpublishing or signing in), `internal` (500) and `unavailable` (503, the engine is shutting down, or another engine holds its data directory).
 - A transfer's ID is its bundle ID in hex.
 
 ## Routes
@@ -54,6 +54,8 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `GET /v1/categories` | | Each category's save folder, by name |
 | `PUT /v1/categories/{name}` | `{"save_folder": "..."}` | The category |
 | `DELETE /v1/categories/{name}` | | 204; transfers in it have none |
+| `GET /v1/folder?path=…&hidden=true` | | A folder on the engine's machine (D-258): its absolute `path`, its `parent` (none at a root), and its `entries`, without hidden ones unless asked. With no `path`, the save folder, or the home folder if that doesn't exist. 400 for a relative path, 404 `not_found`, 400 `not_a_folder`, 403 `permission_denied` |
+| `GET /v1/places` | | The folders worth browsing from on the engine's machine: home, the save folder, the home folder's usual folders, mounted volumes or drive letters, and the root; each with a `name`, `path` and `kind` |
 | `GET /v1/events?after=N` | | The event stream |
 | `GET /v1/session` | | `{"required", "signed_in"}`: whether the engine wants a sign-in and whether the request has one. Answered without credentials |
 | `POST /v1/session` | `{"token": "..."}` | As `GET`, after the token matched, with the session cookie set; 401 otherwise. Answered without credentials |
@@ -62,6 +64,8 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 A chunk map's cells cover consecutive chunks in order, their sizes differing by at most one, so its size stays bounded however large the bundle. A cell's availability is the fewest connected peers holding any one of its chunks. A transfer that isn't running has nothing in flight and every availability 0, and says so with `"running": false` (D-193).
 
 A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link, dates, the trackers it is published on, and for a completed transfer which sharing limit stopped it (`stopped_by`: `ratio`, `time` or `idle`, with the limit's value).
+
+A folder's entries are its folders, then its files, each in natural order: case aside, and `file2` before `file10`. Each has a `name`, a `kind` (`folder` or `file`, after following a symbolic link), whether it is a `symlink`, a file's `size`, when it was `modified`, and whether it is `hidden`. A folder lists at most `MAX_ENTRIES` entries, the first in that order, and says `truncated` when it had more. Remote clients may browse as local ones do: they can already share any path they type, so listing folders gives them nothing new. The types and the cap are in `tempest_api::folders`.
 
 The `ui` settings include whether the first-run account of the network defaults was shown (D-227), so it is said once per data directory, whichever client is first.
 

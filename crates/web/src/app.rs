@@ -24,6 +24,7 @@ use crate::detail::Detail;
 use crate::dialogs::Dialogs;
 use crate::keys::{self, Command, Scope};
 use crate::list::{Move, Order, Transfers};
+use crate::picker::{Picker, PickerHost};
 use crate::share::{Share, SharePath, share_ids};
 use crate::signin::{self, Auth, SignIn};
 use crate::state::{Area, Deeper, Dialog, Ui};
@@ -88,6 +89,7 @@ fn Shell() -> impl IntoView {
     provide_context(config);
     provide_context(sections);
     provide_context(SharePath(NodeRef::new()));
+    provide_context(Picker::new());
 
     // Registered before the drawer's and dialogs' own, so `esc` goes back one level at a time.
     keyboard(store, ui, controls, fields, order);
@@ -124,6 +126,8 @@ fn Shell() -> impl IntoView {
         </div>
         <Detail />
         <Dialogs />
+        // After the dialogs, so it opens over the one that asked for it.
+        <PickerHost />
     }
 }
 

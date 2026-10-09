@@ -15,10 +15,12 @@ use tempest_ui_kit::components::*;
 use tempest_ui_kit::theme::{ThemePicker, bool_attr};
 use wasm_bindgen::JsCast;
 
+use crate::browse::Purpose;
 use crate::config::Config;
 use crate::controls::Controls;
 use crate::list::Move;
 use crate::notify;
+use crate::picker::Browse;
 use crate::rows::{self, Adds, Control, Extras, Row, Section};
 use crate::state::{Area, Dialog, Ui};
 use crate::store::Store;
@@ -246,6 +248,10 @@ fn InlineField(
     label: String,
     #[prop(optional)] placeholder: &'static str,
     #[prop(optional)] title: &'static str,
+    /// A Browse button beside it, for a folder on the engine's machine, which saves the folder
+    /// chosen.
+    #[prop(default = None)]
+    browse: Option<Purpose>,
     #[prop(into)] save: Callback<String, Result<(), String>>,
 ) -> impl IntoView {
     let start = StoredValue::new(text.clone());
@@ -277,6 +283,9 @@ fn InlineField(
                     }
                 }
             />
+            {browse.map(|purpose| view! {
+                <Browse purpose value=draft small=true on_choose=move |path| { draft.set(path); commit(); } />
+            })}
             <Show when=dirty>
                 <button class="btn btn--primary btn--small" type="submit">"save"</button>
             </Show>
@@ -313,7 +322,8 @@ fn ControlView(row: Row) -> impl IntoView {
                 ValueKind::Folder => "the default",
                 _ => "none",
             };
-            view! { <InlineField text label=label.clone() placeholder title=kind.help() save /> }.into_any()
+            let browse = (kind == ValueKind::Folder).then_some(Purpose::SaveFolder);
+            view! { <InlineField text label=label.clone() placeholder title=kind.help() browse save /> }.into_any()
         }
         Control::Toggle { key, on } => switch(label.clone(), on, move || {
             config.change([(key, json!(!on))], format!("{label}: {}", if on { "off" } else { "on" }));
@@ -376,7 +386,7 @@ fn ControlView(row: Row) -> impl IntoView {
                 Ok(())
             };
             view! {
-                <InlineField text=folder label=format!("{name}'s folder") placeholder="/path/to/folder" save />
+                <InlineField text=folder label=format!("{name}'s folder") placeholder="/path/to/folder" browse=Some(Purpose::Category) save />
                 <button class="btn btn--ghost btn--small" type="button" data-remove="" title="Remove the category (x)"
                     on:click=move |_| config.remove_category(remove_name.clone())>
                     "remove"
@@ -513,6 +523,7 @@ fn AddField(adds: Adds) -> impl IntoView {
             {(adds == Adds::Category).then(|| view! {
                 <input class="input" type="text" placeholder="/folder/for/its/downloads" aria-label="Its folder" spellcheck="false" autocomplete="off"
                     prop:value=move || folder.get() on:input=move |e| folder.set(event_target_value(&e)) />
+                <Browse purpose=Purpose::Category value=folder small=true on_choose=move |path| folder.set(path) />
             })}
             <button class="btn btn--small" type="submit">"add"</button>
             {move || problem.get().map(|p| view! { <span class="field__error add-field__error">{p}</span> })}

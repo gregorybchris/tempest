@@ -157,7 +157,7 @@ The TUI is minimal but powerful, giving quick access to every essential feature.
 
 ## Client web UI
 
-The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web` opens it. It shares the TUI's logic through the `api` crate (D-200): the event-following model, finding, column priorities, explanations and saved views. Its keys come from one table, as the TUI's do, and match them where both have the command; what differs, and how the page follows the engine, is in D-202.
+The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web` opens it. It shares the TUI's logic through the `api` crate (D-200): the event-following model, finding, column priorities, explanations and saved views. Its keys come from one table, as the TUI's do, and match them where both have the command; what differs, and how the page follows the engine, is in D-202. A field that takes a path on the engine's machine has a Browse button beside it, which opens a picker over the engine's own folders, with keys of its own (D-258).
 
 ## Tracker website
 

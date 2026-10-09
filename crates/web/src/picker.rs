@@ -569,7 +569,7 @@ fn PickerDialog(pick: Pick) -> impl IntoView {
         view! {
             <p class="picker__statement" aria-live="polite">{statement}</p>
             <Button kind=ButtonKind::Ghost on_click=close>"Cancel"</Button>
-            <Button kind=ButtonKind::Primary disabled=none title="ctrl+enter" on_click=move || run(Command::Choose)>
+            <Button kind=ButtonKind::Primary disabled=none title=browse::hints(mac())[4].0 on_click=move || run(Command::Choose)>
                 {label}
             </Button>
         }
@@ -611,8 +611,8 @@ fn PickerDialog(pick: Pick) -> impl IntoView {
                     <Entries browser generation loading list view_box measure act focus_list offset set_filter />
                 </div>
                 <ul class="picker__hints" aria-hidden="true">
-                    {browse::HINTS.iter().map(|(keys, what)| view! {
-                        <li><kbd>{*keys}</kbd>" "{*what}</li>
+                    {browse::hints(mac()).into_iter().map(|(keys, what)| view! {
+                        <li><kbd>{keys}</kbd>" "{what}</li>
                     }).collect_view()}
                 </ul>
             </div>
@@ -1053,4 +1053,12 @@ fn EntryRow(
         </div>
     }
     .into_any()
+}
+
+/// Whether the browser runs on a Mac, where ⌘ stands in for ctrl.
+fn mac() -> bool {
+    window()
+        .navigator()
+        .platform()
+        .is_ok_and(|platform| platform.starts_with("Mac"))
 }

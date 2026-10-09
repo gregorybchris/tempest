@@ -472,17 +472,23 @@ pub fn command(press: Press) -> Option<Command> {
     })
 }
 
-/// The keys the footer lists, with what they do.
-pub const HINTS: &[(&str, &str)] = &[
-    ("↑↓", "move"),
-    ("→", "open"),
-    ("←", "up"),
-    ("enter", "open or choose"),
-    ("ctrl+enter", "choose"),
-    ("type", "filter"),
-    (".", "hidden"),
-    ("ctrl+L", "path"),
-];
+/// The keys the footer lists, with what they do, written with ⌘ on a Mac.
+pub fn hints(mac: bool) -> [(&'static str, &'static str); 8] {
+    let (choose, path) = match mac {
+        true => ("⌘enter", "⌘L"),
+        false => ("ctrl+enter", "ctrl+L"),
+    };
+    [
+        ("↑↓", "move"),
+        ("→", "open"),
+        ("←", "up"),
+        ("enter", "open or choose"),
+        (choose, "choose"),
+        ("type", "filter"),
+        (".", "hidden"),
+        (path, "path"),
+    ]
+}
 
 /// When an entry last changed, in the browser's time zone: `2026-10-08 14:32`. `offset` is
 /// the zone's minutes ahead of UTC.

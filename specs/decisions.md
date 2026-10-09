@@ -3896,3 +3896,22 @@ This revises D-175, D-182 and D-189.
 - Clients are unchanged: they already sign the authority of the URL they use.
 
 **Rationale:** The operator is the only source of the tracker's name that a client can't forge. Refusing sign-ins without it, outside the local machine, is safe by default and still lets a tracker run with no configuration.
+
+---
+
+## D-240: Bounds on what one client can make a tracker, relay or peer do
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A review before launch found work that one client could make a server or a peer do without limit: fill a swarm, or the tracker, with made-up peer IDs; fetch a 64 MiB manifest again and again; leave listings pending forever; read every comment, or rank every search match, in one request; use a relay's bandwidth without limit; and keep real peers from getting forwarding permissions with forged sources.
+
+**Decision:**
+
+- **Announces (tracker).** Each listed peer records its client: its IPv4 address or IPv6 /64. A new peer from a client that already lists `max_swarm_peers_per_ip` (100) in the swarm, or `max_peers_per_ip` (10,000) across the tracker, is refused with `rate_limited`, retrying after the announce interval. Both are generous for many people behind one carrier-grade NAT, and are `tempest-tracker` options. The protocol allows trackers such limits.
+- **Manifests (peers).** A Manifest being sent counts toward `max_open_requests` until the driver reports it sent, as the protocol already required. A connection gets one at a time and at most two in all; further ManifestRequests are refused with `busy`, which the protocol now allows. The Manifest also waits for the upload speed limits, and Data waits for them before it is read from disk, so a throttled connection doesn't hold whole responses in memory.
+- **Pending listings (catalog).** A listing still pending three days after it was made or last edited is dropped; its sharer's next announce asks again. This replaces D-207's giving up until restart (`--pending-hours` replaces `--fetch-give-up`).
+- **Comments and search (catalog).** A listing's comments come a page (100) at a time, after a given comment ID. Search matches stream out of the index into a bounded heap holding a page's depth, at most 10,000 deep; the total still counts every match. The catalog's database and index work runs on blocking threads.
+- **Relays.** Each registered peer's forwarding is limited to 1 MiB/s in each direction by default. When a peer's permission table is full, a new address replaces the oldest one the peer never sent to, so forged sources, which never get answers, can't crowd out real ones. Sockets to lend are bound outside the registry's lock.
+- **Recommended relays (client).** A relay no tracker has recommended for an hour is forgotten, a newcomer beyond 16 replaces the one recommended longest ago, and only four come from one response.
+
+**Rationale:** Each limit is far above what an honest client needs and bounds what a dishonest one costs. Where refusing would hurt honest users more than the abuse, as with forwarding permissions and recommended relays, old entries make way instead.

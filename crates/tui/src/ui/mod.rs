@@ -9,7 +9,9 @@
 mod chunks;
 mod detail;
 mod form;
+mod help;
 mod modal;
+mod palette;
 mod rates;
 mod rows;
 mod share;
@@ -223,7 +225,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 /// How many rows the help overlay can scroll: 0 when it fits the screen.
 pub fn help_overflow(app: &App) -> usize {
     let (width, height) = app.size;
-    modal::help_overflow(app, Rect::new(0, 0, width, height))
+    help::help_overflow(app, Rect::new(0, 0, width, height))
 }
 
 /// `title` on the rule across `area`, near its left end.

@@ -4,11 +4,12 @@
 //!
 //! The layout is shared with the TUI (`specs/interfaces.md`, D-131, D-136 to D-139). UI logic
 //! lives in plain modules with tests (`keys`, `columns`, `present`, `request`, `stream`, `rows`,
-//! `edits`, `notify`), and the components stay thin.
+//! `edits`, `notify`, `browse`, `paths`), and the components stay thin.
 
 mod api;
 mod app;
 mod areas;
+mod browse;
 mod columns;
 mod config;
 mod controls;
@@ -18,6 +19,8 @@ mod edits;
 mod keys;
 mod list;
 mod notify;
+mod paths;
+mod picker;
 mod present;
 mod request;
 mod rows;

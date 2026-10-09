@@ -18,10 +18,12 @@ use tempest_ui_kit::components::{
 use tempest_ui_kit::theme::bool_attr;
 
 use crate::api;
+use crate::browse::Purpose;
 use crate::config::Config;
 use crate::controls::Controls;
 use crate::edits::{self, LimitsForm};
 use crate::keys::{self, Scope};
+use crate::picker::Browse;
 use crate::state::{Dialog, Ui};
 use crate::store::Store;
 
@@ -72,7 +74,9 @@ pub fn link_problem(link: &str) -> Option<&'static str> {
 fn AddLink() -> impl IntoView {
     let ui = expect_context::<Ui>();
     let controls = expect_context::<Controls>();
+    let config = expect_context::<Config>();
     let link = RwSignal::new(String::new());
+    let folder = RwSignal::new(String::new());
     let stopped = RwSignal::new(false);
     let tried = RwSignal::new(false);
     let input = NodeRef::<Input>::new();
@@ -83,18 +87,34 @@ fn AddLink() -> impl IntoView {
             .then(|| link.with(|l| link_problem(l)))
             .flatten()
     };
+    let folder_problem = move || {
+        tried
+            .get()
+            .then(|| folder.with(|f| edits::save_folder_problem(f)))
+            .flatten()
+    };
+    // The folder a download goes to without one: the engine's save folder.
+    let default_folder = move || {
+        config
+            .info
+            .with(|i| i.as_ref().and_then(|i| i.settings.save_folder.clone()))
+            .unwrap_or_else(|| "the default folder".to_owned())
+    };
     let add = move || {
         tried.set(true);
-        if link.with(|l| link_problem(l)).is_some() {
+        if link.with(|l| link_problem(l)).is_some()
+            || folder.with(|f| edits::save_folder_problem(f)).is_some()
+        {
             return;
         }
         let (text, stopped) = (
             link.get_untracked().trim().to_owned(),
             stopped.get_untracked(),
         );
+        let save_folder = Some(folder.get_untracked().trim().to_owned()).filter(|f| !f.is_empty());
         ui.dialog.set(None);
         leptos::task::spawn_local(async move {
-            match api::add_link(text, stopped).await {
+            match api::add_link(text, save_folder, stopped).await {
                 Ok(added) => {
                     controls.say(Tone::Down, format!("Added {}", added.name));
                     ui.cursor.set(Some(added.id));
@@ -113,7 +133,7 @@ fn AddLink() -> impl IntoView {
                 <Button kind=ButtonKind::Primary on_click=add>"Add"</Button>
             }
         >
-            <form on:submit=move |e| { e.prevent_default(); add(); }>
+            <form class="form-stack" on:submit=move |e| { e.prevent_default(); add(); }>
                 <label class="field">
                     <span class="field__label">"Link"</span>
                     <input
@@ -128,8 +148,28 @@ fn AddLink() -> impl IntoView {
                         on:input=move |e| link.set(event_target_value(&e))
                     />
                     {move || problem().map(|p| view! { <span class="field__error">{p}</span> })}
-                    <span class="field__help">"The download starts through the queue, into the default folder."</span>
+                    <span class="field__help">"The download starts through the queue."</span>
                 </label>
+                <div class="field">
+                    <label class="field__label" for="add-folder">"Save to"</label>
+                    <div class="path-field">
+                        <input
+                            id="add-folder"
+                            class="input"
+                            type="text"
+                            placeholder=default_folder
+                            spellcheck="false"
+                            autocomplete="off"
+                            aria-invalid=move || bool_attr(folder_problem().is_some())
+                            prop:value=move || folder.get()
+                            on:input=move |e| folder.set(event_target_value(&e))
+                        />
+                        <Browse purpose=Purpose::Download value=folder on_choose=move |path| folder.set(path) />
+                    </div>
+                    {move || folder_problem().map(|p| view! { <span class="field__error">{p}</span> })}
+                    <span class="field__help">"A folder on the engine's machine; empty for the default."</span>
+                </div>
+                <button type="submit" hidden=true></button>
             </form>
             <Checkbox checked=stopped on_change=move |on| stopped.set(on)>"Add it stopped"</Checkbox>
         </Modal>
@@ -392,6 +432,8 @@ fn Move(id: BundleId) -> impl IntoView {
             .unwrap_or_default(),
     );
     let problem = RwSignal::new(None::<String>);
+    let input = NodeRef::<Input>::new();
+    focus_on_load(input);
     let save = move || {
         let text = folder.get_untracked().trim().to_owned();
         if let Some(why) = edits::folder_problem(&text) {
@@ -415,7 +457,24 @@ fn Move(id: BundleId) -> impl IntoView {
             }
         >
             <form on:submit=move |e| { e.prevent_default(); save(); }>
-                <Field label="Folder" value=folder placeholder="/path/to/folder" help="An absolute path on the engine's machine. The transfer pauses while its files move." focus=true />
+                <div class="field">
+                    <label class="field__label" for="move-folder">"Folder"</label>
+                    <div class="path-field">
+                        <input
+                            id="move-folder"
+                            node_ref=input
+                            class="input"
+                            type="text"
+                            placeholder="/path/to/folder"
+                            spellcheck="false"
+                            autocomplete="off"
+                            prop:value=move || folder.get()
+                            on:input=move |e| folder.set(event_target_value(&e))
+                        />
+                        <Browse purpose=Purpose::Move value=folder on_choose=move |path| { folder.set(path); problem.set(None); } />
+                    </div>
+                    <span class="field__help">"An absolute path on the engine's machine. The transfer pauses while its files move."</span>
+                </div>
             </form>
             {problem_line(problem)}
         </Modal>

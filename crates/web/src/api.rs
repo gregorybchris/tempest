@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
+use tempest_api::folders::{FolderInfo, PlaceInfo};
 use tempest_api::inspect::{ChunkMapInfo, FileInfo, PeerInfo};
 use tempest_api::requests::{
     AddRequest, Category, CategoryRequest, MoveRequest, NameRequest, QueuePlace, QueueRequest,
@@ -65,14 +66,35 @@ pub async fn rename(id: BundleId, name: Option<String>) -> Result<TransferInfo> 
     .await
 }
 
-/// Adds a download from `link`.
-pub async fn add_link(link: String, stopped: bool) -> Result<TransferInfo> {
+/// Adds a download from `link`, into `save_folder` or the default.
+pub async fn add_link(
+    link: String,
+    save_folder: Option<String>,
+    stopped: bool,
+) -> Result<TransferInfo> {
     let request = AddRequest {
         link: Some(link),
+        save_folder: save_folder.map(Into::into),
         stopped,
         ..AddRequest::default()
     };
     send(method::POST, &format!("{PREFIX}/transfers"), Some(&request)).await
+}
+
+/// The folder at `path` on the engine's machine, hidden entries included, or where browsing
+/// starts with `None`.
+pub async fn folder(path: Option<&str>) -> Result<FolderInfo> {
+    let mut uri = format!("{PREFIX}/folder?hidden=true");
+    if let Some(path) = path {
+        uri.push_str("&path=");
+        uri.push_str(&segment(path));
+    }
+    get(&uri).await
+}
+
+/// The places worth browsing from on the engine's machine.
+pub async fn places() -> Result<Vec<PlaceInfo>> {
+    get(&format!("{PREFIX}/places")).await
 }
 
 /// A transfer's files.
@@ -170,7 +192,7 @@ pub async fn remove_category(name: &str) -> Result<()> {
     send(method::DELETE, &path, None::<&()>).await
 }
 
-/// `text` as one segment of a path.
+/// `text` as one segment of a path, or a query's value.
 fn segment(text: &str) -> String {
     String::from(js_sys::encode_uri_component(text))
 }

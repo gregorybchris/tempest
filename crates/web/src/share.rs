@@ -13,11 +13,14 @@ use tempest_ui_kit::format;
 use tempest_ui_kit::theme::bool_attr;
 
 use crate::api;
+use crate::browse::Purpose;
 use crate::config::Config;
 use crate::controls::Controls;
 use crate::edits::ShareForm;
 use crate::list::Move;
+use crate::picker::Browse;
 use crate::present;
+use crate::signin::Auth;
 use crate::state::Ui;
 use crate::store::Store;
 
@@ -138,6 +141,28 @@ fn NewShare() -> impl IntoView {
         });
     };
 
+    // A path picked from the engine's folders fills the field, and the Share button takes
+    // the focus, so enter shares it as the rest of the form stands.
+    let submit = NodeRef::<leptos::html::Button>::new();
+    let chosen = move |picked: String| {
+        path.set(picked);
+        problem.set(None);
+        request_animation_frame(move || {
+            if let Some(button) = submit.get_untracked() {
+                let _ = button.focus();
+            }
+        });
+    };
+    let remote = matches!(
+        expect_context::<RwSignal<Auth>>().get_untracked(),
+        Auth::SignedIn { remote: true }
+    );
+    let help = match remote {
+        true => {
+            "On the engine's machine, not this device. It is shared from where it is; nothing is copied."
+        }
+        false => "On the engine's machine. It is shared from where it is; nothing is copied.",
+    };
     let categories = Signal::derive(move || {
         let mut options = vec![(String::new(), "none".to_owned())];
         options.extend(config.category_names().into_iter().map(|c| (c.clone(), c)));
@@ -159,22 +184,26 @@ fn NewShare() -> impl IntoView {
     view! {
         <Panel title="share a file or folder">
             <form class="share-form" on:submit=move |e| { e.prevent_default(); share(); }>
-                <label class="field share-form__path">
-                    <span class="field__label">"Path"</span>
-                    <input
-                        node_ref=path_ref
-                        class="input input--large"
-                        type="text"
-                        placeholder="/absolute/path/to/a/file/or/folder"
-                        spellcheck="false"
-                        autocomplete="off"
-                        disabled=busy
-                        aria-invalid=move || bool_attr(problem.with(Option::is_some))
-                        prop:value=move || path.get()
-                        on:input=move |e| path.set(event_target_value(&e))
-                    />
-                    <span class="field__help">"On the engine's machine. It is shared from where it is; nothing is copied."</span>
-                </label>
+                <div class="field share-form__path">
+                    <label class="field__label" for="share-path">"Path"</label>
+                    <div class="path-field">
+                        <input
+                            id="share-path"
+                            node_ref=path_ref
+                            class="input input--large"
+                            type="text"
+                            placeholder="/absolute/path/to/a/file/or/folder"
+                            spellcheck="false"
+                            autocomplete="off"
+                            disabled=busy
+                            aria-invalid=move || bool_attr(problem.with(Option::is_some))
+                            prop:value=move || path.get()
+                            on:input=move |e| path.set(event_target_value(&e))
+                        />
+                        <Browse purpose=Purpose::Share value=path disabled=busy on_choose=chosen />
+                    </div>
+                    <span class="field__help">{help}</span>
+                </div>
                 {text_field("Name", name, "the file or folder's name", "")}
                 <SelectField label="Category" options=categories value=category />
                 {text_field("Tags", tags, "comma-separated", "")}
@@ -182,7 +211,7 @@ fn NewShare() -> impl IntoView {
                 <div class="share-form__actions">
                     {move || problem.get().map(|p| view! { <span class="field__error" role="alert">{p}</span> })}
                     <div class="toolbar__spacer"></div>
-                    <button class="btn btn--primary" type="submit" disabled=busy>"Share"</button>
+                    <button node_ref=submit class="btn btn--primary" type="submit" disabled=busy>"Share"</button>
                 </div>
             </form>
             {move || match building.get() {
@@ -235,7 +264,7 @@ fn Shares() -> impl IntoView {
     view! {
         <Panel title=Signal::derive(move || format!("shares ({})", ids.with(Vec::len)))>
             {move || ids.with(Vec::is_empty).then(|| view! {
-                <Empty title="Nothing shared yet" text="Type a path above to share a file or folder." />
+                <Empty title="Nothing shared yet" text="Type a path above, or browse, to share a file or folder." />
             })}
                 <div class="table-scroll" hidden=move || ids.with(Vec::is_empty)>
                     <table class="table shares" aria-label="Shares">

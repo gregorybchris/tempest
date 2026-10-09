@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use tempest_api::SharingStop;
 use tempest_engine::store::{Kind, Store, TransferRow};
 use tempest_engine::{
     AddOptions, Engine, EngineError, EngineEvent, ShareOptions, Status, Subscription, TransferInfo,
@@ -115,6 +116,7 @@ async fn speed_limits_slow_transfers_and_sharing_limits_end_them() {
 
     let done = wait_for(&a, id, "completed", |t| t.status == Status::Completed).await;
     assert!(done.ratio.unwrap() >= 1.0);
+    assert_eq!(done.stopped_by, Some(SharingStop::Ratio { ratio: 1.0 }));
     assert!(done.seeding_time >= 1, "{done:#?}");
 
     a.shutdown().await;
@@ -274,6 +276,7 @@ async fn a_saved_transfer_too_large_to_store_fails_when_it_starts() {
         wanted: true,
         forced: false,
         done: false,
+        stopped_by: None,
         error: None,
         added: 0,
         completed: None,

@@ -84,7 +84,7 @@ fn Body(id: BundleId, transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     }
 }
 
-/// What the transfer is doing, in a sentence, with the fix it suggests.
+/// What the transfer is doing, in a sentence, with the fix it suggests and more behind a toggle.
 #[component]
 fn Explanation(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     let controls = expect_context::<Controls>();
@@ -107,9 +107,20 @@ fn Explanation(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
             };
             view! { <Button kind=ButtonKind::Primary small=true on_click=run>{label}</Button> }
         });
+        let detail = explanation.detail.map(|detail| {
+            view! {
+                <details class="explain__more">
+                    <summary>"More info"</summary>
+                    <p>{detail}</p>
+                </details>
+            }
+        });
         Some(view! {
             <div class=format!("explain {}", tone.class())>
-                <p class="explain__text">{explanation.text}</p>
+                <div class="explain__body">
+                    <p class="explain__text">{explanation.text}</p>
+                    {detail}
+                </div>
                 {fix}
             </div>
         })

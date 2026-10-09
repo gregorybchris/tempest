@@ -114,6 +114,30 @@ pub struct TransferInfo {
     /// The trackers it is published to (D-208).
     #[serde(default)]
     pub published: BTreeSet<String>,
+    /// Which sharing limit stopped it, if it completed and then stopped by itself (D-256).
+    #[serde(default)]
+    pub stopped_by: Option<SharingStop>,
+}
+
+/// The sharing limit that stopped a complete transfer, with the limit's value.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "limit", rename_all = "snake_case")]
+pub enum SharingStop {
+    /// It had uploaded this many times what it downloaded.
+    Ratio {
+        /// The ratio limit.
+        ratio: f64,
+    },
+    /// It had shared, complete, for this long.
+    Time {
+        /// The time limit, in seconds.
+        seconds: u64,
+    },
+    /// No connected peer had wanted anything from it for this long.
+    Idle {
+        /// The idle timeout, in seconds.
+        seconds: u64,
+    },
 }
 
 /// Whether a transfer downloads a bundle or shares one made here.
@@ -171,6 +195,7 @@ impl TransferInfo {
             link: String::new(),
             settings: BTreeMap::new(),
             published: BTreeSet::new(),
+            stopped_by: None,
         }
     }
 }

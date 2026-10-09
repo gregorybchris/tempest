@@ -51,6 +51,7 @@ fn transfer(seed: u8, name: &str, status: Status) -> TransferInfo {
         link: String::new(),
         settings: Default::default(),
         published: BTreeSet::new(),
+        stopped_by: None,
     }
 }
 

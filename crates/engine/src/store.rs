@@ -78,6 +78,9 @@ CREATE TABLE moves (
     folder TEXT NOT NULL
 ) STRICT;
 ",
+    "
+ALTER TABLE transfers ADD COLUMN stopped_by TEXT;
+",
 ];
 
 /// Why the state store failed.
@@ -100,6 +103,7 @@ pub enum StoreError {
 }
 
 pub use tempest_api::Kind;
+use tempest_api::SharingStop;
 
 /// The kind named `text` in the state database.
 fn parse_kind(text: &str) -> Result<Kind, StoreError> {
@@ -135,6 +139,8 @@ pub struct TransferRow {
     pub forced: bool,
     /// It completed and then stopped sharing on its own.
     pub done: bool,
+    /// The sharing limit that stopped it, when `done` and known (D-256).
+    pub stopped_by: Option<SharingStop>,
     /// Why it stopped, if it failed.
     pub error: Option<String>,
     /// When it was added, in milliseconds since the Unix epoch.
@@ -233,7 +239,7 @@ impl Store {
         let mut statement = self.conn.prepare(
             "SELECT id, kind, link, manifest, name, save_folder, content_dir, wanted, forced, done,
                     error, added, completed, queue_position, category, settings, uploaded,
-                    downloaded, have, chunks, seeding_time
+                    downloaded, have, chunks, seeding_time, stopped_by
              FROM transfers ORDER BY queue_position",
         )?;
         let rows = statement.query_map([], |row| {
@@ -254,6 +260,10 @@ impl Store {
                     wanted: row.get(7)?,
                     forced: row.get(8)?,
                     done: row.get(9)?,
+                    // Unreadable, it is only unknown, which the explanation allows for.
+                    stopped_by: row
+                        .get::<_, Option<String>>(21)?
+                        .and_then(|text| serde_json::from_str(&text).ok()),
                     error: row.get(10)?,
                     added: row.get(11)?,
                     completed: row.get(12)?,
@@ -529,13 +539,16 @@ fn bundle_id(bytes: &[u8]) -> Result<BundleId, StoreError> {
 
 fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError> {
     let settings = serde_json::to_string(&t.settings).expect("JSON values serialize");
+    let stopped_by = t
+        .stopped_by
+        .map(|stop| serde_json::to_string(&stop).expect("a stop serializes"));
     let content_dir = t.content_dir.as_deref().map(path_text).transpose()?;
     tx.execute(
         "INSERT INTO transfers (id, kind, link, manifest, name, save_folder, content_dir, wanted,
              forced, done, error, added, completed, queue_position, category, settings, uploaded,
-             downloaded, have, chunks, seeding_time)
+             downloaded, have, chunks, seeding_time, stopped_by)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20, ?21)
+             ?18, ?19, ?20, ?21, ?22)
          ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, link = excluded.link,
              manifest = excluded.manifest, name = excluded.name,
              save_folder = excluded.save_folder, content_dir = excluded.content_dir,
@@ -544,7 +557,7 @@ fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError
              queue_position = excluded.queue_position, category = excluded.category,
              settings = excluded.settings, uploaded = excluded.uploaded,
              downloaded = excluded.downloaded, have = excluded.have, chunks = excluded.chunks,
-             seeding_time = excluded.seeding_time",
+             seeding_time = excluded.seeding_time, stopped_by = excluded.stopped_by",
         params![
             t.id.as_bytes(),
             t.kind.as_str(),
@@ -567,6 +580,7 @@ fn save_transfer(tx: &Transaction<'_>, t: &TransferRow) -> Result<(), StoreError
             to_i64(t.have),
             to_i64(t.chunks),
             to_i64(t.seeding_time),
+            stopped_by,
         ],
     )?;
     tx.execute("DELETE FROM tags WHERE transfer = ?1", [t.id.as_bytes()])?;
@@ -605,6 +619,7 @@ mod tests {
             wanted: true,
             forced: false,
             done: false,
+            stopped_by: None,
             error: None,
             added: 1_700_000_000_000,
             completed: None,

@@ -4169,3 +4169,18 @@ This revises D-175, D-182 and D-189.
 **Decision:** The engine's sharing limits default to no ratio and no time limit. The ten-minute idle timeout stays, so a finished download stops only once no connected peer has wanted anything for that long. Users can stop a transfer or set limits globally or per transfer. Simulated peers keep their ratio 1.0 default, which models departing peers rather than this client.
 
 **Rationale:** Leaving early is what D-065 set out to prevent. Sharing while someone wants the data serves the swarm, and the idle timeout keeps a download from sharing forever for no one.
+
+---
+
+## D-256: A completed transfer says which sharing limit stopped it
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A completed transfer explained itself as "It stopped sharing when it reached its sharing limit", which didn't say which limit, and read as a cap when the idle timeout had ended it.
+
+**Decision:**
+
+- The engine records which limit stopped a transfer, with the limit's value: the ratio, the sharing time, or the idle timeout when the session stops by itself. Starting the transfer again forgets it. The API carries it as `stopped_by`; transfers completed before this have none.
+- The explanation stays short, "Complete. It stopped sharing.", and gains a detail sentence naming the limit. Explanations can carry such a detail; the web UI shows it behind a "More info" toggle, and the terminal UI's detail screen shows it under the explanation.
+
+**Rationale:** The short line is enough at a glance; the reason is there for whoever asks, and it differs enough between limits to matter.

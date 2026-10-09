@@ -61,7 +61,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 
 A chunk map's cells cover consecutive chunks in order, their sizes differing by at most one, so its size stays bounded however large the bundle. A cell's availability is the fewest connected peers holding any one of its chunks. A transfer that isn't running has nothing in flight and every availability 0, and says so with `"running": false` (D-193).
 
-A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link, dates and the trackers it is published on.
+A transfer carries its status (`state`, plus a `reason` when stalled or errored), its progress, rates, connection and peer counts, time left, ratio, tags, category, folders, link, dates, the trackers it is published on, and for a completed transfer which sharing limit stopped it (`stopped_by`: `ratio`, `time` or `idle`, with the limit's value).
 
 The `ui` settings include whether the first-run account of the network defaults was shown (D-227), so it is said once per data directory, whichever client is first.
 

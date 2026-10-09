@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
+use tempest_api::SharingStop;
 use tempest_core::Config;
 use tempest_core::config::{LingerSettings, Settings};
 pub use tempest_net::dirs::default_data_dir;
@@ -181,11 +182,25 @@ impl SharingLimits {
         action: SharingAction::Stop,
     };
 
-    /// Whether a transfer that has sent `ratio` and shared for `time` has reached a limit.
-    pub fn reached(&self, ratio: Option<f64>, time: Duration) -> bool {
-        let by_ratio = matches!((self.ratio, ratio), (Some(limit), Some(ratio)) if ratio >= limit);
-        let by_time = self.time.is_some_and(|limit| time >= limit);
-        by_ratio || by_time
+    /// The limit a transfer that has sent `ratio` and shared for `time` has reached, if any.
+    pub fn reached(&self, ratio: Option<f64>, time: Duration) -> Option<SharingStop> {
+        if let (Some(limit), Some(ratio)) = (self.ratio, ratio)
+            && ratio >= limit
+        {
+            return Some(SharingStop::Ratio { ratio: limit });
+        }
+        let limit = self.time.filter(|&limit| time >= limit)?;
+        Some(SharingStop::Time {
+            seconds: limit.as_secs(),
+        })
+    }
+
+    /// The idle timeout as the limit that stopped a transfer.
+    pub fn idle_stop(&self) -> Option<SharingStop> {
+        let timeout = self.idle_timeout?;
+        Some(SharingStop::Idle {
+            seconds: timeout.as_secs(),
+        })
     }
 }
 
@@ -1113,10 +1128,16 @@ notifications: { command: [sh, -c, "echo done"] }
             time: Some(hour),
             ..SharingLimits::NONE
         };
-        assert!(!limits.reached(Some(1.9), hour / 2));
-        assert!(limits.reached(Some(2.0), Duration::ZERO));
-        assert!(limits.reached(None, hour));
-        assert!(!SharingLimits::NONE.reached(Some(100.0), hour * 1000));
+        assert_eq!(limits.reached(Some(1.9), hour / 2), None);
+        assert_eq!(
+            limits.reached(Some(2.0), Duration::ZERO),
+            Some(SharingStop::Ratio { ratio: 2.0 })
+        );
+        assert_eq!(
+            limits.reached(None, hour),
+            Some(SharingStop::Time { seconds: 3600 })
+        );
+        assert_eq!(SharingLimits::NONE.reached(Some(100.0), hour * 1000), None);
     }
 
     #[test]

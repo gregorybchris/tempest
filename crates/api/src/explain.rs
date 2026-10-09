@@ -1,7 +1,7 @@
 //! Plain-language explanations of a transfer's state (`specs/interfaces.md`: "explain, don't
 //! decode"). The wording is shared with the web UI (D-119); how to apply a fix is each UI's own.
 
-use crate::{Kind, Status, TransferInfo, words};
+use crate::{Kind, SharingStop, Status, TransferInfo, words};
 
 /// What the user can do about a transfer's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub enum Fix {
 pub struct Explanation {
     /// What is happening, and why if it is stuck.
     pub text: String,
+    /// More about it, for UIs to show on request, so the text stays short.
+    pub detail: Option<String>,
     /// What would help, if anything.
     pub fix: Option<Fix>,
 }
@@ -29,8 +31,14 @@ impl Explanation {
     fn new(text: impl Into<String>, fix: Option<Fix>) -> Self {
         Self {
             text: text.into(),
+            detail: None,
             fix,
         }
+    }
+
+    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 }
 
@@ -61,10 +69,10 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
             Some(Fix::ForceStart),
         ),
         Status::Stopped => Explanation::new("Stopped.", Some(Fix::Start)),
-        Status::Completed => Explanation::new(
-            "Complete. It stopped sharing when it reached its sharing limit.",
-            Some(Fix::ShareAgain),
-        ),
+        Status::Completed => {
+            Explanation::new("Complete. It stopped sharing.", Some(Fix::ShareAgain))
+                .with_detail(stopped_by(transfer.stopped_by))
+        }
         Status::Errored { reason } => Explanation::new(reason.clone(), Some(Fix::Retry)),
         Status::Checking if transfer.kind == Kind::Share => {
             Explanation::new("Reading its files to describe the bundle.", None)
@@ -75,6 +83,31 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
             None,
         ),
     }
+}
+
+/// Which sharing limit stopped a complete transfer, in a sentence.
+fn stopped_by(stop: Option<SharingStop>) -> String {
+    match stop {
+        Some(SharingStop::Ratio { ratio }) => format!(
+            "It reached its ratio limit: it had uploaded {} as much as it downloaded.",
+            times(ratio)
+        ),
+        Some(SharingStop::Time { seconds }) => format!(
+            "It reached its sharing time limit of {}.",
+            words::duration(seconds)
+        ),
+        Some(SharingStop::Idle { seconds }) => format!(
+            "No connected peer had wanted anything from it for {}, its idle timeout.",
+            words::duration(seconds)
+        ),
+        None => "It reached one of its sharing limits.".to_owned(),
+    }
+}
+
+/// "2×", "1.5×".
+fn times(ratio: f64) -> String {
+    let text = format!("{ratio:.2}");
+    format!("{}×", text.trim_end_matches('0').trim_end_matches('.'))
 }
 
 /// "7 of 12 peers, 2 through relays": the connections, out of the peers known, and how many
@@ -154,6 +187,33 @@ mod tests {
             explain(&with(Status::Stopped, 0, 0, 0)).fix,
             Some(Fix::Start)
         );
+    }
+
+    #[test]
+    fn a_completed_transfer_says_which_limit_stopped_it_on_request() {
+        let detail = |stopped_by| {
+            let transfer = TransferInfo {
+                stopped_by,
+                ..with(Status::Completed, 0, 0, 0)
+            };
+            let explanation = explain(&transfer);
+            assert_eq!(explanation.text, "Complete. It stopped sharing.");
+            explanation.detail.unwrap()
+        };
+        assert_eq!(
+            detail(Some(SharingStop::Ratio { ratio: 1.5 })),
+            "It reached its ratio limit: it had uploaded 1.5× as much as it downloaded."
+        );
+        assert!(detail(Some(SharingStop::Ratio { ratio: 2.0 })).contains(" 2× "));
+        assert_eq!(
+            detail(Some(SharingStop::Time { seconds: 7200 })),
+            "It reached its sharing time limit of 2 hours."
+        );
+        assert_eq!(
+            detail(Some(SharingStop::Idle { seconds: 600 })),
+            "No connected peer had wanted anything from it for 10 minutes, its idle timeout."
+        );
+        assert_eq!(detail(None), "It reached one of its sharing limits.");
     }
 
     #[test]

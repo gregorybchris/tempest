@@ -175,10 +175,30 @@
   background: color-mix(in srgb, var(--tone) 6%, transparent);
 }
 
-.explain__text {
+.explain__body {
   flex: 1;
+  min-width: 0;
+}
+
+.explain__text {
   margin: 0;
   color: var(--fg);
+}
+
+.explain__more summary {
+  width: fit-content;
+  margin-top: var(--gap-1);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.explain__more summary:hover {
+  color: var(--fg);
+}
+
+.explain__more p {
+  margin: var(--gap-1) 0 0;
+  color: var(--dim);
 }
 
 .detail__controls,

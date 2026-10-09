@@ -108,6 +108,9 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
     let row = |name: &str, text: String| Line::from(vec![label(name), value(text)]);
 
     let explanation = explain(transfer);
+    let detail = explanation
+        .detail
+        .map(|detail| Line::styled(detail, Style::new().fg(theme.dim)));
     let mut state = vec![Span::styled(
         explanation.text,
         Style::new().fg(summary_color(theme, &transfer.status)),
@@ -164,8 +167,9 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
         Kind::Share => "Share",
     };
     let progress = format!("{kind}: {progress}");
-    let mut lines = vec![
-        Line::from(state),
+    let mut lines = vec![Line::from(state)];
+    lines.extend(detail);
+    lines.extend([
         Line::raw(""),
         row("Progress", progress),
         rates,
@@ -177,7 +181,7 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
         ),
         row("Ratio", ratio),
         row("Peers", peers),
-    ];
+    ]);
     if let Some(content) = &transfer.content_dir {
         lines.push(row("Files in", content.display().to_string()));
     }

@@ -37,6 +37,7 @@ use crate::queue::{Candidate, QueueMove, reorder, schedule};
 use crate::schedule::local_now;
 use crate::status::{Phase, Status, StatusInput};
 use crate::store::{Kind, Store, TransferRow};
+use tempest_api::SharingStop;
 
 mod files;
 mod lifecycle;
@@ -459,6 +460,7 @@ impl EngineTask {
                         t.row.wanted = true;
                         t.row.forced = forced;
                         t.row.done = false;
+                        t.row.stopped_by = None;
                         t.row.error = None;
                         Ok(())
                     })
@@ -669,6 +671,7 @@ impl EngineTask {
             wanted: !options.stopped,
             forced: false,
             done: false,
+            stopped_by: None,
             error: None,
             added: now_millis(),
             completed: None,
@@ -713,6 +716,7 @@ impl EngineTask {
             wanted: true,
             forced: false,
             done: false,
+            stopped_by: None,
             error: None,
             added,
             completed: Some(added),
@@ -978,6 +982,7 @@ impl EngineTask {
             link,
             settings: row.settings.clone(),
             published: row.publish.clone(),
+            stopped_by: row.stopped_by.filter(|_| row.done),
         }))
     }
 
@@ -1113,8 +1118,8 @@ impl EngineTask {
                 let size = t.manifest.as_ref().map(|m| m.total_size());
                 let ratio = crate::ratio(t.row.uploaded, t.row.downloaded, size);
                 let seeding = Duration::from_millis(t.row.seeding_time);
-                if run.sharing.reached(ratio, seeding) {
-                    at_limit.push((t.row.id, run.sharing.action));
+                if let Some(stop) = run.sharing.reached(ratio, seeding) {
+                    at_limit.push((t.row.id, run.sharing.action, stop));
                 }
             }
             run.last_tick = now;
@@ -1130,8 +1135,8 @@ impl EngineTask {
                 }
             }
         }
-        for (id, action) in at_limit {
-            self.sharing_limit_reached(id, action);
+        for (id, action, stop) in at_limit {
+            self.sharing_limit_reached(id, action, stop);
             queue_changed = true;
         }
         self.apply_speed_limits();

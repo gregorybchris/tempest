@@ -242,6 +242,7 @@ mod tests {
             link: String::new(),
             settings: Default::default(),
             published: BTreeSet::new(),
+            stopped_by: None,
         }
     }
 

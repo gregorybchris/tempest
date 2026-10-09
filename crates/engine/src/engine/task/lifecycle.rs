@@ -128,6 +128,7 @@ impl EngineTask {
                 if t.row.have < t.row.chunks {
                     t.row.completed = None;
                     t.row.done = false;
+                    t.row.stopped_by = None;
                 } else {
                     t.row.completed.get_or_insert_with(now_millis);
                 }
@@ -341,7 +342,10 @@ impl EngineTask {
                     t.row.completed.get_or_insert_with(now_millis);
                     // It stopped sharing by itself: the idle timeout passed (D-065), and the
                     // action for a sharing limit applies (D-224).
-                    t.row.done |= !asked;
+                    if !asked {
+                        t.row.done = true;
+                        t.row.stopped_by = run.sharing.idle_stop();
+                    }
                     removed = !asked && run.sharing.action == SharingAction::Remove;
                 }
             }
@@ -380,13 +384,19 @@ impl EngineTask {
         }
     }
 
-    /// Stops or removes a transfer that reached a sharing limit.
-    pub(super) fn sharing_limit_reached(&mut self, id: BundleId, action: SharingAction) {
+    /// Stops or removes a transfer that reached the sharing limit `stop`.
+    pub(super) fn sharing_limit_reached(
+        &mut self,
+        id: BundleId,
+        action: SharingAction,
+        stop: SharingStop,
+    ) {
         match action {
             SharingAction::Stop => {
                 let t = self.transfers.get_mut(&id).expect("a running transfer");
                 // Stopped by a rule, not by the user: completed (D-180).
                 t.row.done = true;
+                t.row.stopped_by = Some(stop);
                 save_row(&mut self.store, &mut t.row);
             }
             SharingAction::Remove => {

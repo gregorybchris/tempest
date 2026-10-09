@@ -30,7 +30,7 @@ pub struct ExperimentInfo {
     pub peers: u32,
     /// Whether its runs' event logs were recorded.
     pub logged: bool,
-    /// Whether a golden baseline has its scenario's name.
+    /// Whether a golden baseline was saved from its scenario file: the same name and hash.
     pub baseline: bool,
 }
 

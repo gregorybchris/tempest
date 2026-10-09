@@ -4,11 +4,12 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
+use std::path::Path;
 
 use tempest_sim::baseline::{self, Baseline};
 use tempest_sim::browse::{self, Baselines, BrowseError};
 use tempest_sim::experiment::{run_all, seeds};
-use tempest_sim::results::Database;
+use tempest_sim::results::{Database, ScenarioFile};
 use tempest_sim::stats::{self, Bootstrap, Meaningful};
 use tempest_sim::{RunOptions, RunResult, Scenario};
 use tempest_sim_api::data::{Method, MetricUnit, Verdict};
@@ -53,7 +54,8 @@ fn threads() -> NonZeroUsize {
 fn record(db: &Database, yaml: &str, events: bool) -> (Scenario, Vec<RunResult>) {
     let scenario = Scenario::from_yaml(yaml).unwrap();
     let seeds = seeds(&scenario);
-    let recorder = db.record(&scenario, None, &seeds, events).unwrap();
+    let file = ScenarioFile::new(Path::new("scenario.yaml"), yaml);
+    let recorder = db.record(&scenario, Some(&file), &seeds, events).unwrap();
     let results = run_all(
         &scenario,
         &seeds,
@@ -83,6 +85,7 @@ fn fixture() -> Fixture {
     let baselines = tempfile::tempdir().unwrap();
     let saved = Baseline {
         scenario: "golden-pair".to_owned(),
+        scenario_sha256: Scenario::file_sha256(GOLDEN),
         runs: golden
             .1
             .iter()
@@ -377,6 +380,7 @@ fn experiments_are_checked_against_their_golden_baseline() {
     }
     Baseline {
         scenario: "golden-pair".to_owned(),
+        scenario_sha256: Scenario::file_sha256(GOLDEN),
         runs: faster,
     }
     .save(&f.baselines.path().join("golden-pair.json"))
@@ -403,6 +407,40 @@ fn experiments_are_checked_against_their_golden_baseline() {
         browse::baselines(&conn, &Baselines::default())
             .unwrap()
             .is_empty()
+    );
+}
+
+#[test]
+fn an_edited_scenario_is_not_checked_against_the_old_baseline() {
+    let f = fixture();
+    // The experiment came from the same file as the baseline, until the file changes.
+    let experiment = |f: &Fixture| {
+        browse::experiment(&f.db, 2, &f.baselines())
+            .unwrap()
+            .unwrap()
+    };
+    assert!(experiment(&f).experiment.baseline);
+    let path = f.baselines.path().join("golden-pair.json");
+    let mut saved = Baseline::load(&path).unwrap();
+    saved.scenario_sha256 = Scenario::file_sha256(&format!("{GOLDEN}# edited\n"));
+    saved.save(&path).unwrap();
+
+    assert!(!experiment(&f).experiment.baseline);
+    let listed = browse::experiments(&f.db, &ExperimentQuery::default(), &f.baselines()).unwrap();
+    assert!(listed.iter().all(|e| !e.baseline));
+    assert!(
+        browse::baseline_report(&f.db, 2, &f.baselines())
+            .unwrap()
+            .is_none()
+    );
+    let outcome = &browse::baselines(&f.db, &f.baselines()).unwrap()[0].experiments[0];
+    assert_eq!(outcome.experiment, 2);
+    assert!(
+        outcome
+            .problem
+            .as_deref()
+            .unwrap()
+            .contains("scenario file differs")
     );
 }
 

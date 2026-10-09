@@ -57,14 +57,15 @@ pub fn experiments(
 ) -> Result<Vec<ExperimentInfo>> {
     let conn = &*db.conn();
     let sql = sql::experiments(query);
-    let names = baselines.names()?;
+    let scenarios = baselines.scenarios()?;
     let mut statement = conn.prepare(&sql.text)?;
     let rows = statement.query_map(params_from_iter(&sql.params), read_experiment)?;
     let mut experiments = Vec::new();
     for row in rows {
         let (mut experiment, run_ids) = row?;
         experiment.logged = logged(conn, run_ids)?;
-        experiment.baseline = names.contains(&experiment.name);
+        experiment.baseline =
+            scenarios.checks(&experiment.name, experiment.scenario_sha256.as_deref());
         experiments.push(experiment);
     }
     Ok(experiments)
@@ -128,7 +129,9 @@ pub fn experiment(
         return Ok(None);
     };
     experiment.logged = logged(conn, run_ids)?;
-    experiment.baseline = baselines.names()?.contains(&experiment.name);
+    experiment.baseline = baselines
+        .scenarios()?
+        .checks(&experiment.name, experiment.scenario_sha256.as_deref());
     let scenario: String = conn.query_row(
         "SELECT scenario::VARCHAR FROM experiments WHERE experiment_id = ?",
         [id],

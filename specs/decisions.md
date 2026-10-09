@@ -2362,7 +2362,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-158: Simulated network details
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided; how capacity is shared is superseded by D-238
 
 **Context:** D-069 sets a message-level network with fair sharing, but not how capacity is shared, how loss and ordering work, or what counts as a message.
 
@@ -3862,6 +3862,42 @@ This revises D-175, D-182 and D-189.
 - The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
 
 **Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.
+
+---
+
+## D-238: The simulated network shares capacity max-min fairly
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** D-158 gave each flow the smaller of its sender's upload and its receiver's download, each split evenly among that end's flows. Capacity a flow couldn't use because its other end was slower went unused, which contradicts `specs/simulation.md`'s "links share capacity fairly", and a flow's start or end changed rates only at its two ends.
+
+**Options:** keep processor sharing at each end; recompute global max-min fairness from scratch at every change (the cost D-158 avoided); compute max-min fairness incrementally (chosen).
+
+**Decision:**
+
+- Uploads, downloads and relay limits are resources. A flow gets as much as it can without taking from a flow that has less: max-min fairness, the allocation progressive filling gives.
+- Each resource has a level, the most any of its flows gets, and a flow's rate is the lowest level among its resources. When a flow starts or ends, the levels of its resources are worked out again, each by filling its capacity given what its flows' other resources allow. A changed level makes the resources sharing its flows work theirs out again, but only those it can move, so most changes stop at the flow's own two ends.
+- If a change hasn't settled after a bounded amount of work, every level is filled from scratch. The property test checks every rate against filling from scratch.
+- The network keeps one finish time per running flow, so the run loop no longer queues an event for every rate change and skips the stale ones.
+
+**Consequences:** the golden baselines were saved again (D-239 changed them too). Medians over 20 seeds moved by up to about 10%: `mixed` completes 10% sooner at the median, `routers` and `sessions` 6–7%, `crowd` 2% later; `crowd`'s rarest-chunk count fell from 10 to 8.5 and `strategic`'s fairness from 0.61 to 0.55. Strategic clients (D-166) now finish about 5% sooner than BitTorrent peers on the same seeds, down from the 15% recorded there, and the difference is no longer meaningful at 20 seeds (95% interval −26 s to +3 s), so `strategic::strategic_clients_download_faster_among_bittorrent_peers` fails: fast peers' spare upload now reaches everyone, which leaves less to gain by gaming them. **Open question for the owner:** whether to keep that test's claim, for example with more seeds or a more uneven swarm, or record the new result. Two validation tests (`rarest_first_keeps_every_chunk_when_the_origin_leaves` and `a_flash_crowd_finishes_near_the_bound`) already failed before this change.
+
+**Rationale:** Max-min fairness is what "share capacity fairly" means for flows, and what TCP and QUIC flows approach on access links. Working levels out only where they change keeps a change's cost near D-158's in large swarms.
+
+---
+
+## D-239: Golden baselines name their scenario file, and draws are the same everywhere
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A golden baseline (D-077) recorded only its scenario's name, so editing a golden scenario compared new runs with results of the old one. And world draws (arrivals, session lengths) used the platform's `ln`, `pow`, `exp` and `sin`, whose last bits differ between systems, so a seed could give different worlds on macOS and Linux.
+
+**Decision:**
+
+- A baseline saves the SHA-256 of its scenario file, as experiments record it. `tempest-sim baseline` refuses to check a scenario edited since its baseline was saved, and says to save new ones with `--update`. The results UI checks an experiment against a baseline only when both came from the same file; it lists the scenario's other experiments with the reason they weren't checked.
+- World draws use the pure-Rust `libm` crate, and a test pins exact draws.
+
+**Rationale:** A baseline is only meaningful for the scenario that produced it, and a seed should name the same world on every platform, including CI's.
 
 ---
 

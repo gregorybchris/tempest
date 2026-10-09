@@ -89,6 +89,41 @@ fn baselines_hold_every_seed() {
 }
 
 #[test]
+fn baselines_are_of_the_scenario_files_as_they_are() {
+    for golden in goldens() {
+        let baseline = Baseline::load(&golden.baseline).unwrap();
+        assert_eq!(
+            baseline.scenario_sha256, golden.sha256,
+            "{} changed since its baseline was saved",
+            golden.scenario.name
+        );
+    }
+}
+
+#[test]
+fn an_edited_scenario_fails_the_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let (scenarios, baselines) = (dir.path().join("golden"), dir.path().join("baselines"));
+    std::fs::create_dir_all(&scenarios).unwrap();
+    std::fs::create_dir_all(&baselines).unwrap();
+    let saved = &goldens()[0];
+    let name = &saved.scenario.name;
+    let original = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("scenarios/golden/{name}.yaml")),
+    )
+    .unwrap();
+    std::fs::write(
+        scenarios.join(format!("{name}.yaml")),
+        format!("{original}# edited\n"),
+    )
+    .unwrap();
+    std::fs::copy(&saved.baseline, baselines.join(format!("{name}.json"))).unwrap();
+    let edited = golden(&scenarios, &baselines).unwrap().remove(0);
+    let error = edited.check(Mode::Quick, threads()).unwrap_err();
+    assert!(error.to_string().contains("--update"), "{error}");
+}
+
+#[test]
 fn a_slower_swarm_fails_the_quick_check() {
     let goldens = goldens();
     std::thread::scope(|scope| {

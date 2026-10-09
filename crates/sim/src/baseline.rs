@@ -33,6 +33,9 @@ pub const QUICK_SEEDS: u32 = 3;
 pub struct Baseline {
     /// The scenario's name.
     pub scenario: String,
+    /// The SHA-256 of the scenario file the runs came from ([`Scenario::file_sha256`]), so that
+    /// an edited scenario isn't checked against results of the old one.
+    pub scenario_sha256: String,
     /// Each seed's metrics.
     pub runs: BTreeMap<u64, Metrics>,
 }
@@ -444,6 +447,8 @@ pub fn measure(
 pub struct Golden {
     /// The scenario.
     pub scenario: Scenario,
+    /// The SHA-256 of its file.
+    pub sha256: String,
     /// Its baseline file.
     pub baseline: PathBuf,
 }
@@ -463,7 +468,7 @@ pub fn golden(scenarios: &Path, baselines: &Path) -> Result<Vec<Golden>, Baselin
     paths
         .iter()
         .map(|path| {
-            let scenario = Scenario::load(path)?;
+            let (scenario, text) = Scenario::load_text(path)?;
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
             if scenario.name != stem {
                 return Err(BaselineError::Mismatch(format!(
@@ -478,13 +483,18 @@ pub fn golden(scenarios: &Path, baselines: &Path) -> Result<Vec<Golden>, Baselin
                 )));
             }
             let baseline = baselines.join(format!("{stem}.json"));
-            Ok(Golden { scenario, baseline })
+            Ok(Golden {
+                scenario,
+                sha256: Scenario::file_sha256(&text),
+                baseline,
+            })
         })
         .collect()
 }
 
 impl Golden {
-    /// Checks the scenario against its baseline.
+    /// Checks the scenario against its baseline. Fails if the baseline was saved from another
+    /// version of the scenario file.
     pub fn check(&self, mode: Mode, threads: NonZeroUsize) -> Result<Vec<Check>, BaselineError> {
         let baseline = Baseline::load(&self.baseline)?;
         if baseline.scenario != self.scenario.name {
@@ -493,6 +503,14 @@ impl Golden {
                 self.baseline.display(),
                 baseline.scenario,
                 self.scenario.name
+            )));
+        }
+        if baseline.scenario_sha256 != self.sha256 {
+            return Err(BaselineError::Mismatch(format!(
+                "{}.yaml changed since {} was saved: if the change is deliberate, save new \
+                 baselines with `tempest-sim baseline --update`",
+                self.scenario.name,
+                self.baseline.display(),
             )));
         }
         let current = measure(&self.scenario, &mode.seeds(&self.scenario), threads)?;
@@ -504,6 +522,7 @@ impl Golden {
         let seeds = Mode::Long.seeds(&self.scenario);
         let baseline = Baseline {
             scenario: self.scenario.name.clone(),
+            scenario_sha256: self.sha256.clone(),
             runs: measure(&self.scenario, &seeds, threads)?,
         };
         baseline.save(&self.baseline)
@@ -533,6 +552,7 @@ mod tests {
     fn baseline() -> Baseline {
         Baseline {
             scenario: "test".into(),
+            scenario_sha256: String::new(),
             runs: [(1, metrics(10.0, 0.9)), (2, metrics(20.0, 0.8))].into(),
         }
     }
@@ -541,6 +561,7 @@ mod tests {
     fn many(n: u64) -> Baseline {
         Baseline {
             scenario: "test".into(),
+            scenario_sha256: String::new(),
             runs: (1..=n)
                 .map(|seed| (seed, metrics(10.0 + (seed % 7) as f64, 0.9)))
                 .collect(),
@@ -679,6 +700,7 @@ mod tests {
         ) {
             let base = Baseline {
                 scenario: "test".into(),
+            scenario_sha256: String::new(),
                 runs: (1..).zip(times.iter().map(|&t| metrics(t, 0.9))).collect(),
             };
             for method in [Method::Mean, paired()] {

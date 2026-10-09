@@ -4909,6 +4909,7 @@ name = "tempest-sim"
 version = "0.1.0"
 dependencies = [
  "duckdb",
+ "libm",
  "proptest",
  "rand 0.9.5",
  "rand_chacha",
@@ -4918,6 +4919,7 @@ dependencies = [
  "sha2",
  "tempest-core",
  "tempest-protocol",
+ "tempest-sim",
  "tempest-sim-api",
  "tempfile",
  "thiserror 2.0.21",

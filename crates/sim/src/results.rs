@@ -10,14 +10,11 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use duckdb::{Connection, params};
-use sha2::{Digest, Sha256};
 
 use crate::engine::RunResult;
 use crate::experiment::Observer;
 use crate::log::{Row, Sink};
 use crate::scenario::Scenario;
-
-pub use duckdb;
 
 /// The git commit the simulator was built from, if it was built from a git checkout.
 pub const GIT_COMMIT: Option<&str> = option_env!("TEMPEST_GIT_COMMIT");
@@ -146,13 +143,32 @@ const BATCH: usize = 16_384;
 pub enum Error {
     /// DuckDB failed.
     #[error("results database: {0}")]
-    Database(#[from] duckdb::Error),
+    Database(#[from] DatabaseError),
     /// The database was written by a build with another schema.
     #[error("the results database has schema version {found}; this build writes {SCHEMA_VERSION}")]
     Schema {
         /// Its version.
         found: i32,
     },
+}
+
+impl From<duckdb::Error> for Error {
+    fn from(error: duckdb::Error) -> Self {
+        Self::Database(error.into())
+    }
+}
+
+/// An error from DuckDB, opaque so that DuckDB stays out of this crate's API.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct DatabaseError(#[from] duckdb::Error);
+
+impl DatabaseError {
+    /// Whether the database is locked, as it is while another process writes it: DuckDB lets
+    /// one process write a file or many read it.
+    pub fn is_locked(&self) -> bool {
+        self.0.to_string().contains("lock")
+    }
 }
 
 /// A results database.
@@ -209,8 +225,15 @@ impl Database {
     }
 
     /// The connection, for queries.
-    pub fn connection(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The DuckDB connection, for tests that check the tables with SQL. Only the `testing`
+    /// feature has it, so DuckDB stays out of this crate's API.
+    #[cfg(feature = "testing")]
+    pub fn connection(&self) -> MutexGuard<'_, Connection> {
+        self.conn()
     }
 
     /// Starts recording an experiment: adds it and its variants, and returns the recorder to
@@ -223,7 +246,7 @@ impl Database {
         seeds: &[u64],
         events: bool,
     ) -> Result<Recorder<'d>, Error> {
-        let conn = self.connection();
+        let conn = self.conn();
         let next = |table: &str, column: &str| -> Result<i64, Error> {
             let sql = format!("SELECT coalesce(max({column}), 0) + 1 FROM {table}");
             Ok(conn.query_row(&sql, [], |row| row.get(0))?)
@@ -284,13 +307,9 @@ pub struct ScenarioFile {
 impl ScenarioFile {
     /// The file at `path` with contents `text`.
     pub fn new(path: &Path, text: &str) -> Self {
-        let sha256 = Sha256::digest(text.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
         Self {
             path: path.display().to_string(),
-            sha256,
+            sha256: Scenario::file_sha256(text),
         }
     }
 }
@@ -336,7 +355,7 @@ impl Recorder<'_> {
     fn write(&self, write: impl FnOnce(&Connection) -> duckdb::Result<()>) {
         let mut error = self.error.lock().unwrap_or_else(|e| e.into_inner());
         if error.is_none()
-            && let Err(e) = write(&self.db.connection())
+            && let Err(e) = write(&self.db.conn())
         {
             *error = Some(e);
         }

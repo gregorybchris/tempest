@@ -51,6 +51,8 @@ sha2 = "0.10"
 tantivy = { version = "0.26", default-features = false }
 thiserror = "2"
 unicode-normalization = "0.1"
+# Pure-Rust math, so the simulator draws the same worlds on every platform.
+libm = "0.2"
 
 # Network interfaces' addresses, to advertise in links.
 if-addrs = "0.15"

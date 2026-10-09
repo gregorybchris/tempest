@@ -13,8 +13,8 @@ The milestones after M0 are implemented with a Claude workflow.
 | **M4** ✓ | First real transfer | Run `tempest share ./folder` on one machine and `tempest get <link>` on another, on a LAN, using a link with a direct address over QUIC |
 | **M5** ✓ | Engine + public swarms | Run the daemon with its HTTP API, event stream and SQLite state. Swarms grow through the tracker's peer-list service, peer exchange and LAN discovery |
 | **M6** ✓ | Getting through routers | Port mapping, relays and hole punching, so direct sends work between two homes |
-| **M7** | Terminal UI | Use the k9s-style TUI against the engine, after the client layout rethink (shared with M8) |
-| **M8** | Web UIs | Use the client web UI and the simulation results UI, built on the shared `ui-kit` |
+| **M7** ✓ | Terminal UI | Use the k9s-style TUI against the engine, after the client layout rethink (shared with M8) |
+| **M8** ✓ | Web UIs | Use the client web UI and the simulation results UI, built on the shared `ui-kit` |
 | **M9** ✓ | Tracker listings | Search, browse, rank and comment, with listings live from the network ([tracker.md](tracker.md)) |
 | **M10** | Learning guide | Decide the guide's design (D-091), then build it |
 

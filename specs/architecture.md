@@ -32,7 +32,7 @@ How the Tempest codebase is put together. Decisions referenced as D-### are in [
 | --- | --- | --- |
 | `protocol` | Wire types, encoding and decoding, chunk tree, proofs, manifest, links | (minimal: hashing, Unicode normalization, serde for tracker JSON) |
 | `core` | Sans-IO peer and bundle logic, strategies, decision events | (none) |
-| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching | `core`, `tracker-api`, `http-client` |
+| `net` | QUIC driver (quinn), port mapping, relay client, LAN discovery, tracker client (announces, sign-in, listings), manifest fetching, bundle storage (disk I/O), the default data folder, shutdown signals | `core`, `tracker-api`, `http-client` |
 | `engine` | Daemon: bundles, SQLite state, config and profiles, HTTP API and events | `core`, `net`, `api`, `tracker-api`, `http` |
 | `api` | The engine API's types, and what clients make of them: the event-following model, finding, columns, explanations, the settings they show and how values are typed (D-200); with its `client` feature, the native API client (D-252) | `tracker-api`; `http` for the client |
 | `http-client` | The HTTPS client setup the tracker client and the API client share: TLS, certificate trust, user agent (D-252) | (none) |
@@ -78,4 +78,4 @@ The last column lists the workspace crates each may use besides `protocol`, whic
 
 ## Open questions
 
-- Error handling and metrics conventions.
+- Metrics conventions.

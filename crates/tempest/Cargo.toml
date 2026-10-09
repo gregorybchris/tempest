@@ -31,6 +31,7 @@ clap.workspace = true
 # The terminal's width, through crossterm, so the status line never wraps.
 ratatui.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
 unicode-width.workspace = true
 

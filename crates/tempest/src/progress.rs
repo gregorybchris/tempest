@@ -28,6 +28,24 @@ impl std::fmt::Display for Interrupted {
 
 impl std::error::Error for Interrupted {}
 
+/// A command gave up waiting for progress; it says why. The command exits with
+/// [`TimedOut::EXIT_CODE`].
+#[derive(Debug)]
+pub struct TimedOut(pub String);
+
+impl TimedOut {
+    /// The exit code of a command that gave up.
+    pub const EXIT_CODE: u8 = 3;
+}
+
+impl std::fmt::Display for TimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TimedOut {}
+
 /// A line on stderr that each update replaces. It shows nothing unless stderr is a terminal
 /// that can move the cursor, and it is cut to the terminal's width: a line that wrapped would
 /// leave a copy of itself behind at every update.

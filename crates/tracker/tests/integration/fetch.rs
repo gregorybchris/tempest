@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tempest_core::EventKind;
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Endpoint, EndpointConfig, FetchLimits, Identity, Node,
     NodeConfig, Storage, StorageConfig, TrackerClient, TrackerError,
@@ -17,6 +18,7 @@ use tempest_protocol::{Address, Entry, FileInfo, Manifest};
 use tempest_tracker::{Catalog, CatalogConfig, FetcherConfig, Tracker, TrackerConfig};
 use tempest_tracker_api::listing::{Content, ListingEdit, ListingStatus};
 use tokio::net::TcpListener;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::oneshot;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -178,12 +180,21 @@ async fn a_manifest_over_the_limit_leaves_the_listing_pending() {
         let identity = Identity::generate().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let (node, handle, manifest) = start_sharer(&identity, dir.path()).await;
+        let mut events = handle.events.resubscribe();
         let announcer = announce(&node, &tracker, &handle, &identity);
 
         let client = TrackerClient::new(Duration::from_secs(5)).unwrap();
         let session = client.sign_in(&tracker, &identity, None).await.unwrap();
-        // Long enough for several attempts.
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Each attempt connects to the sharer, refuses the manifest unread and closes the
+        // connection. After two, the listing is still pending.
+        let mut attempts = 0;
+        while attempts < 2 {
+            match events.recv().await {
+                Ok(event) if matches!(event.kind, EventKind::Closed { .. }) => attempts += 1,
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => panic!("the sharer stopped"),
+            }
+        }
         let listing = client
             .listing(&tracker, Some(&session.token), &manifest.bundle_id())
             .await

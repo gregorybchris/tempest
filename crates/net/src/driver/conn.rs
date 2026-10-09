@@ -101,16 +101,29 @@ async fn open(
     timeout: Duration,
 ) -> Option<Opened> {
     let addr = address.socket_addr();
+    let started = Instant::now();
     let attempt = async {
         let connection = match path {
             PathKind::Direct => endpoint.dial(addr, Some(peer)).await,
             PathKind::Relayed => endpoint.dial_relayed(addr, Some(peer)).await,
         }
+        .inspect_err(|error| tracing::debug!("dialing {peer} at {addr} failed: {error}"))
         .ok()?;
-        let (send, recv) = connection.quic().open_bi().await.ok()?;
+        let (send, recv) = connection
+            .quic()
+            .open_bi()
+            .await
+            .inspect_err(|error| tracing::debug!("opening a stream to {peer} at {addr}: {error}"))
+            .ok()?;
         Some((connection, send, recv))
     };
-    tokio::time::timeout(timeout, attempt).await.ok().flatten()
+    let opened = tokio::time::timeout(timeout, attempt).await;
+    match &opened {
+        Ok(Some(_)) => tracing::debug!("dialed {peer} at {addr} in {:?}", started.elapsed()),
+        Ok(None) => {}
+        Err(_) => tracing::debug!("dialing {peer} at {addr} timed out after {timeout:?}"),
+    }
+    opened.ok().flatten()
 }
 
 /// Hands a dialed connection to the bundle, or closes it if the bundle has stopped.

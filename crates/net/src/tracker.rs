@@ -503,6 +503,9 @@ impl AnnounceTask {
             state.peers = response.peers.len();
             state.error = None;
         });
+        for entry in &response.peers {
+            tracing::debug!("tracker listed {} at {:?}", entry.peer, entry.addrs);
+        }
         let records: Vec<PeerRecord> = response
             .peers
             .into_iter()

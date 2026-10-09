@@ -37,8 +37,8 @@ pub const FEATURES: [Feature; 3] = [
 ];
 
 /// What the first run says before the features.
-pub const INTRO: &str = "These are on so that sending directly works behind home routers. \
-                         Each shares something, and Settings switches each off.";
+pub const INTRO: &str = "The following features are enabled by default so transfers work \
+                         from behind home routers. You can turn each one off in Settings.";
 
 #[cfg(test)]
 mod tests {

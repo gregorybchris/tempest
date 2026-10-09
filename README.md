@@ -24,7 +24,9 @@ In development. See the [roadmap](specs/roadmap.md).
 
 ## Install
 
-Releases are on [GitHub](https://github.com/gregorybchris/tempest/releases/latest) for macOS, Linux and Windows.
+Releases are on [GitHub](https://github.com/gregorybchris/tempest/releases/latest).
+
+**Client** (`tempest`), for macOS, Linux and Windows:
 
 ```sh
 # macOS and Linux
@@ -36,7 +38,16 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/gregorybchris/temp
 
 Windows users can instead download the `.msi` from the release page.
 
-To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`. Tracker and relay operators get `tempest-tracker` and `tempest-relay` from the same release, as `tempest-tracker-cli` and `tempest-relay-cli` archives and installers for macOS and Linux. The simulator is built from source, and so can the others be:
+**Tracker** (`tempest-tracker`) and **relay** (`tempest-relay`), for macOS and Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/releases/latest/download/tempest-tracker-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/releases/latest/download/tempest-relay-cli-installer.sh | sh
+```
+
+See [running a tracker](specs/tracker.md#running-one) and [relays](protocol/relays.md).
+
+**From source:** build the web UIs below (optional), then `cargo install --path crates/tempest`. The other programs install the same way. The simulator is only built from source:
 
 ```sh
 cargo install --path crates/tracker-cli   # tempest-tracker, for tracker operators (build crates/tracker-web first)

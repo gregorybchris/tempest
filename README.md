@@ -1,3 +1,5 @@
+<p align="center"><img src="branding/banner.png" alt="Tempest" width="800"></p>
+
 # Tempest
 
 Tempest is a peer-to-peer file sharing protocol and client, written in Rust. It is built on BitTorrent's ideas but is not compatible with BitTorrent.

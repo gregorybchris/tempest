@@ -17,7 +17,7 @@ use crate::keys::Command;
 use crate::present::{self, plural};
 use crate::request::{self, method};
 use crate::route::Route;
-use crate::views::{Copyable, Crumbs, HealthBars, TextArea, fetch, shown};
+use crate::views::{Crumbs, HealthBars, TextArea, fetch, shown};
 
 /// A listing's page.
 #[component]
@@ -179,14 +179,19 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                 </div>
                 <aside class="listing__side">
                     <Panel title="Get it">
-                        <p class="note dim">"Open the link in Tempest, or run:"</p>
-                        <Copyable text=command what="command" />
+                        <p class="note dim">"Copy the link into Tempest, or run the command:"</p>
+                        <div class="copyable">
+                            <code class="copyable__text">{command.clone()}</code>
+                        </div>
                         <div class="listing__get">
-                            <a class="btn btn--primary" href=link.clone()>"Open in Tempest"</a>
-                            <button class="btn" type="button" on:click={
+                            <button class="btn btn--primary" type="button" on:click={
                                 let link = link.clone();
                                 move |_| ctx.copy(link.clone(), "link")
                             }>"copy link"</button>
+                            <button class="btn" type="button" on:click={
+                                let command = command.clone();
+                                move |_| ctx.copy(command.clone(), "command")
+                            }>"copy command"</button>
                         </div>
                     </Panel>
                     <Panel title="Swarm">

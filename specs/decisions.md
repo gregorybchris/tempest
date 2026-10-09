@@ -4184,3 +4184,21 @@ This revises D-175, D-182 and D-189.
 - The explanation stays short, "Complete. It stopped sharing.", and gains a detail sentence naming the limit. Explanations can carry such a detail; the web UI shows it behind a "More info" toggle, and the terminal UI's detail screen shows it under the explanation.
 
 **Rationale:** The short line is enough at a glance; the reason is there for whoever asks, and it differs enough between limits to matter.
+
+---
+
+## D-257: Releases include the tracker and the relay, and no Homebrew
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** D-233 and D-236 left the servers out of releases, so operators had to build from source. D-211 chose a Homebrew tap, which needs a second repository and a token for the release workflow to push to it.
+
+**Decision:**
+
+- One tag releases `tempest`, `tempest-tracker` and `tempest-relay` together, at the workspace version. Tracker and relay archives are named after their packages (`tempest-tracker-cli`, `tempest-relay-cli`).
+- The tracker and relay build for macOS and Linux only and ship a shell installer each, with no PowerShell script or MSI. The release setup step builds the tracker website, which the tracker embeds.
+- The Homebrew tap is dropped, and with it the formulas and the publish job. This supersedes the tap in D-211 and D-133.
+- The MSI template is edited by hand for the product icon, so dist's check of it is allowed to differ.
+
+**Rationale:** The protocol isn't frozen, so the programs are only known to work built from the same commit. A tap would need a second repository to maintain.
+

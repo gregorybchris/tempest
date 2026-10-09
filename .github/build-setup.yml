@@ -7,3 +7,7 @@
 - name: Build the web UI
   shell: bash
   run: cd crates/web && trunk build --release --cargo-profile web
+# The tracker website is embedded in `tempest-tracker`.
+- name: Build the tracker website
+  shell: bash
+  run: cd crates/tracker-web && trunk build --release --cargo-profile web

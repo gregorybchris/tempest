@@ -32,14 +32,11 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/r
 
 # Windows (PowerShell)
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/gregorybchris/tempest/releases/latest/download/tempest-installer.ps1 | iex"
-
-# Homebrew
-brew install gregorybchris/tap/tempest
 ```
 
 Windows users can instead download the `.msi` from the release page.
 
-To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`. Releases contain only `tempest`. The servers and the simulator are separate programs built from source:
+To build from source, build the web UIs below (optional), then `cargo install --path crates/tempest`. Tracker and relay operators get `tempest-tracker` and `tempest-relay` from the same release, as `tempest-tracker-cli` and `tempest-relay-cli` archives and installers for macOS and Linux. The simulator is built from source, and so can the others be:
 
 ```sh
 cargo install --path crates/tracker-cli   # tempest-tracker, for tracker operators (build crates/tracker-web first)

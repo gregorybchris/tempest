@@ -70,13 +70,13 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 
 ## Releasing locally
 
-CI builds releases when a version tag is pushed (D-211). Releases contain only `tempest`, the one crate that opts in with `package.metadata.dist`; the servers and the simulator are built from source (D-233, D-236). The same archives can also be built on one Mac with dist (D-232):
+CI builds releases when a version tag is pushed (D-211). Releases contain `tempest`, `tempest-tracker` and `tempest-relay` in lockstep, the crates that opt in with `package.metadata.dist`; the simulator is built from source (D-233, D-257). The same archives can also be built on one Mac with dist (D-232):
 
 - **Tools:** trunk and the `wasm32-unknown-unknown` target for the web UIs; rustup targets for each platform; `zig` and `cargo-zigbuild` for Linux; `llvm` and `cargo-xwin` for Windows. Dist picks the cross compiler itself.
-- **Web UI first.** Build the client web UI with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
-- **Per target:** `dist build --artifacts=local --target <triple>` writes archives and checksums to `target/distrib`. `--artifacts=all` on one target also writes the installers, the Homebrew formulas and `sha256.sum`.
+- **Web UI first.** Build the client web UI and the tracker website with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.
+- **Per target:** `dist build --artifacts=local --target <triple>` writes archives and checksums to `target/distrib`. `--artifacts=all` on one target also writes the installers and `sha256.sum`.
 - **Smoke test** each binary that can run here: `--version`, `--help` and `tempest web --set api.port=<spare port>`. The Intel macOS binaries run under Rosetta.
-- **Publishing** is separate: a GitHub release with these files, and the formulas pushed to the tap.
+- **Publishing** is separate: a GitHub release with these files.
 - **Disk:** each target's `dist` profile build takes several GB. Delete a target's `target/<triple>/dist` once it is packaged.
 
 What a Mac can't build: the `.msi` installers, since WiX runs only on Windows. They come from CI, or from a Windows machine.

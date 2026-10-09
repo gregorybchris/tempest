@@ -22,7 +22,7 @@ The catalog's default categories follow this list; `--category` replaces them.
 
 ## Running one
 
-`tempest-tracker` is its own program (D-236), built from source (`cargo install --path crates/tracker-cli`, after building the website with trunk; see the README). It runs the peer-list service. With `--catalog FILE`, it also keeps a catalog in that SQLite file and serves its website at `/` and the listing API beside the peer-list service's, under `/tempest/v1/`. `tempest-tracker --help` lists every option, including invites, categories, relays and the limits on fetching manifests.
+`tempest-tracker` is its own program (D-236), installed from a release or built from source (`cargo install --path crates/tracker-cli`, after building the website with trunk; see the README). It runs the peer-list service. With `--catalog FILE`, it also keeps a catalog in that SQLite file and serves its website at `/` and the listing API beside the peer-list service's, under `/tempest/v1/`. `tempest-tracker --help` lists every option, including invites, categories, relays and the limits on fetching manifests.
 
 - **Relays (D-185, D-236):** a tracker doesn't run a relay. Run [`tempest-relay`](../protocol/relays.md) separately, and pass the identity it prints on startup as `--relay '<key>@host:port'`. Clients with `relays.from_trackers` on (D-186) then use that relay. Repeat `--relay` for more.
 

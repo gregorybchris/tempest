@@ -344,6 +344,34 @@ fn an_edit_can_ask_for_a_listing() {
 }
 
 #[test]
+fn listings_that_stay_pending_are_dropped() {
+    let mut catalog = catalog(false);
+    let alice = Key::new(1);
+    let lifetime = std::time::Duration::from_secs(100);
+    catalog.request_listing(0, &bundle(1), &alice.id()).unwrap();
+    catalog.request_listing(50, &bundle(2), &alice.id()).unwrap();
+    catalog.request_listing(50, &bundle(3), &alice.id()).unwrap();
+    catalog.set_content(&bundle(3), &content("listed")).unwrap();
+
+    assert_eq!(catalog.drop_pending(100, lifetime).unwrap(), 0);
+    // An edit keeps a pending listing longer.
+    sign_in(&mut catalog, &alice, 120);
+    let edit = ListingEdit {
+        title: Some("Kept".into()),
+        ..ListingEdit::default()
+    };
+    catalog
+        .edit_listing(120, &bundle(2), &alice.id(), &edit)
+        .unwrap();
+    assert_eq!(catalog.drop_pending(151, lifetime).unwrap(), 1);
+    assert_eq!(catalog.pending().unwrap(), [(bundle(2), alice.id())]);
+    // Listed bundles stay, and a dropped one can be asked for again.
+    assert!(catalog.listing(&bundle(3), None).is_ok());
+    catalog.request_listing(160, &bundle(1), &alice.id()).unwrap();
+    assert_eq!(catalog.pending().unwrap().len(), 2);
+}
+
+#[test]
 fn browsing_pages_newest_first_and_filters_by_category() {
     let mut catalog = catalog(false);
     let alice = Key::new(1);

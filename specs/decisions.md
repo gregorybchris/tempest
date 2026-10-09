@@ -3296,7 +3296,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 ## D-207: How the tracker fetches manifests to list bundles
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-240)
 
 **Context:** D-129 has the tracker fetch a listed bundle's manifest from peers, but leaves open which peers, how often and within what limits. Every fetch is a QUIC connection the tracker opens to addresses that announces gave it.
 

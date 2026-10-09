@@ -164,8 +164,8 @@ impl Tracker {
     ) -> io::Result<()> {
         let mut sweeper = tokio::spawn(self.clone().sweep());
         let mut fetching = match &self.catalog {
-            Some(catalog) => {
-                let run = fetcher::run(self.clone(), catalog.clone(), self.fetcher.clone());
+            Some(_) => {
+                let run = fetcher::run(self.clone(), self.fetcher.clone());
                 Some(tokio::spawn(run))
             }
             None => None,
@@ -306,6 +306,19 @@ impl Tracker {
     }
 }
 
+/// Runs `work` on a blocking thread, as all of the catalog's work must: SQLite and the search
+/// index block, and so does waiting for the catalog's lock.
+pub(crate) async fn blocking<T: Send + 'static>(
+    tracker: Tracker,
+    work: impl FnOnce(&Tracker) -> T + Send + 'static,
+) -> T {
+    match tokio::task::spawn_blocking(move || work(&tracker)).await {
+        Ok(value) => value,
+        // A blocking task is cancelled only as the runtime shuts down.
+        Err(error) => std::panic::resume_unwind(error.into_panic()),
+    }
+}
+
 /// Whether `authority`'s host is this machine: `localhost` or a loopback address.
 fn is_loopback(authority: &str) -> bool {
     let host = match authority.strip_prefix('[') {
@@ -362,29 +375,32 @@ async fn announce(
         Err(refusal) => return refuse(refusal),
     };
     if tracker.catalog.is_some() && (listing.is_some() || downloaded) {
-        let now = catalog::unix_now();
-        let mut catalog = tracker.catalog();
-        // The announce itself succeeded; the catalog's work is retried by later announces or
-        // lost, as a download count is, and neither is worth refusing it for.
-        // Asking again for a bundle the catalog knows costs nothing, so only new ones count
-        // against the client's limit. Over it, a later announce asks again.
-        let publish = listing.is_some()
-            && match catalog.knows_listing(&request.bundle) {
-                Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
-                Err(error) => {
-                    eprintln!("cannot list {}: {error}", request.bundle);
-                    false
-                }
-            };
-        if publish && let Err(error) = catalog.request_listing(now, &request.bundle, &request.peer)
-        {
-            eprintln!("cannot list {}: {error}", request.bundle);
-        }
-        // Fresh peer IDs could otherwise inflate the counts.
-        let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
-        if downloaded && let Err(error) = catalog.record_download(now, &request.bundle) {
-            eprintln!("cannot count a download of {}: {error}", request.bundle);
-        }
+        let (bundle, peer, listed) = (request.bundle, request.peer, listing.is_some());
+        blocking(tracker, move |tracker| {
+            let now = catalog::unix_now();
+            let mut catalog = tracker.catalog();
+            // The announce itself succeeded; the catalog's work is retried by later announces
+            // or lost, as a download count is, and neither is worth refusing it for.
+            // Asking again for a bundle the catalog knows costs nothing, so only new ones count
+            // against the client's limit. Over it, a later announce asks again.
+            let publish = listed
+                && match catalog.knows_listing(&bundle) {
+                    Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
+                    Err(error) => {
+                        eprintln!("cannot list {bundle}: {error}");
+                        false
+                    }
+                };
+            if publish && let Err(error) = catalog.request_listing(now, &bundle, &peer) {
+                eprintln!("cannot list {bundle}: {error}");
+            }
+            // Fresh peer IDs could otherwise inflate the counts.
+            let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
+            if downloaded && let Err(error) = catalog.record_download(now, &bundle) {
+                eprintln!("cannot count a download of {bundle}: {error}");
+            }
+        })
+        .await;
     }
     json(StatusCode::OK, &response)
 }

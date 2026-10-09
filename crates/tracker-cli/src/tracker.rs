@@ -110,15 +110,16 @@ struct CatalogArgs {
     #[arg(long, default_value_t = FetcherConfig::default().concurrency, value_name = "N",
         requires = "catalog")]
     fetch_concurrency: usize,
-    /// The largest manifest fetched, in bytes. Bundles with larger ones stay pending.
+    /// The largest manifest fetched, in bytes. Bundles with larger ones stay pending until
+    /// they are dropped.
     #[arg(long, default_value_t = FetcherConfig::default().limits.max_manifest,
         value_name = "BYTES", requires = "catalog")]
     fetch_max_manifest: u32,
-    /// Hours after the first failed fetch of a bundle's manifest to stop trying until the
-    /// tracker restarts.
-    #[arg(long, default_value_t = FetcherConfig::default().give_up.as_secs() / 3600,
+    /// Hours a listing may wait for its manifest, from when it was made or last edited, before
+    /// it is dropped. Its sharer's next announce asks again.
+    #[arg(long, default_value_t = FetcherConfig::default().pending_lifetime.as_secs() / 3600,
         value_name = "HOURS", requires = "catalog")]
-    fetch_give_up: u64,
+    pending_hours: u64,
     /// Change a per-IP rate limit, as `action=BURST/SECONDS` (BURST at once, then one per
     /// SECONDS) or `action=off`. Actions: challenge, sign-in, browse, publish, edit, vote,
     /// comment, report, download. Repeat for more. See specs/tracker.md for the defaults.
@@ -261,7 +262,7 @@ impl CatalogArgs {
                 max_manifest: self.fetch_max_manifest,
                 ..defaults.limits
             },
-            give_up: Duration::from_secs(self.fetch_give_up.saturating_mul(3600)),
+            pending_lifetime: Duration::from_secs(self.pending_hours.saturating_mul(3600)),
             ..defaults
         }
     }

@@ -532,6 +532,14 @@ impl Catalog {
         self.store.record_download(bundle, now / DAY)
     }
 
+    /// Drops the listings that have waited for their manifests for `lifetime` since they were
+    /// made or last edited, and returns how many. Nobody serves those bundles, or nobody the
+    /// tracker can reach; a sharer's next announce asks again.
+    pub fn drop_pending(&mut self, now: u64, lifetime: Duration) -> Result<usize, StoreError> {
+        self.store
+            .delete_pending_before(now.saturating_sub(lifetime.as_secs()))
+    }
+
     /// The bundles whose listings wait for their manifests, with their publishers, oldest
     /// first.
     pub fn pending(&self) -> Result<Vec<(BundleId, PeerId)>, StoreError> {

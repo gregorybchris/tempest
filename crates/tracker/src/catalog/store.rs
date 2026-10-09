@@ -541,6 +541,14 @@ impl Store {
         .collect()
     }
 
+    /// Deletes the pending listings made or last edited before `cutoff`, and returns how many.
+    pub fn delete_pending_before(&self, cutoff: u64) -> Result<usize, StoreError> {
+        Ok(self.conn.execute(
+            "DELETE FROM listings WHERE status = 'pending' AND updated < ?1",
+            [to_i64(cutoff)],
+        )?)
+    }
+
     fn tags(&self, bundle: &BundleId) -> Result<Vec<String>, StoreError> {
         let mut statement = self
             .conn

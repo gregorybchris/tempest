@@ -3,14 +3,15 @@
 //! A listing stays pending until the tracker knows what the bundle holds. The fetcher looks at
 //! the pending listings every so often and, for each one that is due, asks a few of the
 //! bundle's live peers for its manifest over QUIC, as any peer would. A manifest that matches
-//! the bundle ID gives the listing its content, which lists it.
+//! the bundle ID gives the listing its content, which lists it. A listing still pending after
+//! [`FetcherConfig::pending_lifetime`] is dropped, so requests for bundles nobody serves don't
+//! pile up; its sharer's next announce asks again.
 //!
-//! [`Schedule`] decides when each bundle is due and when to give up, and [`choose`] which peers
-//! to ask; both are plain data, so the rules are tested without a network or a clock.
+//! [`Schedule`] decides when each bundle is due, and [`choose`] which peers to ask; both are
+//! plain data, so the rules are tested without a network or a clock.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rand::seq::SliceRandom;
@@ -23,8 +24,8 @@ use tempest_protocol::{BundleId, Manifest, PeerId};
 use tempest_tracker_api::listing::Content;
 use tokio::task::JoinSet;
 
-use crate::catalog::Catalog;
-use crate::server::Tracker;
+use crate::catalog;
+use crate::server::{Tracker, blocking};
 
 /// The most addresses dialed for one peer: the one the tracker observed comes first.
 const MAX_ADDRS_PER_PEER: usize = 4;
@@ -43,9 +44,9 @@ pub struct FetcherConfig {
     pub retry: Duration,
     /// The longest wait between attempts.
     pub max_retry: Duration,
-    /// How long after its first failed attempt a bundle is given up on, until the tracker
-    /// restarts. Its listing stays pending.
-    pub give_up: Duration,
+    /// How long a listing may stay pending, from when it was made or last edited, before it is
+    /// dropped.
+    pub pending_lifetime: Duration,
     /// How often the pending listings are looked at.
     pub scan_interval: Duration,
     /// Where the fetcher's QUIC endpoint binds. It dials out only.
@@ -60,7 +61,7 @@ impl Default for FetcherConfig {
             limits: FetchLimits::default(),
             retry: Duration::from_secs(30),
             max_retry: Duration::from_secs(60 * 60),
-            give_up: Duration::from_secs(3 * 24 * 60 * 60),
+            pending_lifetime: Duration::from_secs(3 * 24 * 60 * 60),
             scan_interval: Duration::from_secs(5),
             endpoint: EndpointConfig::any(0),
         }
@@ -70,14 +71,10 @@ impl Default for FetcherConfig {
 /// One pending bundle's attempts so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Attempts {
-    /// When the first attempt failed, if one has.
-    first_failure: Option<Instant>,
     /// Failures in a row.
     failures: u32,
     /// Nothing is tried before this.
     next: Instant,
-    /// Whether the fetcher stopped trying.
-    given_up: bool,
 }
 
 /// When each pending bundle is due.
@@ -85,7 +82,6 @@ struct Attempts {
 pub(crate) struct Schedule {
     retry: Duration,
     max_retry: Duration,
-    give_up: Duration,
     attempts: HashMap<BundleId, Attempts>,
 }
 
@@ -98,8 +94,6 @@ pub(crate) enum Outcome {
     NoPeers,
     /// Every peer asked failed.
     Failed,
-    /// It failed for longer than the configured time: no more attempts.
-    GaveUp,
 }
 
 impl Schedule {
@@ -107,7 +101,6 @@ impl Schedule {
         Self {
             retry: config.retry,
             max_retry: config.max_retry,
-            give_up: config.give_up,
             attempts: HashMap::new(),
         }
     }
@@ -126,11 +119,7 @@ impl Schedule {
         pending
             .iter()
             .filter(|(bundle, _)| !busy.contains(bundle))
-            .filter(|(bundle, _)| {
-                self.attempts
-                    .get(bundle)
-                    .is_none_or(|a| !a.given_up && a.next <= now)
-            })
+            .filter(|(bundle, _)| self.attempts.get(bundle).is_none_or(|a| a.next <= now))
             .take(slots)
             .copied()
             .collect()
@@ -144,10 +133,8 @@ impl Schedule {
         fetched: Option<bool>,
     ) -> Outcome {
         let entry = self.attempts.entry(bundle).or_insert(Attempts {
-            first_failure: None,
             failures: 0,
             next: now,
-            given_up: false,
         });
         match fetched {
             Some(true) => {
@@ -160,11 +147,6 @@ impl Schedule {
                 Outcome::NoPeers
             }
             Some(false) => {
-                let first = *entry.first_failure.get_or_insert(now);
-                if now.duration_since(first) >= self.give_up {
-                    entry.given_up = true;
-                    return Outcome::GaveUp;
-                }
                 let wait = self.retry.saturating_mul(1 << entry.failures.min(16));
                 entry.failures += 1;
                 entry.next = now + wait.min(self.max_retry);
@@ -225,18 +207,9 @@ async fn fetch(
 }
 
 /// Runs the fetcher for `tracker`'s catalog until the task is dropped.
-pub(crate) async fn run(
-    tracker: Tracker,
-    catalog: Arc<Mutex<Catalog>>,
-    config: FetcherConfig,
-) -> io::Result<()> {
+pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<()> {
     let identity = Identity::generate().map_err(io::Error::other)?;
     let endpoint = Endpoint::bind(identity, &config.endpoint)?;
-    let lock = || {
-        catalog
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    };
     let mut rng = ChaCha8Rng::seed_from_u64(getrandom::u64()?);
     let mut schedule = Schedule::new(&config);
     let mut tasks = JoinSet::new();
@@ -246,7 +219,13 @@ pub(crate) async fn run(
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                let pending = match lock().pending() {
+                let lifetime = config.pending_lifetime;
+                let pending = blocking(tracker.clone(), move |tracker| {
+                    let mut catalog = tracker.catalog();
+                    catalog.drop_pending(catalog::unix_now(), lifetime)?;
+                    catalog.pending()
+                });
+                let pending = match pending.await {
                     Ok(pending) => pending,
                     Err(error) => {
                         eprintln!("cannot read the pending listings: {error}");
@@ -273,16 +252,17 @@ pub(crate) async fn run(
                     Err(error) => (error.id(), None),
                 };
                 let Some(bundle) = busy.remove(&id) else { continue };
-                if let Some(manifest) = &manifest
-                    && let Err(error) = lock().set_content(&bundle, &content(manifest))
-                {
-                    eprintln!("cannot list {bundle}: {error}");
-                    continue;
+                if let Some(manifest) = &manifest {
+                    let content = content(manifest);
+                    let stored = blocking(tracker.clone(), move |tracker| {
+                        tracker.catalog().set_content(&bundle, &content)
+                    });
+                    if let Err(error) = stored.await {
+                        eprintln!("cannot list {bundle}: {error}");
+                        continue;
+                    }
                 }
-                let outcome = schedule.record(Instant::now(), bundle, Some(manifest.is_some()));
-                if outcome == Outcome::GaveUp {
-                    eprintln!("gave up fetching the manifest of {bundle} to list it");
-                }
+                schedule.record(Instant::now(), bundle, Some(manifest.is_some()));
             }
         }
     }
@@ -302,7 +282,6 @@ mod tests {
         FetcherConfig {
             retry: Duration::from_secs(10),
             max_retry: Duration::from_secs(60),
-            give_up: Duration::from_secs(300),
             ..FetcherConfig::default()
         }
     }
@@ -324,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn failures_back_off_then_give_up() {
+    fn failures_back_off_up_to_max_retry() {
         let mut s = Schedule::new(&config());
         let t = Instant::now();
         let pending = [(bundle(1), ())];
@@ -357,13 +336,6 @@ mod tests {
         }
         let entry = &s.attempts[&bundle(1)];
         assert_eq!(entry.next, t2 + Duration::from_secs(4 + 60));
-
-        let late = t + Duration::from_secs(300);
-        assert_eq!(s.record(late, bundle(1), Some(false)), Outcome::GaveUp);
-        assert!(
-            s.due(late + Duration::from_secs(3600), &pending, &none, 1)
-                .is_empty()
-        );
     }
 
     #[test]

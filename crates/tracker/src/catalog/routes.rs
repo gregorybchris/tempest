@@ -6,7 +6,8 @@
 //! JSON `Content-Type`, which a cross-site form can't send, and the cookie is `SameSite=Strict`;
 //! together they keep other sites from acting with a browser's session.
 //!
-//! Every route is rate limited per client IP ([`crate::limits`]), before its handler runs.
+//! Every route is rate limited per client IP ([`crate::limits`]), before its handler runs. Handlers
+//! run on blocking threads ([`blocking`]): the catalog's SQLite and search index block.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -31,7 +32,7 @@ use tempest_tracker_api::query::{DEFAULT_LIMIT, ListingQuery};
 
 use super::unix_now as now;
 use crate::limits::Action;
-use crate::server::{Tracker, json, refuse};
+use crate::server::{Tracker, blocking, json, refuse};
 use crate::swarms::Refusal;
 
 /// The largest request body accepted: room for the longest description.
@@ -191,14 +192,20 @@ fn session_cookie(tracker: &Tracker, token: &str, max_age: u64) -> HeaderValue {
 }
 
 async fn info(State(tracker): State<Tracker>) -> Response {
-    json(StatusCode::OK, &tracker.catalog().info())
+    blocking(tracker, |tracker| {
+        json(StatusCode::OK, &tracker.catalog().info())
+    })
+    .await
 }
 
 async fn challenge(
     State(tracker): State<Tracker>,
     Extension(ClientIp(ip)): Extension<ClientIp>,
 ) -> Response {
-    answer(tracker.catalog().challenge(now(), ip).and_then(|c| ok(&c)))
+    blocking(tracker, move |tracker| {
+        answer(tracker.catalog().challenge(now(), ip).and_then(|c| ok(&c)))
+    })
+    .await
 }
 
 async fn sign_in(
@@ -206,11 +213,14 @@ async fn sign_in(
     headers: HeaderMap,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let request: SignIn = body(&headers, raw)?;
-        let authority = tracker.sign_in_authority(&headers)?;
-        ok(&tracker.catalog().sign_in(now(), &authority, &request)?)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let request: SignIn = body(&headers, raw)?;
+            let authority = tracker.sign_in_authority(&headers)?;
+            ok(&tracker.catalog().sign_in(now(), &authority, &request)?)
+        })())
+    })
+    .await
 }
 
 async fn poll(
@@ -218,35 +228,44 @@ async fn poll(
     headers: HeaderMap,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let request: Poll = body(&headers, raw)?;
-        let polled: PollResponse = tracker.catalog().poll(now(), &request)?;
-        let mut response = json(StatusCode::OK, &polled);
-        if let Some(session) = &polled.session {
-            let cookie = session_cookie(&tracker, &session.token, session.expires_in_secs);
-            response.headers_mut().insert(header::SET_COOKIE, cookie);
-        }
-        Ok(response)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let request: Poll = body(&headers, raw)?;
+            let polled: PollResponse = tracker.catalog().poll(now(), &request)?;
+            let mut response = json(StatusCode::OK, &polled);
+            if let Some(session) = &polled.session {
+                let cookie = session_cookie(&tracker, &session.token, session.expires_in_secs);
+                response.headers_mut().insert(header::SET_COOKIE, cookie);
+            }
+            Ok(response)
+        })())
+    })
+    .await
 }
 
 async fn sign_out(State(tracker): State<Tracker>, headers: HeaderMap) -> Response {
-    if let Some(token) = token(&headers)
-        && let Err(refusal) = tracker.catalog().sign_out(token)
-    {
-        return refuse(refusal);
-    }
-    let mut response = json(StatusCode::OK, &serde_json::json!({}));
-    let cookie = session_cookie(&tracker, "", 0);
-    response.headers_mut().insert(header::SET_COOKIE, cookie);
-    response
+    blocking(tracker, move |tracker| {
+        if let Some(token) = token(&headers)
+            && let Err(refusal) = tracker.catalog().sign_out(token)
+        {
+            return refuse(refusal);
+        }
+        let mut response = json(StatusCode::OK, &serde_json::json!({}));
+        let cookie = session_cookie(tracker, "", 0);
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+        response
+    })
+    .await
 }
 
 async fn me(State(tracker): State<Tracker>, headers: HeaderMap) -> Response {
-    answer((|| {
-        let key = signed_in(&tracker, &headers)?;
-        ok(&tracker.catalog().account(&key)?)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let key = signed_in(tracker, &headers)?;
+            ok(&tracker.catalog().account(&key)?)
+        })())
+    })
+    .await
 }
 
 async fn edit_me(
@@ -254,11 +273,14 @@ async fn edit_me(
     headers: HeaderMap,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let key = signed_in(&tracker, &headers)?;
-        let edit: AccountEdit = body(&headers, raw)?;
-        ok(&tracker.catalog().edit_account(&key, &edit)?)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let key = signed_in(&tracker, &headers)?;
+            let edit: AccountEdit = body(&headers, raw)?;
+            ok(&tracker.catalog().edit_account(&key, &edit)?)
+        })())
+    })
+    .await
 }
 
 /// The query string of `GET /tempest/v1/account/listings`.
@@ -285,15 +307,18 @@ async fn my_listings(
     headers: HeaderMap,
     page: Result<Query<PageQuery>, QueryRejection>,
 ) -> Response {
-    answer((|| {
-        let key = signed_in(&tracker, &headers)?;
-        let page = query(page)?;
-        let mut page = tracker
-            .catalog()
-            .published_by(&key, page.offset, page.limit)?;
-        tracker.add_swarms(&mut page.listings);
-        ok(&page)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let key = signed_in(&tracker, &headers)?;
+            let page = query(page)?;
+            let mut page = tracker
+                .catalog()
+                .published_by(&key, page.offset, page.limit)?;
+            tracker.add_swarms(&mut page.listings);
+            ok(&page)
+        })())
+    })
+    .await
 }
 
 async fn listings(
@@ -301,18 +326,21 @@ async fn listings(
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
 ) -> Response {
-    answer((|| {
-        let listing_query = ListingQuery::parse(raw.as_deref().unwrap_or(""))
-            .map_err(|error| Refusal::new(ErrorCode::InvalidRequest, error.to_string()))?;
-        let viewer = viewer(&tracker, &headers);
-        let page =
-            tracker
-                .catalog()
-                .listings(now(), &listing_query, viewer.as_ref(), |bundle| {
-                    tracker.swarm_stats(bundle)
-                })?;
-        ok(&page)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let listing_query = ListingQuery::parse(raw.as_deref().unwrap_or(""))
+                .map_err(|error| Refusal::new(ErrorCode::InvalidRequest, error.to_string()))?;
+            let viewer = viewer(&tracker, &headers);
+            let page =
+                tracker
+                    .catalog()
+                    .listings(now(), &listing_query, viewer.as_ref(), |bundle| {
+                        tracker.swarm_stats(bundle)
+                    })?;
+            ok(&page)
+        })())
+    })
+    .await
 }
 
 async fn listing(
@@ -320,13 +348,16 @@ async fn listing(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let viewer = viewer(&tracker, &headers);
-        let mut listing = tracker.catalog().listing(&id, viewer.as_ref())?;
-        tracker.add_swarms(std::slice::from_mut(&mut listing));
-        ok(&listing)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let viewer = viewer(&tracker, &headers);
+            let mut listing = tracker.catalog().listing(&id, viewer.as_ref())?;
+            tracker.add_swarms(std::slice::from_mut(&mut listing));
+            ok(&listing)
+        })())
+    })
+    .await
 }
 
 async fn edit_listing(
@@ -335,14 +366,17 @@ async fn edit_listing(
     Path(id): Path<String>,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let key = signed_in(&tracker, &headers)?;
-        let edit: ListingEdit = body(&headers, raw)?;
-        let mut listing = tracker.catalog().edit_listing(now(), &id, &key, &edit)?;
-        tracker.add_swarms(std::slice::from_mut(&mut listing));
-        ok(&listing)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let key = signed_in(&tracker, &headers)?;
+            let edit: ListingEdit = body(&headers, raw)?;
+            let mut listing = tracker.catalog().edit_listing(now(), &id, &key, &edit)?;
+            tracker.add_swarms(std::slice::from_mut(&mut listing));
+            ok(&listing)
+        })())
+    })
+    .await
 }
 
 async fn unpublish(
@@ -350,12 +384,15 @@ async fn unpublish(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let key = signed_in(&tracker, &headers)?;
-        tracker.catalog().unpublish(now(), &id, &key)?;
-        ok(&serde_json::json!({}))
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let key = signed_in(&tracker, &headers)?;
+            tracker.catalog().unpublish(now(), &id, &key)?;
+            ok(&serde_json::json!({}))
+        })())
+    })
+    .await
 }
 
 async fn vote(
@@ -364,14 +401,17 @@ async fn vote(
     Path(id): Path<String>,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let key = signed_in(&tracker, &headers)?;
-        let request: VoteRequest = body(&headers, raw)?;
-        let mut listing = tracker.catalog().vote(now(), &id, &key, request.vote)?;
-        tracker.add_swarms(std::slice::from_mut(&mut listing));
-        ok(&listing)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let key = signed_in(&tracker, &headers)?;
+            let request: VoteRequest = body(&headers, raw)?;
+            let mut listing = tracker.catalog().vote(now(), &id, &key, request.vote)?;
+            tracker.add_swarms(std::slice::from_mut(&mut listing));
+            ok(&listing)
+        })())
+    })
+    .await
 }
 
 async fn comments(
@@ -379,11 +419,14 @@ async fn comments(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let viewer = viewer(&tracker, &headers);
-        ok(&tracker.catalog().comments(&id, viewer.as_ref())?)
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let viewer = viewer(&tracker, &headers);
+            ok(&tracker.catalog().comments(&id, viewer.as_ref())?)
+        })())
+    })
+    .await
 }
 
 async fn comment(
@@ -392,13 +435,16 @@ async fn comment(
     Path(id): Path<String>,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let key = signed_in(&tracker, &headers)?;
-        let comment: NewComment = body(&headers, raw)?;
-        let comment = tracker.catalog().comment(now(), &id, &key, &comment)?;
-        Ok(json(StatusCode::CREATED, &comment))
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let key = signed_in(&tracker, &headers)?;
+            let comment: NewComment = body(&headers, raw)?;
+            let comment = tracker.catalog().comment(now(), &id, &key, &comment)?;
+            Ok(json(StatusCode::CREATED, &comment))
+        })())
+    })
+    .await
 }
 
 async fn report(
@@ -407,13 +453,16 @@ async fn report(
     Path(id): Path<String>,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
-    answer((|| {
-        let id = bundle(&id)?;
-        let key = signed_in(&tracker, &headers)?;
-        let report: NewReport = body(&headers, raw)?;
-        tracker.catalog().report(now(), &id, &key, &report)?;
-        Ok(json(StatusCode::CREATED, &serde_json::json!({})))
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id = bundle(&id)?;
+            let key = signed_in(&tracker, &headers)?;
+            let report: NewReport = body(&headers, raw)?;
+            tracker.catalog().report(now(), &id, &key, &report)?;
+            Ok(json(StatusCode::CREATED, &serde_json::json!({})))
+        })())
+    })
+    .await
 }
 
 async fn delete_comment(
@@ -421,12 +470,15 @@ async fn delete_comment(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    answer((|| {
-        let id: u64 = id
-            .parse()
-            .map_err(|_| Refusal::new(ErrorCode::InvalidRequest, "a comment ID is a number"))?;
-        let key = signed_in(&tracker, &headers)?;
-        tracker.catalog().delete_comment(id, &key)?;
-        ok(&serde_json::json!({}))
-    })())
+    blocking(tracker, move |tracker| {
+        answer((|| {
+            let id: u64 = id
+                .parse()
+                .map_err(|_| Refusal::new(ErrorCode::InvalidRequest, "a comment ID is a number"))?;
+            let key = signed_in(&tracker, &headers)?;
+            tracker.catalog().delete_comment(id, &key)?;
+            ok(&serde_json::json!({}))
+        })())
+    })
+    .await
 }

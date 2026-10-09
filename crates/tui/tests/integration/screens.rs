@@ -292,6 +292,56 @@ fn the_share_area_lists_shares_with_their_links() {
     insta::assert_snapshot!("shared", draw(&app, 80, 24).backend());
 }
 
+/// The screen's lines, as text.
+fn lines(terminal: &Terminal<TestBackend>) -> Vec<String> {
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect()
+        })
+        .collect()
+}
+
+/// The first line naming one of the `item-` transfers, and the line the cursor is on.
+fn top_and_cursor(app: &App) -> (String, String) {
+    let lines = lines(&draw(app, 80, 24));
+    let items = || lines.iter().filter(|line| line.contains("item-"));
+    let top = items().next().expect("a row shows").clone();
+    let cursor = items()
+        .find(|line| line.contains('▌'))
+        .expect("the cursor shows");
+    (top, cursor.clone())
+}
+
+#[test]
+fn moving_up_past_the_first_page_moves_the_cursor_not_the_list() {
+    for (area, kind) in [("1", Kind::Download), ("2", Kind::Share)] {
+        let mut app = app();
+        with_settings(&mut app);
+        let many = (1..=40)
+            .map(|seed| TransferInfo {
+                kind,
+                ..transfer(seed, &format!("item-{seed:02}"), Status::Stopped)
+            })
+            .collect();
+        app.apply(ApiEvent::Snapshot(many));
+        press(&mut app, area);
+        for _ in 0..30 {
+            press(&mut app, "j");
+            draw(&app, 80, 24);
+        }
+        let (top, before) = top_and_cursor(&app);
+        assert!(!top.contains("item-01 "), "the list scrolled: {top}");
+
+        press(&mut app, "k");
+        let (top_after, after) = top_and_cursor(&app);
+        assert_eq!(top_after, top, "the list stays put in area {area}");
+        assert_ne!(after, before, "the cursor moved up in area {area}");
+    }
+}
+
 #[test]
 fn the_settings_area_groups_every_setting() {
     let mut app = app();

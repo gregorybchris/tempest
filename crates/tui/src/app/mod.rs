@@ -11,6 +11,7 @@ mod rows;
 mod screen;
 mod share;
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -93,6 +94,9 @@ pub struct App {
     pub finding: Finding,
     /// The transfer the cursor is on.
     pub selected: Option<BundleId>,
+    /// The first row the list showed when last drawn. Drawing keeps it, so the list scrolls
+    /// only when the cursor leaves the rows on screen.
+    pub list_offset: Cell<usize>,
     /// How far into the selected transfer the Transfers area goes.
     pub view: View,
     /// The detail's tab.
@@ -150,6 +154,7 @@ impl App {
             theme,
             finding: Finding::default(),
             selected: None,
+            list_offset: Cell::new(0),
             view: View::List,
             tab: Tab::Summary,
             scroll: 0,

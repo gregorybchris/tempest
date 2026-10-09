@@ -1,6 +1,7 @@
 //! The Share area (D-139): a form for a file or folder to share, the bundle being built, and
 //! the shares with their links.
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -23,6 +24,9 @@ pub struct ShareArea {
     pub building: Option<PathBuf>,
     /// The share the cursor is on.
     pub selected: Option<BundleId>,
+    /// The first row the list of shares showed when last drawn, kept as the Transfers list's
+    /// is.
+    pub offset: Cell<usize>,
 }
 
 impl Default for ShareArea {
@@ -32,6 +36,7 @@ impl Default for ShareArea {
             editing: false,
             building: None,
             selected: None,
+            offset: Cell::new(0),
         }
     }
 }

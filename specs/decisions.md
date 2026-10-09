@@ -3862,3 +3862,21 @@ This revises D-175, D-182 and D-189.
 - The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
 
 **Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.
+
+---
+
+## D-238: Storage limits: bundle size, disk space, open files and failed syncs
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A manifest can declare up to 64 TiB, and a download allocated its chunk trees in full when its storage opened, about 66 bytes per chunk. A link to a bundle declaring a huge file aborted the engine, and again at every start, as the transfer resumed. Every file of a running bundle stayed open, so a bundle of 100,000 files ran out of file descriptors. A failed sync was retried, and the retry, which succeeds once the kernel has dropped the failed pages, was trusted.
+
+**Decision:**
+
+- **Trees grow as they learn.** A file's chunk tree is allocated in pages of 1,024 nodes, each when one of its nodes becomes known.
+- **A size limit.** Storage refuses a bundle over 1 TiB (`StorageConfig::max_bundle_size`), as a transfer error, before allocating anything. The bundle task checks a fetched manifest's size before its session takes the manifest, since the session's per-chunk state is large too. A stored transfer over the limit fails when it starts, rather than crashing the engine.
+- **Disk space.** A download is laid out only if its folder's file system has room for the bytes it doesn't hold yet: the files' sizes less what is already on disk, or less the chunks its checkpoint records when resuming. Otherwise the transfer fails with the space needed and free. Space isn't reserved, so downloads started together can still run out.
+- **Open files.** A bundle keeps at most 64 files open (`StorageConfig::open_files`), opening them as they are used and closing the least recently used one no read or write holds. A file written since its last sync is synced before its handle closes. A file reopened must be the same file (device and inode, on Unix), or storage refuses it.
+- **A failed sync is final.** Once a sync fails, every later write, sync and checkpoint of that storage fails with that error, so the transfer stops and its last checkpoint, which only records synced chunks, is what it resumes from.
+
+**Rationale:** 1 TiB covers real bundles while keeping a download's memory in the low gigabytes; the limit can be raised once per-chunk state shrinks. Checking free space up front turns a disk filling up mid-download into an error the user sees before anything is written. Syncing a handle before it closes keeps a write's failure from going unreported, and treating a failed sync as final is how databases learned to handle Linux dropping dirty pages after an I/O error.

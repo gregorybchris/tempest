@@ -7,11 +7,16 @@
 //! in a bounded channel (D-085).
 //!
 //! - A shared bundle's files stay where they are and are only read.
-//! - A download is laid out in a destination folder before its first chunk arrives. Writes are
-//!   verified first, and synced to disk in batches, then once more when the last chunk arrives.
+//! - A download is laid out in a destination folder before its first chunk arrives, if the
+//!   bundle is within [`StorageConfig::max_bundle_size`] and the folder's file system has room
+//!   for it. Writes are verified first, and synced to disk in batches, then once more when the
+//!   last chunk arrives. A failed sync stops the storage for good.
+//! - Files are opened as they are used, at most [`StorageConfig::open_files`] at a time.
+//! - Dropping an opening's future stops its work, such as hashing files, soon after.
 
 mod checkpoint;
 mod files;
+mod handles;
 mod tree;
 
 use std::collections::BTreeSet;
@@ -32,8 +37,14 @@ use tokio::time::{Instant, sleep_until};
 
 use checkpoint::FileState;
 pub use checkpoint::{Checkpoint, CheckpointError};
-use files::{BundleFile, Opened};
+pub use files::find_entry;
+use files::{Cancel, Opened};
+use handles::OpenFiles;
 use tree::FileTree;
+
+/// The largest bundle storage takes by default: 1 TiB. Memory grows with a bundle's chunk count,
+/// and a manifest can declare any size.
+pub const MAX_BUNDLE_SIZE: u64 = 1 << 40;
 
 /// How a bundle's storage behaves.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +57,10 @@ pub struct StorageConfig {
     pub sync_bytes: u64,
     /// Sync once this long has passed since the first write after the last sync.
     pub sync_interval: Duration,
+    /// The most files kept open at once, while no more are in use. At least 1.
+    pub open_files: usize,
+    /// The largest bundle, in bytes, to store or share.
+    pub max_bundle_size: u64,
 }
 
 impl Default for StorageConfig {
@@ -55,6 +70,8 @@ impl Default for StorageConfig {
             queue: 64,
             sync_bytes: 64 * 1024 * 1024,
             sync_interval: Duration::from_secs(5),
+            open_files: 64,
+            max_bundle_size: MAX_BUNDLE_SIZE,
         }
     }
 }
@@ -101,6 +118,39 @@ pub enum StorageError {
     /// The bundle is shared from files that are only read.
     #[error("a shared bundle is read-only")]
     ReadOnly,
+    /// The bundle is larger than [`StorageConfig::max_bundle_size`].
+    #[error("the bundle is {size} bytes, more than the {max} this client takes")]
+    TooLarge {
+        /// The bundle's size.
+        size: u64,
+        /// The most allowed.
+        max: u64,
+    },
+    /// The destination's file system lacks room for the download.
+    #[error(
+        "not enough disk space in {}: the download needs {needed} more bytes, and {available} are free",
+        path.display()
+    )]
+    NoSpace {
+        /// The destination folder.
+        path: PathBuf,
+        /// The bytes still to write.
+        needed: u64,
+        /// The bytes free.
+        available: u64,
+    },
+    /// Syncing written data to disk failed, so what was written since the last sync may be
+    /// lost. Storage takes no more writes.
+    #[error("{}: syncing to disk failed: {source}", path.display())]
+    SyncFailed {
+        /// The file.
+        path: PathBuf,
+        /// What went wrong.
+        source: Arc<io::Error>,
+    },
+    /// Opening was stopped before it finished.
+    #[error("opening storage was cancelled")]
+    Cancelled,
     /// The storage task has stopped.
     #[error("storage has stopped")]
     Stopped,
@@ -144,8 +194,8 @@ impl Storage {
         config: StorageConfig,
     ) -> Result<Self, StorageError> {
         let base = base.into();
-        Self::start(manifest, config, false, move |manifest, layout| {
-            files::open_shared(&base, manifest, layout)
+        Self::start(manifest, config, false, move |manifest, layout, cancel| {
+            files::open_shared(&base, manifest, layout, cancel)
         })
         .await
     }
@@ -163,8 +213,8 @@ impl Storage {
         config: StorageConfig,
     ) -> Result<(Self, RangeList), StorageError> {
         let dir = dir.into();
-        let storage = Self::start(manifest, config, true, move |manifest, layout| {
-            files::create_download(&dir, manifest, layout)
+        let storage = Self::start(manifest, config, true, move |manifest, layout, cancel| {
+            files::create_download(&dir, manifest, layout, cancel)
         })
         .await?;
         let have = storage.have().await?;
@@ -180,8 +230,8 @@ impl Storage {
         checkpoint: Checkpoint,
     ) -> Result<Self, StorageError> {
         let base = base.into();
-        Self::start(manifest, config, false, move |manifest, layout| {
-            files::resume_shared(&base, manifest, layout, &checkpoint.files)
+        Self::start(manifest, config, false, move |manifest, layout, cancel| {
+            files::resume_shared(&base, manifest, layout, &checkpoint.files, cancel)
         })
         .await
     }
@@ -197,29 +247,42 @@ impl Storage {
         checkpoint: Checkpoint,
     ) -> Result<(Self, RangeList), StorageError> {
         let dir = dir.into();
-        let storage = Self::start(manifest, config, true, move |manifest, layout| {
-            files::resume_download(&dir, manifest, layout, &checkpoint.files)
+        let storage = Self::start(manifest, config, true, move |manifest, layout, cancel| {
+            files::resume_download(&dir, manifest, layout, &checkpoint.files, cancel)
         })
         .await?;
         let have = storage.have().await?;
         Ok((storage, have))
     }
 
-    /// Opens the files on the blocking pool and starts the task.
+    /// Opens the files on the blocking pool and starts the task. Dropping the future cancels
+    /// the opening.
     async fn start(
         manifest: Arc<Manifest>,
         config: StorageConfig,
         writable: bool,
-        open: impl FnOnce(&Manifest, &ChunkLayout) -> Result<Vec<Opened>, StorageError> + Send + 'static,
+        open: impl FnOnce(&Manifest, &ChunkLayout, &Cancel) -> Result<Vec<Opened>, StorageError>
+        + Send
+        + 'static,
     ) -> Result<Self, StorageError> {
+        let size = manifest.total_size();
+        if size > config.max_bundle_size {
+            return Err(StorageError::TooLarge {
+                size,
+                max: config.max_bundle_size,
+            });
+        }
         let manifest_bytes: Arc<[u8]> = manifest.to_bytes().into();
         let task_manifest = manifest.clone();
+        let cancel = CancelOnDrop(Cancel::default());
+        let job_cancel = cancel.0.clone();
         let (layout, opened) = tokio::task::spawn_blocking(move || {
             let layout = ChunkLayout::new(&task_manifest);
-            open(&task_manifest, &layout).map(|opened| (layout, opened))
+            open(&task_manifest, &layout, &job_cancel).map(|opened| (layout, opened))
         })
         .await
         .expect("opening storage panicked")?;
+        drop(cancel);
 
         let mut have = ChunkSet::new(layout.chunk_count());
         let mut files = Vec::with_capacity(opened.len());
@@ -237,7 +300,7 @@ impl Storage {
 
         let (commands, receiver) = mpsc::channel(config.queue.max(1));
         let task = Task {
-            files: files.into(),
+            files: Arc::new(OpenFiles::new(files, config.open_files)),
             layout,
             trees,
             finished: have.is_full(),
@@ -247,7 +310,6 @@ impl Storage {
             config,
             jobs: JoinSet::new(),
             unsynced: Unsynced::default(),
-            sync_error: None,
             completing: None,
             stats: StorageStats::default(),
         };
@@ -427,11 +489,8 @@ enum Done {
         result: Result<Learned, StorageError>,
         reply: oneshot::Sender<Result<Written, StorageError>>,
     },
-    /// A batched sync of `files`.
-    Sync {
-        files: BTreeSet<usize>,
-        result: Result<(), StorageError>,
-    },
+    /// A batched sync.
+    Sync,
 }
 
 /// What a verified Data adds to a file's chunk tree.
@@ -448,9 +507,18 @@ struct Unsynced {
     since: Option<Instant>,
 }
 
+/// Cancels an opening when dropped, as when its future is.
+struct CancelOnDrop(Cancel);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
 /// The storage task's state.
 struct Task {
-    files: Arc<[BundleFile]>,
+    files: Arc<OpenFiles>,
     layout: ChunkLayout,
     trees: Vec<FileTree>,
     have: ChunkSet,
@@ -459,8 +527,6 @@ struct Task {
     parallel_jobs: usize,
     jobs: JoinSet<Done>,
     unsynced: Unsynced,
-    /// A periodic sync's failure, reported by the next flush.
-    sync_error: Option<StorageError>,
     /// The write that stored the last missing chunk, answered once everything is synced.
     completing: Option<oneshot::Sender<Result<Written, StorageError>>>,
     /// Every chunk is present and has been synced, or was present from the start.
@@ -509,13 +575,10 @@ impl Task {
                     let files = self.files.clone();
                     self.stats.reads += 1;
                     self.jobs.spawn_blocking(move || {
-                        let file = &files[file];
-                        let result = files::read_chunks(file, position, count)
-                            .map(|chunks| Data { proof, chunks })
-                            .map_err(|source| StorageError::Io {
-                                path: file.path.clone(),
-                                source,
-                            });
+                        let info = &files.files()[file].info;
+                        let result = files
+                            .read(file, |handle| files::read_chunks(handle, info, position, count))
+                            .map(|chunks| Data { proof, chunks });
                         let _ = reply.send(result);
                         Done::Read
                     });
@@ -599,7 +662,7 @@ impl Task {
         let store = !self.have.contains_range(span);
         let files = self.files.clone();
         self.jobs.spawn_blocking(move || {
-            let result = verify_and_write(&files[file], position(node), count, data, store);
+            let result = verify_and_write(&files, file, position(node), count, data, store);
             Done::Write {
                 file,
                 node,
@@ -635,7 +698,7 @@ impl Task {
                     self.stats.writes += 1;
                     self.have.insert_range(span);
                     self.unsynced.files.insert(file);
-                    let size = self.files[file].info.size;
+                    let size = self.files.files()[file].info.size;
                     self.unsynced.bytes += data_len(size, position(node), 1 << node.level);
                     self.unsynced.since.get_or_insert_with(Instant::now);
                     if self.unsynced.bytes >= self.config.sync_bytes {
@@ -650,14 +713,8 @@ impl Task {
                     let _ = reply.send(Ok(Written { complete: false }));
                 }
             }
-            Done::Sync { files, result } => {
-                if let Err(error) = result {
-                    // Sync these files again next time, and report the failure.
-                    self.unsynced.files.extend(files);
-                    self.unsynced.since.get_or_insert_with(Instant::now);
-                    self.sync_error.get_or_insert(error);
-                }
-            }
+            // A failure is final, and the next flush reports it.
+            Done::Sync => {}
         }
     }
 
@@ -677,11 +734,8 @@ impl Task {
         self.stats.syncs += unsynced.files.len() as u64;
         let files = self.files.clone();
         self.jobs.spawn_blocking(move || {
-            let result = sync(&files, &unsynced.files);
-            Done::Sync {
-                files: unsynced.files,
-                result,
-            }
+            let _ = files.sync(unsynced.files);
+            Done::Sync
         });
     }
 
@@ -693,12 +747,13 @@ impl Task {
         let unsynced = std::mem::take(&mut self.unsynced);
         self.stats.syncs += unsynced.files.len() as u64;
         let files = self.files.clone();
-        let result = tokio::task::spawn_blocking(move || sync(&files, &unsynced.files))
+        tokio::task::spawn_blocking(move || files.sync(unsynced.files))
             .await
-            .expect("syncing panicked");
-        match self.sync_error.take() {
+            .expect("syncing panicked")?;
+        // A periodic sync may have failed.
+        match self.files.failure() {
             Some(error) => Err(error),
-            None => result,
+            None => Ok(()),
         }
     }
 
@@ -710,11 +765,14 @@ impl Task {
         // checkpoint must see.
         self.settle().await;
         let have = self.have.to_ranges();
-        let mut states = Vec::with_capacity(self.files.len());
-        for ((file, tree), span) in self.files.iter().zip(&self.trees).zip(self.layout.files()) {
-            let metadata = file.file.metadata().map_err(|source| StorageError::Io {
-                path: file.path.clone(),
-                source,
+        let files = self.files.files();
+        let mut states = Vec::with_capacity(files.len());
+        for ((file, tree), span) in files.iter().zip(&self.trees).zip(self.layout.files()) {
+            let metadata = std::fs::symlink_metadata(&file.path).map_err(|source| {
+                StorageError::Io {
+                    path: file.path.clone(),
+                    source,
+                }
             })?;
             let span = ChunkRange {
                 start: span.first_chunk,
@@ -741,11 +799,9 @@ impl Task {
         if result.is_ok() {
             let files = self.files.clone();
             result = tokio::task::spawn_blocking(move || {
-                files.iter().try_for_each(|file| {
-                    files::restore_modified(file).map_err(|source| StorageError::Io {
-                        path: file.path.clone(),
-                        source,
-                    })
+                (0..files.files().len()).try_for_each(|i| {
+                    let modified = files.files()[i].info.modified;
+                    files.read(i, |file| files::restore_modified(file, modified))
                 })
             })
             .await
@@ -761,15 +817,16 @@ fn position(node: TreeNode) -> u32 {
     (node.index << node.level) as u32
 }
 
-/// Verifies `data` against `file`'s manifest entry and, if `store`, writes its chunks.
+/// Verifies `data` against file `file`'s manifest entry and, if `store`, writes its chunks.
 fn verify_and_write(
-    file: &BundleFile,
+    files: &OpenFiles,
+    file: usize,
     position: u32,
     count: u32,
     data: Data,
     store: bool,
 ) -> Result<Learned, StorageError> {
-    let info = &file.info;
+    let info = &files.files()[file].info;
     let leaves = verify_data_leaves(
         info.size,
         &info.root,
@@ -780,9 +837,8 @@ fn verify_and_write(
     )?;
     // Verification passed, so the chunks lie within the file.
     if store {
-        files::write_chunks(file, position, &data.chunks).map_err(|source| StorageError::Io {
-            path: file.path.clone(),
-            source,
+        files.write(file, |handle| {
+            files::write_chunks(handle, position, &data.chunks)
         })?;
     }
     Ok(Learned {
@@ -791,15 +847,4 @@ fn verify_and_write(
     })
 }
 
-/// Syncs the data of each of `which` to disk.
-fn sync(files: &[BundleFile], which: &BTreeSet<usize>) -> Result<(), StorageError> {
-    which.iter().try_for_each(|&i| {
-        files[i]
-            .file
-            .sync_data()
-            .map_err(|source| StorageError::Io {
-                path: files[i].path.clone(),
-                source,
-            })
-    })
-}
+

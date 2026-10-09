@@ -12,6 +12,7 @@ tempest-tracker-api.workspace = true
 tempest-core.workspace = true
 tempest-protocol.workspace = true
 
+fs4.workspace = true
 if-addrs.workspace = true
 igd-next.workspace = true
 netdev.workspace = true
@@ -26,6 +27,7 @@ serde_json.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
+unicode-normalization.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

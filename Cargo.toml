@@ -57,6 +57,8 @@ if-addrs = "0.15"
 igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
 # The default gateway, which NAT-PMP and PCP requests go to.
 netdev = { version = "0.46", default-features = false, features = ["gateway"] }
+# Free disk space, before laying out a download.
+fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 # For O_NOFOLLOW when opening downloaded files.
 libc = "0.2"
 # Raising the limit on open files without unsafe code.

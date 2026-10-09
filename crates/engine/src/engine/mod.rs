@@ -275,8 +275,8 @@ impl Engine {
 
     async fn launch(base: EngineConfig, hold: bool) -> Result<Self, EngineError> {
         base.validate()?;
-        // Every file of every running transfer stays open. Best effort: at the old limit,
-        // transfers of many files fail to open with a clear error.
+        // Each running transfer keeps some of its files open. Best effort: at the old limit,
+        // fewer transfers run before files fail to open with a clear error.
         let _ = tempest_net::raise_open_file_limit();
         let data_dir = base.data_dir()?;
         std::fs::create_dir_all(&data_dir).map_err(|source| EngineError::Io {

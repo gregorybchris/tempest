@@ -82,14 +82,15 @@ RelayReject {
 `Address` is defined in [messages.md](messages.md#common-structures).
 
 - The peer sends Register as the first message on the control stream. The relay answers with Registered or RelayReject. After RelayReject, the relay closes the connection.
-- If the peer's observed address changes, the relay MAY send a new Registered with the same relay address and the new observed address.
+- The relay MAY close with `protocol_violation` a connection that doesn't send Register promptly, or that sends anything on the control stream after Register.
+- If the peer's observed address changes, the relay MAY send a new Registered with the same relay address and the new observed address. A peer MUST close the relay connection with `protocol_violation` if a later Registered changes the relay address.
 - A peer MUST treat an unknown RelayReject reason like `full`.
 - The relay address remains valid while the relay connection is open. If the same peer ID registers again within 5 minutes of disconnecting, the relay SHOULD lend it the same relay address.
 - A relay MAY restrict registration to an allowlist of peer IDs (`not_allowed`). It MAY refuse when out of capacity (`full`).
 - If a peer registers again while its earlier relay connection is still open, the relay MAY close the earlier connection and lend the new one the same relay address.
 - Either side closes the relay connection with the reason codes of a [Goodbye](messages.md#closing-a-connection): `protocol_violation` when the other side breaks a rule, `duplicate` for a connection replaced by a newer registration, and `shutting_down` when the relay stops.
 
-**Implementer notes.** Each registration uses one of the relay's ports. An open relay should limit registrations per source IP address, so one host can't exhaust its ports.
+**Implementer notes.** Each registration uses one of the relay's ports. An open relay should limit registrations per source IP address (per prefix for IPv6), so one host can't exhaust its ports.
 
 ### Forwarding datagrams
 

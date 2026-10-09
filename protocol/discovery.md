@@ -73,6 +73,7 @@ The message is exactly 39 bytes, encoded with the primitives in [messages.md](me
 - A peer MAY send a query to the groups, for example when it starts or when it begins downloading a bundle.
 - A peer that receives a query SHOULD reply with an announce sent directly (unicast) to the query's source address and port. It SHOULD NOT reply to the same source more than once per second.
 - A peer MUST ignore its own announcements.
+- A peer SHOULD ignore a datagram whose source address isn't on one of its own local networks, or link-local or loopback. Otherwise a host elsewhere on the internet could steer its dials.
 
 **Rationale.**
 

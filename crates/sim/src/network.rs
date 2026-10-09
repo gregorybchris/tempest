@@ -386,7 +386,8 @@ impl<P> Network<P> {
             }
             touched.extend_from_slice(&self.resources[resource].flows);
             let level = self.level(resource);
-            if same(self.resources[resource].level, level) {
+            let old = self.resources[resource].level;
+            if same(old, level) {
                 continue;
             }
             self.resources[resource].level = level;
@@ -394,7 +395,7 @@ impl<P> Network<P> {
                 let flow = self.flow(self.resources[resource].flows[i]);
                 let ([up, down], group) = (flow.links, flow.group);
                 for other in [Some(up), Some(down), group].into_iter().flatten() {
-                    if other != resource {
+                    if other != resource && affects(old, level, self.resources[other].level) {
                         self.enqueue(other);
                     }
                 }
@@ -513,6 +514,20 @@ fn fill(capacity: f64, caps: &mut [f64]) -> f64 {
         left -= cap;
     }
     f64::INFINITY
+}
+
+/// Whether a resource's level going from `old` to `new` can change the level of another
+/// resource at `level` that shares one of its flows.
+///
+/// A level is where its resource's capacity fills when each flow takes up to what its other
+/// resources allow, so a flow's allowance changes nothing while it stays at or above the level
+/// both before and after. An unsaturated resource (an infinite level) holds no flow back, and
+/// stays unsaturated when its flows are allowed less.
+fn affects(old: f64, new: f64, level: f64) -> bool {
+    match level.is_finite() {
+        true => old.min(new) < level,
+        false => new > old,
+    }
 }
 
 /// Whether two levels are the same within [`TOLERANCE`].

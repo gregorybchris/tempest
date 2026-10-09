@@ -46,26 +46,6 @@ pub struct PickItem {
 }
 
 impl App {
-    /// The view of the list saved as `name`.
-    pub(in crate::app) fn save_view(&mut self, name: &str) -> Result<Request, String> {
-        if name.trim().is_empty() {
-            return Err("Name the view.".to_owned());
-        }
-        let view = prefs::saved(name, &self.finding);
-        self.views = prefs::with_view(&self.views, view);
-        let value = prefs::views_value(&self.views);
-        let about = Some(format!("the view {}", name.trim()));
-        Ok(self.change_settings([(prefs::VIEWS, value)], about))
-    }
-
-    /// The name of the saved view the list shows, if it shows one.
-    pub fn current_view(&self) -> Option<&str> {
-        self.views
-            .iter()
-            .find(|view| prefs::finding(view) == self.finding)
-            .map(|view| view.name.as_str())
-    }
-
     pub(super) fn pick_key(&mut self, kind: PickKind, selected: usize, key: KeyEvent) -> Outcome {
         let count = self.pick_items(&kind).len();
         let last = count.saturating_sub(1);

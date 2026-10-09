@@ -9,9 +9,9 @@ use tempest_api::{Kind, TransferInfo};
 use super::App;
 use super::modal::{FormKind, Modal};
 use super::request::{Action, Request, Target};
-use super::rows::{ValueKind, limit_input};
+use super::rows::ValueKind;
 use crate::form::{Field, Form};
-use crate::format;
+use crate::format::{self, limit_input};
 
 /// The settings the form edits, and its labels for them.
 const DOWNLOAD: (&str, &str) = ("limits.download", "Download");

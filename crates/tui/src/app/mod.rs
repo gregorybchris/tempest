@@ -3,12 +3,14 @@
 
 mod hints;
 mod inside;
+mod kept;
 mod keys;
 mod limits;
 mod modal;
 mod request;
 mod rows;
 mod screen;
+mod settings;
 mod share;
 
 use std::cell::Cell;

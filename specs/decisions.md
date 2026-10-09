@@ -3285,7 +3285,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 
 **Decision:**
 
-- A tracker runs a catalog only when its operator passes `--catalog FILE`; `--invites-required` and `tempest tracker invite` make invites, and `--category` replaces the default categories, which lead with D-031's legitimate uses. A publisher may also type a new category, kept in a tag's normal form; the tracker lists it with the others once a listing uses it.
+- A tracker runs a catalog only when its operator passes `--catalog FILE`; `--invites-required` and `tempest tracker invite` make invites, and `--category` replaces the default categories, which lead with D-031's legitimate uses.
 - Sign-in: `POST /catalog/v1/challenges` gives a typeable code and a poll secret. The key signs `tempest catalog sign-in v1`, a zero byte, the tracker's authority as the signer reached it, a zero byte and the code, and posts it to `/catalog/v1/sessions`, which answers with a session; the holder of the poll secret can collect that session once, as an `HttpOnly`, `SameSite=Strict` cookie. Codes last ten minutes and are kept in memory. Sessions last 30 days and are stored as hashes of their tokens.
 - Requests authenticate with a bearer token or the cookie. Bodies must be JSON with a JSON content type, so no cross-site form can act with a browser's session.
 - Listings are pending until the tracker knows the bundle's content, and only their publisher sees them then. The first key to ask keeps a bundle's listing. Publishers edit title, description, category and tags; signed-in accounts vote up or down and comment, and delete their own comments.

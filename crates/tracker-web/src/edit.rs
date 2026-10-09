@@ -189,7 +189,7 @@ fn Form(listing: Listing) -> impl IntoView {
                     placeholder="What it is, where it comes from, its license, how to use it."
                     error=error_in(Field::Description)
                 />
-                <CategoryField label="Category" options=categories value=category placeholder="a new category" />
+                <SelectField label="Category" options=categories value=category />
                 <label class="field">
                     <span class="field__label">"Tags"</span>
                     <input

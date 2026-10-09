@@ -4,8 +4,8 @@
 
 #![cfg(unix)]
 
-use crate::common::Running;
-use std::io::{BufRead, BufReader, Read, Write};
+use crate::common::{COMMAND_LIMIT, OutputWithin, Running, lines};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -131,10 +131,9 @@ fn tempest_web_serves_the_ui_beside_the_api() {
             .spawn()
             .unwrap(),
     );
-    let mut first = String::new();
-    BufReader::new(running.0.stdout.take().unwrap())
-        .read_line(&mut first)
-        .unwrap();
+    let first = lines(running.0.stdout.take().unwrap())
+        .recv_timeout(LIMIT)
+        .expect("tempest web prints its URL");
     let url = first.trim().to_owned();
     let address = url.strip_prefix("http://").expect("a local URL").to_owned();
 
@@ -179,7 +178,7 @@ fn tempest_web_serves_the_ui_beside_the_api() {
     // A second `tempest web` finds the engine the first runs.
     let found = tempest(dir.path())
         .args(["web", "--no-open"])
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap();
     assert!(found.status.success());
     assert_eq!(String::from_utf8_lossy(&found.stdout).trim(), url);

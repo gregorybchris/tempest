@@ -9,7 +9,7 @@
 
 #![cfg(unix)]
 
-use crate::common::{self, Running};
+use crate::common::{self, COMMAND_LIMIT, OutputWithin, Running};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -439,7 +439,7 @@ fn search_filter_and_sign_in_in_a_browser() {
             "--data-dir",
         ])
         .arg(&data)
-        .output()
+        .output_within(COMMAND_LIMIT)
         .unwrap();
     assert!(
         signed.status.success(),

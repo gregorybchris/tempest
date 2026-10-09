@@ -26,6 +26,7 @@ use tokio::task::JoinSet;
 
 use crate::catalog;
 use crate::server::{Tracker, blocking};
+use crate::swarms::is_local;
 
 /// The most addresses dialed for one peer: the one the tracker observed comes first.
 const MAX_ADDRS_PER_PEER: usize = 4;
@@ -51,6 +52,9 @@ pub struct FetcherConfig {
     pub scan_interval: Duration,
     /// Where the fetcher's QUIC endpoint binds. It dials out only.
     pub endpoint: EndpointConfig,
+    /// Whether to dial addresses on a local network or machine. Peers choose the addresses they
+    /// announce, so otherwise a peer could aim the fetcher at internal services or a third party.
+    pub allow_local_peers: bool,
 }
 
 impl Default for FetcherConfig {
@@ -59,6 +63,7 @@ impl Default for FetcherConfig {
             concurrency: 8,
             peers_per_attempt: 3,
             limits: FetchLimits::default(),
+            allow_local_peers: false,
             retry: Duration::from_secs(30),
             max_retry: Duration::from_secs(60 * 60),
             pending_lifetime: Duration::from_secs(3 * 24 * 60 * 60),
@@ -260,7 +265,13 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                 let in_flight: HashSet<BundleId> = busy.values().copied().collect();
                 let slots = config.concurrency.saturating_sub(busy.len());
                 for (bundle, publisher) in schedule.due(now, &pending, &in_flight, slots) {
-                    let swarm = tracker.lock().peers(now, &bundle);
+                    let mut swarm = tracker.lock().peers(now, &bundle);
+                    for (entry, _) in &mut swarm {
+                        entry.addrs.retain(|addr| {
+                            addr.port() != 0 && (config.allow_local_peers || !is_local(addr.ip()))
+                        });
+                    }
+                    swarm.retain(|(entry, _)| !entry.addrs.is_empty() || entry.relay.is_some());
                     let peers = choose(swarm, &publisher, config.peers_per_attempt, &mut rng);
                     if peers.is_empty() {
                         tracing::info!(

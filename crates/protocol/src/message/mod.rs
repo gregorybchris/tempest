@@ -39,6 +39,12 @@ pub const MAX_PEER_RECORDS: usize = 50;
 /// The most addresses one Candidates message may carry.
 pub const MAX_CANDIDATES: usize = 16;
 
+/// The most capabilities a Hello may list.
+pub const MAX_CAPABILITIES: usize = 16;
+
+/// The most addresses a Hello or a PeerRecord may list.
+pub const MAX_ADDRESSES: usize = 32;
+
 /// A peer message type, with its code on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]

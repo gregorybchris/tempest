@@ -1,7 +1,8 @@
 //! Control messages, sent on the control stream (`protocol/messages.md`, Control messages).
 
 use super::{
-    MAX_CANDIDATES, MAX_PEER_RECORDS, MAX_REQUEST_CHUNKS, MessageError, check_count, list_at_most,
+    MAX_ADDRESSES, MAX_CANDIDATES, MAX_CAPABILITIES, MAX_PEER_RECORDS, MAX_REQUEST_CHUNKS,
+    MessageError, check_count, list_at_most,
 };
 use crate::address::Address;
 use crate::hash::PeerId;
@@ -49,6 +50,8 @@ impl Hello {
         if self.max_open_requests == 0 {
             return Err(MessageError::ZeroMaxOpenRequests);
         }
+        check_count("capabilities", self.capabilities.len(), MAX_CAPABILITIES)?;
+        check_count("addresses", self.addresses.len(), MAX_ADDRESSES)?;
         Ok(())
     }
 
@@ -66,11 +69,11 @@ impl Hello {
     pub(super) fn decode_body(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             bundle_id: r.hash()?,
-            capabilities: r.list()?,
+            capabilities: list_at_most(r, "capabilities", MAX_CAPABILITIES)?,
             client: r.string()?.to_owned(),
             max_request_chunks: r.u32()?,
             max_open_requests: r.u32()?,
-            addresses: r.list()?,
+            addresses: list_at_most(r, "addresses", MAX_ADDRESSES)?,
             relay: decode_relay(r)?,
         })
     }
@@ -161,7 +164,11 @@ pub struct Peers {
 
 impl Peers {
     pub(super) fn validate(&self) -> Result<(), MessageError> {
-        check_count("peers", self.peers.len(), MAX_PEER_RECORDS)
+        check_count("peers", self.peers.len(), MAX_PEER_RECORDS)?;
+        for peer in &self.peers {
+            check_count("addresses", peer.addresses.len(), MAX_ADDRESSES)?;
+        }
+        Ok(())
     }
 
     pub(super) fn encode_body(&self, w: &mut Writer) {
@@ -201,7 +208,7 @@ impl Decode for PeerRecord {
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             peer_id: r.hash()?,
-            addresses: r.list()?,
+            addresses: list_at_most(r, "addresses", MAX_ADDRESSES)?,
             relay: decode_relay(r)?,
         })
     }

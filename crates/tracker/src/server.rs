@@ -278,9 +278,13 @@ impl Tracker {
     }
 
     /// The authority a sign-in must be signed for: the public URL's. Without one, the `Host`
-    /// the request reached, but only if it names this machine: a client elsewhere could have
-    /// been sent by another site with a `Host` of its choosing.
-    pub(crate) fn sign_in_authority(&self, headers: &HeaderMap) -> Result<String, Refusal> {
+    /// the request reached, but only if it names this machine and comes from it: a client
+    /// elsewhere could have been sent by another site with a `Host` of its choosing.
+    pub(crate) fn sign_in_authority(
+        &self,
+        client: IpAddr,
+        headers: &HeaderMap,
+    ) -> Result<String, Refusal> {
         if let Some(public) = &self.public {
             return Ok(public.authority.clone());
         }
@@ -289,7 +293,7 @@ impl Tracker {
             .and_then(|value| value.to_str().ok())
             .map(account::normalize_authority);
         match host {
-            Some(host) if is_loopback(&host) => Ok(host),
+            Some(host) if is_loopback(&host) && client.is_loopback() => Ok(host),
             _ => {
                 let message = "this tracker takes sign-ins only from its own machine until its \
                     operator sets its public URL (tempest-tracker --public-url)";

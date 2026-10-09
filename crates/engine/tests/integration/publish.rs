@@ -33,6 +33,7 @@ async fn start_tracker() -> String {
         retry: Duration::from_millis(200),
         scan_interval: Duration::from_millis(100),
         endpoint: EndpointConfig::localhost(),
+        allow_local_peers: true,
         ..FetcherConfig::default()
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

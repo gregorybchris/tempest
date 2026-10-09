@@ -6,8 +6,8 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Shows `path` in the file manager: a folder is opened, a file is selected in its folder where
-/// the platform can (macOS, Windows) and otherwise its folder is opened.
+/// Shows `path` in the file manager: macOS selects it in its folder, Windows does for a file and
+/// opens a folder, and elsewhere a folder is opened (a file's parent).
 pub fn reveal(path: &Path) -> Result<(), String> {
     let (program, args) = command(path);
     let status = Command::new(program)
@@ -29,12 +29,9 @@ pub fn reveal(path: &Path) -> Result<(), String> {
 fn command(path: &Path) -> (&'static str, Vec<std::ffi::OsString>) {
     let file = path.is_file();
     if cfg!(target_os = "macos") {
-        let mut args = Vec::new();
-        if file {
-            args.push("-R".into());
-        }
-        args.push(path.into());
-        ("open", args)
+        // Always select, never open: `open` on a folder named `X.app` launches it, and a peer
+        // chooses the names in a download.
+        ("open", vec!["-R".into(), path.into()])
     } else if cfg!(windows) {
         let arg = if file {
             let mut arg = std::ffi::OsString::from("/select,");

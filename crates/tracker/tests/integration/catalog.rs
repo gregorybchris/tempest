@@ -69,8 +69,14 @@ async fn call(
     {
         request = request.header(header::HOST, HOST);
     }
+    // `x-test-from` sets the peer address instead of being sent.
+    let mut from: SocketAddr = "198.51.100.9:50000".parse().unwrap();
     for (name, value) in headers {
-        request = request.header(*name, *value);
+        if *name == "x-test-from" {
+            from = value.parse().unwrap();
+        } else {
+            request = request.header(*name, *value);
+        }
     }
     let body = match body {
         Value::Null => Body::empty(),
@@ -80,7 +86,6 @@ async fn call(
         }
     };
     let mut request = request.body(body).unwrap();
-    let from: SocketAddr = "198.51.100.9:50000".parse().unwrap();
     request.extensions_mut().insert(ConnectInfo(from));
     let response = router.clone().oneshot(request).await.unwrap();
     let status = response.status();
@@ -339,8 +344,19 @@ async fn without_a_public_url_only_this_machine_signs_in() {
             .contains("--public-url")
     );
 
+    // A remote client naming a loopback host is refused too.
+    let (_, spoofed) = sign_in_as(
+        &router,
+        &key,
+        "localhost:8080",
+        &[("host", "localhost:8080")],
+    )
+    .await;
+    assert_eq!(spoofed.status, StatusCode::FORBIDDEN);
+
     for local in ["127.0.0.1:4777", "localhost:8080", "[::1]:4777"] {
-        let (challenge, answer) = sign_in_as(&router, &key, local, &[("host", local)]).await;
+        let headers = [("host", local), ("x-test-from", "127.0.0.1:50000")];
+        let (challenge, answer) = sign_in_as(&router, &key, local, &headers).await;
         assert_eq!(answer.status, StatusCode::OK, "{local}: {}", answer.body);
 
         // Over plain HTTP, the session cookie can't be marked Secure.

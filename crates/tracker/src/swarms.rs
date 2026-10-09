@@ -281,7 +281,7 @@ impl Swarm {
 
 /// Whether `ip` can only be reached from its own network or machine: loopback, private,
 /// link-local or unique local.
-fn is_local(ip: IpAddr) -> bool {
+pub(crate) fn is_local(ip: IpAddr) -> bool {
     match ip.to_canonical() {
         IpAddr::V4(v4) => {
             v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()

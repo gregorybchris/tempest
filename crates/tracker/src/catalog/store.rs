@@ -245,6 +245,17 @@ const LISTING_COLUMNS: &str = "
 impl Store {
     /// Opens the database at `path`, creating it if needed, and brings its schema up to date.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        // The file holds sessions and invite codes; SQLite gives its WAL files the same mode.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(path);
+        }
         Self::init(Connection::open(path)?)
     }
 

@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use rand::SeedableRng;
 use tempest_protocol::message::{
-    Candidates, GoodbyeReason, Have, HaveUpdate, Hello, MAX_CANDIDATES, PeerRecord,
+    Candidates, GoodbyeReason, Have, HaveUpdate, Hello, MAX_ADDRESSES, MAX_CANDIDATES, PeerRecord,
 };
 use tempest_protocol::tree::{VerifyError, verify_data};
 use tempest_protocol::{Address, BundleId, Manifest, Message, PeerId, RangeList};
@@ -688,7 +688,13 @@ impl Session {
             client: self.config.client.clone(),
             max_request_chunks: self.config.upload.max_request_chunks,
             max_open_requests: self.config.upload.max_open_requests,
-            addresses: self.local.addresses.clone(),
+            addresses: self
+                .local
+                .addresses
+                .iter()
+                .take(MAX_ADDRESSES)
+                .copied()
+                .collect(),
             relay: self.local.relay,
         };
         let state = self.conns.get_mut(&conn).expect("open");
@@ -994,6 +1000,17 @@ impl Session {
     }
 
     fn on_have_update(&mut self, now: Time, id: ConnId, update: HaveUpdate) -> Outcome {
+        // Applying an update costs per chunk it names, not per byte. A peer gaining or losing each
+        // chunk once or twice is honest; one flipping them back and forth is stalling the bundle.
+        if let Some(bundle) = &self.bundle {
+            let conn = self.conns.get_mut(&id).expect("open");
+            conn.churn += update.added.chunk_count() + update.removed.chunk_count();
+            if conn.churn > 4 * u64::from(bundle.layout.chunk_count()) + 4096 {
+                return Err(violation(
+                    "HaveUpdates changed far more chunks than the bundle has",
+                ));
+            }
+        }
         self.on_holdings(id, update)?;
         self.update_want(id);
         if self.bundle.is_none() {

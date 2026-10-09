@@ -230,13 +230,14 @@ async fn challenge(
 
 async fn sign_in(
     State(tracker): State<Tracker>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
     headers: HeaderMap,
     raw: Result<Bytes, BytesRejection>,
 ) -> Response {
     blocking(tracker, move |tracker| {
         answer((|| {
             let request: SignIn = body(&headers, raw)?;
-            let authority = tracker.sign_in_authority(&headers)?;
+            let authority = tracker.sign_in_authority(ip, &headers)?;
             ok(&tracker.catalog().sign_in(now(), &authority, &request)?)
         })())
     })

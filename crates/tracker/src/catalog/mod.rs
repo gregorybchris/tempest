@@ -164,7 +164,12 @@ fn invalid(error: text::TextError) -> Refusal {
 
 impl From<StoreError> for Refusal {
     fn from(error: StoreError) -> Self {
-        let refusal = Refusal::new(ErrorCode::Unavailable, error.to_string());
+        // The detail (SQL and constraint names) stays in the log.
+        tracing::error!("catalog store error: {error}");
+        let refusal = Refusal::new(
+            ErrorCode::Unavailable,
+            "the catalog could not complete the request",
+        );
         Refusal {
             status: 500,
             ..refusal
@@ -484,6 +489,10 @@ impl Catalog {
 
     /// Changes `key`'s account.
     pub fn edit_account(&mut self, key: &PeerId, edit: &AccountEdit) -> Result<Account, Refusal> {
+        if self.store.is_banned(key)? {
+            tracing::info!("account edit refused: {key} is banned");
+            return Err(banned());
+        }
         let name = edit
             .name
             .as_deref()

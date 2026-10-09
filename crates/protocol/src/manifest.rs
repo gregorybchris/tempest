@@ -5,11 +5,10 @@
 //! [`Manifest`] value is always valid: [`Manifest::new`] and decoding both check every rule.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry as MapEntry;
 
 use crate::hash::{Hash, leaf_hash, manifest_hash};
 use crate::path::{
-    EscapesBundle, PathError, ancestors, fold_case, symlink_steps, validate_name, validate_path,
+    EscapesBundle, PathError, ancestors, fold_case, validate_name, validate_path,
     validate_symlink_target,
 };
 use crate::tree::chunk_count;
@@ -324,82 +323,144 @@ impl Manifest {
             let EntryKind::Symlink { target } = &entry.kind else {
                 continue;
             };
-            let steps = symlink_steps(&entry.path, target)
+            let via = tree
+                .symlink_on_route(&entry.path, target)
                 .map_err(|EscapesBundle| ManifestError::SymlinkEscapes(entry.path.clone()))?;
-            for step in steps {
-                if let Some(via) = tree.symlink(&step) {
-                    return Err(ManifestError::SymlinkThroughSymlink {
-                        path: entry.path.clone(),
-                        via: via.to_owned(),
-                    });
-                }
+            if let Some(via) = via {
+                return Err(ManifestError::SymlinkThroughSymlink {
+                    path: entry.path.clone(),
+                    via: via.to_owned(),
+                });
             }
         }
         Ok(())
     }
 }
 
-/// Every path in a manifest, entries and the directories that implicitly contain them, keyed by
-/// case-folded path.
+/// Every path in a manifest, entries and the directories that implicitly contain them, as a trie
+/// of case-folded segments. Memory is linear in the manifest's size, however deep its paths.
 struct PathTree<'a> {
-    /// The original path, and the entry's kind (`None` for an implicit directory).
-    paths: HashMap<String, (&'a str, Option<&'a EntryKind>)>,
+    /// Node 0 is the top level.
+    nodes: Vec<Node<'a>>,
+    /// A node's children, by parent and case-folded segment.
+    children: HashMap<(usize, String), usize>,
+}
+
+#[derive(Default)]
+struct Node<'a> {
+    /// The path as first seen: an entry's, or an implicit directory's. `None` until seen.
+    original: Option<&'a str>,
+    /// The entry's kind (`None` for an implicit directory).
+    kind: Option<&'a EntryKind>,
 }
 
 impl<'a> PathTree<'a> {
     /// Indexes `entries`, checking that no two paths differ only by case, that nothing is inside
     /// a file or symlink, and that directory entries are empty.
     fn new(entries: &'a [Entry]) -> Result<Self, ManifestError> {
-        let mut paths: HashMap<_, (&str, Option<&EntryKind>)> = HashMap::new();
+        let mut tree = Self {
+            nodes: vec![Node::default()],
+            children: HashMap::new(),
+        };
         for entry in entries {
-            match paths.entry(fold_case(&entry.path)) {
-                MapEntry::Occupied(other) => {
-                    return Err(ManifestError::CaseCollision(
-                        other.get().0.to_owned(),
-                        entry.path.clone(),
-                    ));
-                }
-                MapEntry::Vacant(slot) => {
-                    slot.insert((entry.path.as_str(), Some(&entry.kind)));
-                }
+            let mut node = 0;
+            for segment in entry.path.split('/') {
+                node = tree.child(node, segment);
             }
+            let slot = &mut tree.nodes[node];
+            if let Some(other) = slot.original {
+                return Err(ManifestError::CaseCollision(
+                    other.to_owned(),
+                    entry.path.clone(),
+                ));
+            }
+            slot.original = Some(entry.path.as_str());
+            slot.kind = Some(&entry.kind);
         }
         for entry in entries {
-            for dir in ancestors(&entry.path) {
-                match paths.entry(fold_case(dir)) {
-                    MapEntry::Vacant(slot) => {
-                        slot.insert((dir, None));
+            let mut node = 0;
+            let mut ends = ancestors(&entry.path).map(str::len);
+            let mut end = ends.next();
+            for segment in entry.path.split('/') {
+                let Some(dir_end) = end else { break };
+                node = tree.child(node, segment);
+                end = ends.next();
+                let dir = &entry.path[..dir_end];
+                let slot = &mut tree.nodes[node];
+                match (slot.original, slot.kind) {
+                    (None, _) => slot.original = Some(dir),
+                    (Some(other), _) if other != dir => {
+                        return Err(ManifestError::CaseCollision(
+                            other.to_owned(),
+                            dir.to_owned(),
+                        ));
                     }
-                    MapEntry::Occupied(other) => match *other.get() {
-                        (other, _) if other != dir => {
-                            return Err(ManifestError::CaseCollision(
-                                other.to_owned(),
-                                dir.to_owned(),
-                            ));
-                        }
-                        (_, None) => {}
-                        (_, Some(EntryKind::Directory)) => {
-                            return Err(ManifestError::NonEmptyDirectory(dir.to_owned()));
-                        }
-                        (_, Some(_)) => {
-                            return Err(ManifestError::InsideFileOrSymlink {
-                                path: entry.path.clone(),
-                                parent: dir.to_owned(),
-                            });
-                        }
-                    },
+                    (Some(_), None) => {}
+                    (Some(_), Some(EntryKind::Directory)) => {
+                        return Err(ManifestError::NonEmptyDirectory(dir.to_owned()));
+                    }
+                    (Some(_), Some(_)) => {
+                        return Err(ManifestError::InsideFileOrSymlink {
+                            path: entry.path.clone(),
+                            parent: dir.to_owned(),
+                        });
+                    }
                 }
             }
         }
-        Ok(Self { paths })
+        Ok(tree)
     }
 
-    /// The path of the symlink entry at `path`, compared case-insensitively, if there is one.
-    fn symlink(&self, path: &str) -> Option<&'a str> {
-        match self.paths.get(&fold_case(path)) {
-            Some(&(original, Some(EntryKind::Symlink { .. }))) => Some(original),
-            _ => None,
+    /// The child of `parent` named `segment`, compared case-insensitively, made if missing.
+    fn child(&mut self, parent: usize, segment: &str) -> usize {
+        let next = self.nodes.len();
+        let node = *self
+            .children
+            .entry((parent, fold_case(segment)))
+            .or_insert(next);
+        if node == next {
+            self.nodes.push(Node::default());
         }
+        node
+    }
+
+    /// The child of `parent` named `segment`, compared case-insensitively, if there is one.
+    fn find(&self, parent: usize, segment: &str) -> Option<usize> {
+        self.children.get(&(parent, fold_case(segment))).copied()
+    }
+
+    /// Resolves the target of the symlink at `link` one segment at a time, as
+    /// [`symlink_steps`] does, and returns the path of the first symlink entry that a step
+    /// reaches, compared case-insensitively.
+    fn symlink_on_route(&self, link: &str, target: &str) -> Result<Option<&'a str>, EscapesBundle> {
+        // The node reached after each segment; `None` once the route leaves the manifest's paths.
+        let mut route: Vec<Option<usize>> = Vec::new();
+        let mut node = Some(0);
+        if let Some((dir, _)) = link.rsplit_once('/') {
+            for segment in dir.split('/') {
+                node = node.and_then(|node| self.find(node, segment));
+                route.push(node);
+            }
+        }
+        let mut via = None;
+        for segment in target.split('/') {
+            if segment == ".." {
+                route.pop().ok_or(EscapesBundle)?;
+            } else {
+                let parent = route.last().copied().unwrap_or(Some(0));
+                route.push(parent.and_then(|parent| self.find(parent, segment)));
+            }
+            if via.is_none()
+                && let Some(Some(node)) = route.last()
+                && let Node {
+                    original: Some(original),
+                    kind: Some(EntryKind::Symlink { .. }),
+                } = &self.nodes[*node]
+            {
+                via = Some(*original);
+            }
+        }
+        Ok(via)
     }
 }
 
@@ -507,6 +568,20 @@ mod tests {
 
     fn manifest(entries: Vec<Entry>) -> Result<Manifest, ManifestError> {
         Manifest::new("bundle", "", 0, "test", entries)
+    }
+
+    #[test]
+    fn deep_paths_cost_memory_linear_in_their_length() {
+        // 200 entries of about 4 KiB each would hold hundreds of MB if every ancestor were a key.
+        let entries = (0..200)
+            .map(|n| {
+                let deep = "a/".repeat(2040);
+                Entry::file(format!("x{n:04}/{deep}f"), file(1))
+            })
+            .collect();
+        let mut entries: Vec<Entry> = entries;
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        manifest(entries).unwrap();
     }
 
     #[test]

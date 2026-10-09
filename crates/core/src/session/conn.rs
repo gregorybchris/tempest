@@ -58,6 +58,8 @@ pub(super) struct Conn {
     /// Whether the other peer has lacked chunks while connected, so that it having every chunk
     /// now means it received them.
     pub was_incomplete: bool,
+    /// The chunks the other peer's HaveUpdates have added or removed over the connection.
+    pub churn: u64,
     /// While superseeding: the chunks announced to the other peer, and the range offered to it.
     pub offer: Option<Offer>,
     /// No requests are sent on the connection before this time, after a Reject.
@@ -145,6 +147,7 @@ impl Conn {
             exchanged_at: now,
             next_peers: None,
             was_incomplete: false,
+            churn: 0,
             offer: None,
             retry_at: None,
             lacks_manifest: false,

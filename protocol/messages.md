@@ -140,6 +140,7 @@ Hello {
 - The accepting peer's `bundle_id` MUST equal the dialing peer's.
 - A peer MUST NOT send an optional message unless the other peer listed the corresponding capability. This version of the protocol defines no optional capabilities.
 - `max_request_chunks` MUST be a power of two from 1 to 1,024. `max_open_requests` MUST be at least 1.
+- `capabilities` MUST have at most 16 entries and `addresses` at most 32. A receiver MUST treat more as a protocol violation.
 - `addresses` lists addresses at which the sender accepts connections. It SHOULD include only addresses reachable from outside the sender's local network, unless the connection itself is on a local network. `relay` holds the relay address lent to the sender by its home relay ([relays.md](relays.md)), if it has one.
 - A receiver MUST ignore bytes after the known fields (see [Framing](#framing)).
 
@@ -221,7 +222,7 @@ PeerRecord {
 - A leaving peer SHOULD send that last Peers on each connection, listing peers it is connected to first, then others it knows. A peer that knew the swarm only through the leaver would otherwise have no one left to find.
 - A PeerRecord's `addresses` MAY include the addresses that peer advertised in its Hello, and the source address of a direct connection with it. They MUST NOT include a relay address: relay addresses go only in `relay`.
 - A PeerRecord's `relay` MUST contain at most one address.
-- A PeerRecord SHOULD list at most 16 addresses in `addresses`. A receiver MAY keep only some of them.
+- A PeerRecord SHOULD list at most 16 addresses in `addresses`, and MUST NOT list more than 32. A receiver MAY keep only some of them.
 
 **Rationale.** Peer exchange is the cheapest way to grow from one known peer to many. The limits bound how much a peer can flood its neighbors with addresses.
 

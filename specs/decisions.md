@@ -4243,3 +4243,27 @@ This revises D-175, D-182 and D-189.
 
 **Rationale:** The earlier loss and slowdown came from the old model leaving capacity unused, which the tests' claims depended on. Keeping a claim the model no longer shows would mean tuning scenarios until it appears.
 
+
+## D-260: Security review hardening
+
+**Date:** 2026-10-09 · **Status:** Decided
+
+**Context:** A review of the whole repo found resource-exhaustion paths from untrusted peers and a few tracker and engine gaps.
+
+**Decision:**
+
+- **Hello and Peers:** a Hello lists at most 16 capabilities and 32 addresses, and a PeerRecord at most 32 addresses. A receiver treats more as a protocol violation (`protocol/messages.md`).
+- **Manifest validation** indexes paths in a trie of case-folded segments, so memory is linear in the manifest's size instead of quadratic in path depth.
+- **HaveUpdate:** a connection whose updates change more than four times the bundle's chunks is closed as a protocol violation. Updates are still applied per chunk.
+- **Tracker fetcher:** it dials only public addresses with a nonzero port unless `allow_local_peers` is set, so announced addresses can't aim it at internal services or third parties.
+- **Tracker sign-in** without a public URL needs a loopback peer as well as a loopback `Host`. A banned key can't edit its account. Store errors reach clients as a generic message. The catalog file is created mode 0600.
+- **Reveal** on macOS always selects the path with `open -R`, so a downloaded folder named `X.app` is never launched.
+
+**Open:** these need a decision before they change.
+
+- `notifications.command` can be set through the API, so any client the API admits can run commands (D-125, D-184).
+- A key can claim any unlisted bundle first, and a listing signature binds no tracker and never expires.
+- Announced addresses are unauthenticated, so a tracker can point downloaders at a third party.
+- Tracker and asset responses carry no CSP.
+- Unicode bidi and format characters are allowed in names.
+- Relay routes can be evicted by spoofed traffic.

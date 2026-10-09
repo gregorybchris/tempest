@@ -93,10 +93,32 @@ async fn dial(
     let relayed = peer.relay.iter().map(|a| (*a, PathKind::Relayed));
     let mut last = String::from("it has no address");
     for (address, path) in direct.chain(relayed) {
+        let started = std::time::Instant::now();
         match tokio::time::timeout(timeout, dial_one(endpoint, address, path, peer)).await {
-            Ok(Ok(connection)) => return Ok(connection),
-            Ok(Err(error)) => last = format!("{address}: {error}"),
-            Err(_) => last = format!("{address}: timed out"),
+            Ok(Ok(connection)) => {
+                tracing::debug!(
+                    "dialed {} at {address} ({path:?}) in {:?}",
+                    peer.peer_id,
+                    started.elapsed()
+                );
+                return Ok(connection);
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(
+                    "dialing {} at {address} ({path:?}) failed after {:?}: {error} ({error:?})",
+                    peer.peer_id,
+                    started.elapsed()
+                );
+                last = format!("{address}: {error}");
+            }
+            Err(_) => {
+                tracing::debug!(
+                    "dialing {} at {address} ({path:?}) timed out after {:?}",
+                    peer.peer_id,
+                    started.elapsed()
+                );
+                last = format!("{address}: timed out");
+            }
         }
     }
     Err(FetchError::Unreachable(last))

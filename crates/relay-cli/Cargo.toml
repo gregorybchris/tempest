@@ -26,6 +26,7 @@ tempest-relay.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]

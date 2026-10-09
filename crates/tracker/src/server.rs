@@ -162,6 +162,10 @@ impl Tracker {
         listener: TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> io::Result<()> {
+        tracing::info!(
+            "serving; catalog and manifest fetcher {}",
+            if self.catalog.is_some() { "on" } else { "off" }
+        );
         let mut sweeper = tokio::spawn(self.clone().sweep());
         let mut fetching = match &self.catalog {
             Some(_) => {
@@ -193,6 +197,10 @@ impl Tracker {
                 _ => Err(io::Error::other("the manifest fetcher stopped")),
             },
         };
+        match &result {
+            Ok(()) => tracing::info!("shutting down"),
+            Err(error) => tracing::error!("serving ended: {error}"),
+        }
         sweeper.abort();
         if let Some(fetching) = fetching {
             fetching.abort();
@@ -207,6 +215,7 @@ impl Tracker {
         loop {
             tick.tick().await;
             self.lock().sweep(Instant::now());
+            tracing::trace!("swept silent peers");
         }
     }
 
@@ -342,12 +351,16 @@ async fn announce(
                 status: rejection.status().as_u16(),
                 ..Refusal::new(ErrorCode::InvalidRequest, rejection.body_text())
             };
+            tracing::debug!("announce from {peer} refused: {}", refusal.body.message);
             return refuse(refusal);
         }
     };
     let request: AnnounceRequest = match serde_json::from_slice(&body) {
         Ok(request) => request,
-        Err(error) => return refuse(Refusal::new(ErrorCode::InvalidRequest, error.to_string())),
+        Err(error) => {
+            tracing::debug!("announce from {peer} refused: bad body: {error}");
+            return refuse(Refusal::new(ErrorCode::InvalidRequest, error.to_string()));
+        }
     };
     // Only a tracker with a catalog reads `listing` (`protocol/trackers.md`).
     let listing = request.listing.filter(|_| tracker.catalog.is_some());
@@ -359,6 +372,11 @@ async fn announce(
         )
     {
         let message = "the listing signature doesn't verify for this peer and bundle";
+        tracing::info!(
+            "announce for {} by {} refused: {message}",
+            request.bundle,
+            request.peer
+        );
         return refuse(Refusal::new(ErrorCode::InvalidRequest, message));
     }
     let observed = tracker.observed_ip(peer, &headers);
@@ -372,8 +390,24 @@ async fn announce(
     };
     let response = match result {
         Ok(response) => response,
-        Err(refusal) => return refuse(refusal),
+        Err(refusal) => {
+            tracing::debug!(
+                "announce for {} by {} at {observed} refused ({}): {}",
+                request.bundle,
+                request.peer,
+                refusal.status,
+                refusal.body.message
+            );
+            return refuse(refusal);
+        }
     };
+    tracing::debug!(
+        "announce for {} by {} at {observed}: {:?}, answered with {} peers",
+        request.bundle,
+        request.peer,
+        request.event,
+        response.peers.len()
+    );
     if tracker.catalog.is_some() && (listing.is_some() || downloaded) {
         let (bundle, peer, listed) = (request.bundle, request.peer, listing.is_some());
         blocking(tracker, move |tracker| {
@@ -385,7 +419,17 @@ async fn announce(
             // against the client's limit. Over it, a later announce asks again.
             let publish = listed
                 && match catalog.knows_listing(&bundle) {
-                    Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
+                    Ok(known) => {
+                        known || {
+                            let allowed = tracker.limit(Action::Publish, observed).is_ok();
+                            if !allowed {
+                                tracing::debug!(
+                                    "listing request for {bundle} from {observed} is over the publish limit"
+                                );
+                            }
+                            allowed
+                        }
+                    }
                     Err(error) => {
                         tracing::error!("cannot list {bundle}: {error}");
                         false
@@ -396,6 +440,9 @@ async fn announce(
             }
             // Fresh peer IDs could otherwise inflate the counts.
             let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
+            if downloaded {
+                tracing::debug!("{peer} completed {bundle}");
+            }
             if downloaded && let Err(error) = catalog.record_download(now, &bundle) {
                 tracing::error!("cannot count a download of {bundle}: {error}");
             }

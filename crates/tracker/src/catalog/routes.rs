@@ -98,10 +98,30 @@ async fn limit(State(tracker): State<Tracker>, mut request: Request, next: Next)
     if let Some(action) = action
         && let Err(refusal) = tracker.limit(action, ip)
     {
+        tracing::debug!(
+            "{action:?} request from {ip} refused: {} (retry after {:?}s)",
+            refusal.body.message,
+            refusal.body.retry_after_secs
+        );
         return refuse(refusal);
     }
+    let method = request.method().clone();
+    let route = matched.map_or_else(String::new, |path| path.as_str().to_owned());
     request.extensions_mut().insert(ClientIp(ip));
-    next.run(request).await
+    let started = std::time::Instant::now();
+    let response = next.run(request).await;
+    // Bodies and query strings can hold secrets, so only the route template is logged.
+    let status = response.status();
+    let elapsed = started.elapsed();
+    let polling = matches!(action, Some(Action::Challenge | Action::SignIn));
+    if status.is_server_error() {
+        tracing::warn!("{method} {route} failed with {status} in {elapsed:?}");
+    } else if method == Method::GET || method == Method::HEAD || (polling && status.is_success()) {
+        tracing::debug!("{method} {route} from {ip}: {status} in {elapsed:?}");
+    } else {
+        tracing::info!("{method} {route}: {status} in {elapsed:?}");
+    }
+    response
 }
 
 fn answer(result: Answer) -> Response {

@@ -226,6 +226,13 @@ async fn fetch(
 pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<()> {
     let identity = Identity::generate().map_err(io::Error::other)?;
     let endpoint = Endpoint::bind(identity, &config.endpoint)?;
+    tracing::info!(
+        "manifest fetcher started on {:?}: {} at once, {} peers per attempt, pending listings dropped after {}h",
+        endpoint.local_addrs(),
+        config.concurrency,
+        config.peers_per_attempt,
+        config.pending_lifetime.as_secs() / 3600
+    );
     let mut rng = ChaCha8Rng::seed_from_u64(getrandom::u64()?);
     let mut schedule = Schedule::new(&config);
     let mut tasks = JoinSet::new();
@@ -248,6 +255,7 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                         continue;
                     }
                 };
+                tracing::trace!("{} pending listings", pending.len());
                 let now = Instant::now();
                 let in_flight: HashSet<BundleId> = busy.values().copied().collect();
                 let slots = config.concurrency.saturating_sub(busy.len());
@@ -255,6 +263,9 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                     let swarm = tracker.lock().peers(now, &bundle);
                     let peers = choose(swarm, &publisher, config.peers_per_attempt, &mut rng);
                     if peers.is_empty() {
+                        tracing::info!(
+                            "{bundle} is pending but its swarm has no live peers to ask (publisher {publisher})"
+                        );
                         schedule.record(now, bundle, None);
                         continue;
                     }
@@ -265,7 +276,10 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
             Some(joined) = tasks.join_next_with_id() => {
                 let (id, manifest) = match joined {
                     Ok((id, manifest)) => (id, manifest),
-                    Err(error) => (error.id(), None),
+                    Err(error) => {
+                        tracing::error!("a manifest fetch task failed: {error}");
+                        (error.id(), None)
+                    }
                 };
                 let Some(bundle) = busy.remove(&id) else { continue };
                 if let Some(manifest) = &manifest {
@@ -278,6 +292,9 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                         tracing::error!("cannot list {bundle}: {error}");
                         continue;
                     }
+                }
+                if manifest.is_none() {
+                    tracing::info!("{bundle} stays pending; the fetcher will retry with backoff");
                 }
                 schedule.record(Instant::now(), bundle, Some(manifest.is_some()));
             }

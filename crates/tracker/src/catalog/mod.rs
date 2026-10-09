@@ -200,6 +200,11 @@ impl Catalog {
                 .iter()
                 .map(|listing| (listing, category_name(categories, &listing.fields.category))),
         )?;
+        tracing::info!(
+            "catalog opened: {} listings indexed, {} taken down",
+            listed.len(),
+            catalog.blocked.len()
+        );
         Ok(catalog)
     }
 
@@ -239,6 +244,7 @@ impl Catalog {
     pub fn create_invite(&mut self, now: u64) -> Result<String, Refusal> {
         let code = code_from(random::<CODE_LEN>()?);
         self.store.create_invite(&code, now)?;
+        tracing::info!("invite made");
         Ok(code)
     }
 
@@ -250,8 +256,13 @@ impl Catalog {
     /// there is no such listing.
     pub fn set_hidden(&mut self, bundle: &BundleId, hidden: bool) -> Result<(), Refusal> {
         if !self.store.set_hidden(bundle, hidden)? {
+            tracing::warn!("cannot set {bundle} hidden={hidden}: no such listing");
             return Err(not_found("listing"));
         }
+        tracing::info!(
+            "{bundle} is now {}",
+            if hidden { "hidden" } else { "shown" }
+        );
         Ok(self.reindex(bundle)?)
     }
 
@@ -259,11 +270,18 @@ impl Catalog {
     /// edit, vote, comment or report. Fails if there is no such account.
     pub fn set_banned(&mut self, key: &PeerId, banned: bool) -> Result<(), Refusal> {
         if !self.store.set_banned(key, banned)? {
+            tracing::warn!("cannot set {key} banned={banned}: no such account");
             return Err(not_found("account"));
         }
-        for bundle in self.store.bundles_of(key)? {
-            self.reindex(&bundle)?;
+        let bundles = self.store.bundles_of(key)?;
+        for bundle in &bundles {
+            self.reindex(bundle)?;
         }
+        tracing::info!(
+            "{key} is now {}; reindexed its {} listings",
+            if banned { "banned" } else { "unbanned" },
+            bundles.len()
+        );
         Ok(())
     }
 
@@ -285,10 +303,14 @@ impl Catalog {
         let client = client_key(ip);
         let mine = self.challenges.values().filter(|p| p.client == client);
         if mine.count() >= self.config.max_challenges_per_ip {
+            tracing::debug!("sign-in code for {ip} refused: too many outstanding for its client");
             let refusal = Refusal::new(ErrorCode::RateLimited, "too many sign-in codes at once");
             return Err(refusal.retry_after(Duration::from_secs(60)));
         }
         if self.challenges.len() >= MAX_CHALLENGES {
+            tracing::warn!(
+                "sign-in code for {ip} refused: {MAX_CHALLENGES} sign-ins are outstanding"
+            );
             let refusal = Refusal::new(ErrorCode::Unavailable, "too many sign-ins at once");
             return Err(refusal.retry_after(Duration::from_secs(60)));
         }
@@ -302,6 +324,10 @@ impl Catalog {
         };
         // A repeated code, about one in 2^50, replaces an old challenge, which then fails.
         self.challenges.insert(code.clone(), pending);
+        tracing::debug!(
+            "sign-in code issued to {ip}; {} outstanding",
+            self.challenges.len()
+        );
         Ok(Challenge {
             code,
             poll,
@@ -317,29 +343,48 @@ impl Catalog {
         authority: &str,
         request: &SignIn,
     ) -> Result<Session, Refusal> {
-        let failed = |message: &str| refusal(401, codes::SIGN_IN_FAILED, message);
+        let key = request.key;
+        let failed = |why: &str, message: &str| {
+            tracing::info!("sign-in by {key} failed: {why}");
+            refusal(401, codes::SIGN_IN_FAILED, message)
+        };
         let code = normalize_code(&request.code);
         let Some(pending) = self.challenges.get(&code) else {
-            return Err(failed("the code is unknown or expired"));
+            return Err(failed("unknown code", "the code is unknown or expired"));
         };
         if pending.expires <= now || pending.session.is_some() {
-            return Err(failed("the code is expired or already used"));
+            return Err(failed(
+                "expired or used code",
+                "the code is expired or already used",
+            ));
         }
         let message = sign_in_message(authority, &code);
         if !verify(&request.key, &message, &request.sig) {
-            return Err(failed(&format!(
-                "the signature doesn't verify for this key, code and the tracker address {authority}"
-            )));
+            return Err(failed(
+                "bad signature",
+                &format!(
+                    "the signature doesn't verify for this key, code and the tracker address {authority}"
+                ),
+            ));
         }
-        let account = match self.store.account(&request.key)? {
-            Some(_) => self.account(&request.key)?,
-            None => self.join(&request.key, request.invite.as_deref(), now)?,
+        let existing = self.store.account(&request.key)?.is_some();
+        let account = match existing {
+            true => self.account(&request.key)?,
+            false => self.join(&request.key, request.invite.as_deref(), now)?,
         };
+        if self.store.is_banned(&request.key)? {
+            tracing::info!("banned key {key} signed in; it can browse but not publish");
+        }
 
         let token = Hash::new(random::<32>()?).to_string();
         let lifetime = self.config.session_lifetime.as_secs();
         self.store
             .create_session(&sha256(&token), &request.key, now + lifetime, now)?;
+        tracing::info!(
+            "{key} signed in ({}), session valid {}h",
+            if existing { "returning" } else { "new account" },
+            lifetime / 3600
+        );
         let session = Session {
             token,
             expires_in_secs: lifetime,
@@ -364,7 +409,18 @@ impl Catalog {
             }
             (true, None) => false,
         };
+        if joined {
+            tracing::info!("{key} joined the catalog");
+        }
         if !joined {
+            tracing::info!(
+                "{key} refused an account: invite {}",
+                if invite.is_some() {
+                    "unknown or used"
+                } else {
+                    "missing"
+                }
+            );
             let message = "this catalog needs an invite to join; the one given is unknown or used";
             return Err(refusal(403, codes::INVITE_REQUIRED, message));
         }
@@ -378,6 +434,7 @@ impl Catalog {
             pending.expires > now && pending.poll_hash == sha256(&request.poll)
         });
         if !matches {
+            tracing::debug!("sign-in poll failed: unknown or expired code, or wrong poll secret");
             let message = "the code is unknown or expired, or the poll secret is wrong";
             return Err(refusal(401, codes::SIGN_IN_FAILED, message));
         }
@@ -385,6 +442,9 @@ impl Catalog {
             Some(_) => self.challenges.remove(&code).and_then(|p| p.session),
             None => None,
         };
+        if let Some(session) = &session {
+            tracing::debug!("sign-in collected by {}", session.account.key);
+        }
         Ok(PollResponse { session })
     }
 
@@ -402,7 +462,9 @@ impl Catalog {
 
     /// Ends the session whose token is `token`.
     pub fn sign_out(&mut self, token: &str) -> Result<(), Refusal> {
-        Ok(self.store.delete_session(&sha256(token))?)
+        self.store.delete_session(&sha256(token))?;
+        tracing::debug!("session ended");
+        Ok(())
     }
 
     // Accounts.
@@ -445,16 +507,25 @@ impl Catalog {
         key: &PeerId,
     ) -> Result<(), StoreError> {
         if self.store.is_banned(key)? {
+            tracing::info!("not listing {bundle}: publisher {key} is banned");
             return Ok(());
         }
         if self.store.account(key)?.is_none() {
             if self.config.invites_required {
+                tracing::info!("not listing {bundle}: publisher {key} has no account");
                 return Ok(());
             }
             self.store.create_account(key, now)?;
+            tracing::info!("{key} joined the catalog by announcing a listing");
         }
-        if self.store.listing_owner(bundle)?.is_none() {
-            self.store.create_listing(bundle, key, now)?;
+        match self.store.listing_owner(bundle)? {
+            None => {
+                self.store.create_listing(bundle, key, now)?;
+                tracing::info!("{bundle} listed as pending for {key} by an announce");
+            }
+            Some((owner, status)) => tracing::debug!(
+                "{bundle} is already listed ({status:?}, owner {owner}); announce by {key} ignored"
+            ),
         }
         Ok(())
     }
@@ -474,6 +545,7 @@ impl Catalog {
         edit: &ListingEdit,
     ) -> Result<Listing, Refusal> {
         if self.store.is_banned(key)? {
+            tracing::info!("edit of {bundle} refused: {key} is banned");
             return Err(banned());
         }
         let title = edit.title.as_deref().map(text::clean_title);
@@ -492,11 +564,18 @@ impl Catalog {
         }
 
         match self.store.listing_owner(bundle)? {
-            None => self.store.create_listing(bundle, key, now)?,
+            None => {
+                self.store.create_listing(bundle, key, now)?;
+                tracing::info!("{bundle} listed as pending for {key} by the web form");
+            }
             Some((owner, _)) if owner != *key => {
+                tracing::info!("edit of {bundle} refused: {key} is not its publisher {owner}");
                 return Err(forbidden("another key listed this bundle"));
             }
-            Some((_, ListingStatus::Unpublished)) => self.store.relist(bundle, now)?,
+            Some((_, ListingStatus::Unpublished)) => {
+                self.store.relist(bundle, now)?;
+                tracing::info!("{bundle} listed again by {key}");
+            }
             Some(_) => {}
         }
         let mut fields = self.store.listing_fields(bundle)?;
@@ -506,6 +585,7 @@ impl Catalog {
         fields.tags = tags.unwrap_or(fields.tags);
         self.store.set_listing_fields(bundle, &fields, now)?;
         self.reindex(bundle)?;
+        tracing::info!("{bundle} edited by {key}");
         self.listing(bundle, Some(key))
     }
 
@@ -514,11 +594,13 @@ impl Catalog {
         match self.store.listing_owner(bundle)? {
             None => Err(not_found("listing")),
             Some((owner, _)) if owner != *key => {
+                tracing::info!("unpublish of {bundle} refused: {key} is not its publisher {owner}");
                 Err(forbidden("only the listing's publisher can unpublish it"))
             }
             Some(_) => {
                 self.store
                     .set_status(bundle, ListingStatus::Unpublished, now)?;
+                tracing::info!("{bundle} unpublished by {key}");
                 Ok(self.reindex(bundle)?)
             }
         }
@@ -527,6 +609,7 @@ impl Catalog {
     /// Records what `bundle` holds, from its manifest, which lists it if it was pending.
     pub fn set_content(&mut self, bundle: &BundleId, content: &Content) -> Result<(), StoreError> {
         self.store.set_content(bundle, content)?;
+        tracing::debug!("recorded the content of {bundle}");
         self.reindex(bundle)
     }
 
@@ -540,8 +623,16 @@ impl Catalog {
     /// made or last edited, and returns how many. Nobody serves those bundles, or nobody the
     /// tracker can reach; a sharer's next announce asks again.
     pub fn drop_pending(&mut self, now: u64, lifetime: Duration) -> Result<usize, StoreError> {
-        self.store
-            .delete_pending_before(now.saturating_sub(lifetime.as_secs()))
+        let dropped = self
+            .store
+            .delete_pending_before(now.saturating_sub(lifetime.as_secs()))?;
+        if dropped > 0 {
+            tracing::info!(
+                "dropped {dropped} listings still pending after {}h",
+                lifetime.as_secs() / 3600
+            );
+        }
+        Ok(dropped)
     }
 
     /// The bundles whose listings wait for their manifests, with their publishers, oldest
@@ -661,6 +752,7 @@ impl Catalog {
     ) -> Result<Listing, Refusal> {
         self.listed(bundle, key)?;
         self.store.vote(bundle, key, vote, now)?;
+        tracing::debug!("{key} voted {vote:?} on {bundle}");
         self.listing(bundle, Some(key))
     }
 
@@ -687,7 +779,9 @@ impl Catalog {
     ) -> Result<Comment, Refusal> {
         let body = text::clean_comment(&comment.body).map_err(invalid)?;
         self.listed(bundle, key)?;
-        Ok(self.store.add_comment(bundle, key, &body, now)?)
+        let comment = self.store.add_comment(bundle, key, &body, now)?;
+        tracing::info!("{key} commented on {bundle}");
+        Ok(comment)
     }
 
     /// Records `key`'s report of `bundle`'s listing, for the operator. A key's later report of
@@ -701,7 +795,9 @@ impl Catalog {
     ) -> Result<(), Refusal> {
         let reason = text::clean_report(&report.reason).map_err(invalid)?;
         self.listed(bundle, key)?;
-        Ok(self.store.add_report(bundle, key, &reason, now)?)
+        self.store.add_report(bundle, key, &reason, now)?;
+        tracing::info!("{key} reported {bundle}");
+        Ok(())
     }
 
     /// Deletes `key`'s comment `id`.
@@ -711,7 +807,11 @@ impl Catalog {
             Some(comment) if comment.author.key != *key => {
                 Err(forbidden("only a comment's author can delete it"))
             }
-            Some(_) => Ok(self.store.delete_comment(id)?),
+            Some(_) => {
+                self.store.delete_comment(id)?;
+                tracing::info!("{key} deleted comment {id}");
+                Ok(())
+            }
         }
     }
 }

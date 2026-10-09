@@ -4783,6 +4783,7 @@ dependencies = [
  "tempest-tui",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "unicode-width",
 ]
@@ -4950,6 +4951,7 @@ dependencies = [
  "tempest-relay",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
@@ -5063,6 +5065,7 @@ dependencies = [
  "tempest-tracker-api",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 

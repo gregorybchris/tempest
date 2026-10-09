@@ -285,6 +285,37 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         );
     }
     let catalog = args.catalog.open()?;
+    tracing::info!(
+        "tracker config: interval {}s, min interval {}s, max peers {} ({} per IP, {} per swarm \
+         and IP), {} relays, {}, behind proxy {}, public URL {}",
+        args.interval,
+        args.min_interval,
+        args.max_peers,
+        args.max_peers_per_ip,
+        args.max_swarm_peers_per_ip,
+        args.relay.len(),
+        match args.allow.len() {
+            0 => "public".to_string(),
+            n => format!("private ({n} allowed bundles)"),
+        },
+        args.behind_proxy,
+        args.public_url.as_deref().unwrap_or("none"),
+    );
+    if let Some(path) = &args.catalog.catalog {
+        tracing::info!(
+            "catalog config: {}, invites required {}, categories {}, fetch concurrency {}, \
+             max manifest {} bytes, pending lifetime {}h, rate limit overrides {}, \
+             {} sign-in codes per IP",
+            path.display(),
+            args.catalog.invites_required,
+            args.catalog.category.len(),
+            args.catalog.fetch_concurrency,
+            args.catalog.fetch_max_manifest,
+            args.catalog.pending_hours,
+            args.catalog.catalog_limit.len(),
+            args.catalog.challenges_per_ip,
+        );
+    }
     let config = TrackerConfig {
         interval: Duration::from_secs(args.interval.max(1)),
         min_interval: Duration::from_secs(args.min_interval),
@@ -300,6 +331,7 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
     runtime.block_on(async {
         let listener = bind(args.bind, args.port).await?;
         let address = listener.local_addr()?;
+        tracing::info!("listening on {address}");
         eprintln!("tracker listening on http://{address}; press Ctrl-C to stop");
         let mut tracker = Tracker::new(config)?.behind_proxy(args.behind_proxy);
         if let Some(url) = &args.public_url {
@@ -322,9 +354,14 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
                 .fetcher(args.catalog.fetcher())
                 .with_pages(assets::router(TRACKER_WEB, TRACKER_WEB_NOT_BUILT));
         }
-        tracker
+        let served = tracker
             .serve(listener, tempest_net::signal::interrupted())
-            .await?;
+            .await;
+        if let Err(error) = &served {
+            tracing::error!("the tracker stopped: {error}");
+        }
+        served?;
+        tracing::info!("stopped");
         eprintln!("stopped");
         Ok(())
     })
@@ -339,6 +376,7 @@ fn invite(path: &Path) -> Result<()> {
     let code = catalog
         .create_invite(now)
         .map_err(|refusal| anyhow::anyhow!(refusal.body.message))?;
+    tracing::info!("operator made an invite");
     println!("{code}");
     Ok(())
 }
@@ -368,6 +406,7 @@ fn operate(command: &TrackerCommand, out: &mut impl std::io::Write) -> Result<()
                 .set_hidden(bundle, hide)
                 .map_err(refused)?;
             let done = if hide { "hid" } else { "showed" };
+            tracing::info!("operator {done} {bundle}");
             writeln!(out, "{done} {bundle}")?;
         }
         TrackerCommand::Ban { key, file } | TrackerCommand::Unban { key, file } => {
@@ -376,6 +415,7 @@ fn operate(command: &TrackerCommand, out: &mut impl std::io::Write) -> Result<()
                 .set_banned(key, ban)
                 .map_err(refused)?;
             let done = if ban { "banned" } else { "unbanned" };
+            tracing::info!("operator {done} {key}");
             writeln!(out, "{done} {key}")?;
         }
         TrackerCommand::Reports { bundle, file } => {
@@ -426,7 +466,10 @@ async fn bind(ip: Option<IpAddr>, port: u16) -> Result<TcpListener> {
     for ip in candidates {
         match TcpListener::bind(SocketAddr::new(ip, port)).await {
             Ok(listener) => return Ok(listener),
-            Err(error) => last = Some(error),
+            Err(error) => {
+                tracing::warn!("cannot bind {ip} port {port}: {error}");
+                last = Some(error);
+            }
         }
     }
     let error = last.expect("at least one candidate");

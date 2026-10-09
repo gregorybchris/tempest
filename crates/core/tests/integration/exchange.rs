@@ -226,9 +226,46 @@ proptest! {
     }
 }
 
-/// Every combination of strategies completes a swarm with verified bytes.
+/// The strategy combinations [`strategy_combinations_complete`] runs, as indexes into each
+/// strategy's options: every combination of chunk selection, upload and endgame, which shape a
+/// download the most, with what happens on completion and superseeding chosen so that every
+/// pair of options of any two strategies appears together. All 288 combinations took a minute,
+/// most of it hashing.
+fn strategy_combinations() -> Vec<[usize; 5]> {
+    let mut rows = Vec::new();
+    for selection in 0..4 {
+        for upload in 0..4 {
+            for endgame in 0..3 {
+                let when_complete = (selection + upload + endgame) % 2;
+                let superseed = (selection + 2 * upload + endgame) % 3;
+                rows.push([selection, upload, endgame, when_complete, superseed]);
+            }
+        }
+    }
+    rows
+}
+
 #[test]
-fn every_strategy_combination_completes() {
+fn strategy_combinations_cover_every_pair_of_options() {
+    let counts = [4, 4, 3, 2, 3];
+    let rows = strategy_combinations();
+    for a in 0..5 {
+        for b in a + 1..5 {
+            for x in 0..counts[a] {
+                for y in 0..counts[b] {
+                    assert!(
+                        rows.iter().any(|row| row[a] == x && row[b] == y),
+                        "strategies {a} and {b}: options {x} and {y} never meet"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Strategy combinations complete a swarm with verified bytes: see [`strategy_combinations`].
+#[test]
+fn strategy_combinations_complete() {
     let content = bundle(&[37 * CHUNK + 5, 0, 30 * CHUNK]);
     let selections = [
         ChunkSelection::RarestFirst,
@@ -244,45 +281,35 @@ fn every_strategy_combination_completes() {
     ];
     let endgames = [Endgame::Limited, Endgame::Classic, Endgame::Off];
     let completions = [WhenComplete::RoundRobin, WhenComplete::Unchanged];
-    let mut swarms = 0;
-    for selection in selections {
-        for upload in uploads {
-            for endgame in endgames {
-                for when_complete in completions {
-                    for superseed in [Superseed::Off, Superseed::On, Superseed::Crowd] {
-                        let mut config = Config::default();
-                        config.strategies.chunk_selection = selection;
-                        config.strategies.upload = upload;
-                        config.strategies.endgame = endgame;
-                        config.strategies.when_complete = when_complete;
-                        config.strategies.superseed = superseed;
-                        config.requests.chunks = 4;
-                        let label = format!("{:?}", config.strategies);
+    let superseeds = [Superseed::Off, Superseed::On, Superseed::Crowd];
+    for [selection, upload, endgame, when_complete, superseed] in strategy_combinations() {
+        let mut config = Config::default();
+        config.strategies.chunk_selection = selections[selection];
+        config.strategies.upload = uploads[upload];
+        config.strategies.endgame = endgames[endgame];
+        config.strategies.when_complete = completions[when_complete];
+        config.strategies.superseed = superseeds[superseed];
+        config.requests.chunks = 4;
+        let label = format!("{:?}", config.strategies);
 
-                        let mut swarm = Swarm::new();
-                        let origin = swarm.add_complete(1, config.clone(), &content);
-                        swarm.nodes[origin].upload_rate = Some(400_000);
-                        let fetchers: Vec<usize> = (2..7)
-                            .map(|n| swarm.add_empty(n, config.clone(), &content))
-                            .collect();
-                        for (i, &f) in fetchers.iter().enumerate() {
-                            swarm.nodes[f].latency = Duration::from_millis(3 * i as u64);
-                            swarm.nodes[f].upload_rate = Some(200_000);
-                        }
-                        let mut everyone = fetchers.clone();
-                        everyone.push(origin);
-                        swarm.introduce_all(&everyone);
-                        swarm.run(far_future());
-                        for &f in &fetchers {
-                            let node = &swarm.nodes[f];
-                            assert!(node.session.is_complete(), "{label}: node {f}");
-                            assert_eq!(node.content.files(), content.files(), "{label}");
-                        }
-                        swarms += 1;
-                    }
-                }
-            }
+        let mut swarm = Swarm::new();
+        let origin = swarm.add_complete(1, config.clone(), &content);
+        swarm.nodes[origin].upload_rate = Some(400_000);
+        let fetchers: Vec<usize> = (2..7)
+            .map(|n| swarm.add_empty(n, config.clone(), &content))
+            .collect();
+        for (i, &f) in fetchers.iter().enumerate() {
+            swarm.nodes[f].latency = Duration::from_millis(3 * i as u64);
+            swarm.nodes[f].upload_rate = Some(200_000);
+        }
+        let mut everyone = fetchers.clone();
+        everyone.push(origin);
+        swarm.introduce_all(&everyone);
+        swarm.run(far_future());
+        for &f in &fetchers {
+            let node = &swarm.nodes[f];
+            assert!(node.session.is_complete(), "{label}: node {f}");
+            assert_eq!(node.content.files(), content.files(), "{label}");
         }
     }
-    assert_eq!(swarms, 4 * 4 * 3 * 2 * 3);
 }

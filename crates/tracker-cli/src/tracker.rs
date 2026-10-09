@@ -65,6 +65,13 @@ pub struct TrackerArgs {
     /// The most peers listed across all swarms.
     #[arg(long, default_value_t = TrackerConfig::default().max_peers)]
     max_peers: usize,
+    /// The most peers listed across all swarms from one IP address, or one IPv6 /64.
+    #[arg(long, default_value_t = TrackerConfig::default().max_peers_per_ip, value_name = "N")]
+    max_peers_per_ip: usize,
+    /// The most peers listed in one swarm from one IP address, or one IPv6 /64.
+    #[arg(long, default_value_t = TrackerConfig::default().max_swarm_peers_per_ip,
+        value_name = "N")]
+    max_swarm_peers_per_ip: usize,
     /// A relay to recommend to peers, as `<key>@host[:port]`, which `tempest-relay` prints
     /// when it starts. Repeat for more. The relay runs separately.
     #[arg(long, value_name = "RELAY")]
@@ -281,6 +288,8 @@ pub fn tracker(args: TrackerArgs) -> Result<()> {
         interval: Duration::from_secs(args.interval.max(1)),
         min_interval: Duration::from_secs(args.min_interval),
         max_peers: args.max_peers,
+        max_peers_per_ip: args.max_peers_per_ip,
+        max_swarm_peers_per_ip: args.max_swarm_peers_per_ip,
         allowed: (!args.allow.is_empty())
             .then(|| args.allow.iter().copied().collect::<HashSet<_>>()),
         relays: args.relay.clone(),

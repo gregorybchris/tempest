@@ -63,12 +63,12 @@ struct Seen {
     decisions: usize,
 }
 
-fn watch(engine: &Engine, id: BundleId) -> Arc<Mutex<Seen>> {
+/// Subscribes before returning, so nothing that happens afterwards is missed.
+async fn watch(engine: &Engine, id: BundleId) -> Arc<Mutex<Seen>> {
     let seen = Arc::new(Mutex::new(Seen::default()));
-    let engine = engine.clone();
+    let mut events = engine.subscribe(None).await.unwrap();
     let record = seen.clone();
     tokio::spawn(async move {
-        let mut events = engine.subscribe(None).await.unwrap();
         while let Ok(event) = events.recv().await {
             if let EngineEvent::Decision { id: of, event } = &event.event
                 && *of == id
@@ -101,10 +101,11 @@ async fn a_swarm_forms_through_the_tracker_lan_discovery_and_peer_exchange() {
     }
 
     // The sharer announces to the tracker and answers on the LAN. Its uploads are limited, so
-    // the downloaders are still downloading when they learn of each other.
+    // the downloaders are still downloading when they learn of each other: several seconds,
+    // against peer exchange every second.
     let mut sharer_config = swarm_config(&root.path().join("sharer"), Some(lan_port));
     sharer_config.trackers = vec![tracker.clone()];
-    sharer_config.limits.upload = Some(1 << 20);
+    sharer_config.limits.upload = Some(1 << 19);
     let sharer = Engine::open(sharer_config).await.unwrap();
     let share = sharer
         .add_path(&source, ShareOptions::default())
@@ -113,30 +114,33 @@ async fn a_swarm_forms_through_the_tracker_lan_discovery_and_peer_exchange() {
     let id = share.id;
     wait_for(&sharer, id, "sharing", |t| t.status == Status::Sharing).await;
 
-    // The first downloader's link names only the tracker; it doesn't use the LAN.
+    // Both downloaders open before either starts, so they download at the same time.
     let first = Engine::open(swarm_config(&root.path().join("first"), None))
         .await
         .unwrap();
-    let first_seen = watch(&first, id);
+    let second = Engine::open(swarm_config(&root.path().join("second"), Some(lan_port)))
+        .await
+        .unwrap();
+    let first_seen = watch(&first, id).await;
+    let second_seen = watch(&second, id).await;
+
+    // The first downloader's link names only the tracker; it doesn't use the LAN.
     let mut tracker_link = Link::new(id);
     tracker_link.trackers = vec![tracker.clone()];
     first
         .add_link(&tracker_link.to_string(), AddOptions::default())
         .await
         .unwrap();
-
     // The second's link names only the bundle; it finds the sharer on the LAN.
-    let second = Engine::open(swarm_config(&root.path().join("second"), Some(lan_port)))
-        .await
-        .unwrap();
-    let second_seen = watch(&second, id);
     second
         .add_link(&Link::new(id).to_string(), AddOptions::default())
         .await
         .unwrap();
 
     for (engine, name) in [(&first, "first"), (&second, "second")] {
-        let done = wait_for(engine, id, name, |t| t.status == Status::Sharing).await;
+        // Complete, whether still sharing or already done: once every peer is complete, a
+        // downloader soon stops sharing.
+        let done = wait_for(engine, id, name, |t| t.completed.is_some()).await;
         assert_eq!(done.have, done.chunks);
         let folder = root.path().join(name).join("downloads/album");
         for (path, data) in &files {

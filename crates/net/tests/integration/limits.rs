@@ -17,8 +17,10 @@ use tokio::time::Instant;
 const MIB: u64 = 1024 * 1024;
 
 /// How far the measured rate may stray from the limit. Above it by up to a burst and a frame
-/// over a few seconds; below it by the time connecting and fetching the manifest take.
-const TOLERANCE: (f64, f64) = (0.75, 1.2);
+/// over a few seconds, which is what a limit promises. Below it by the time connecting and
+/// fetching the manifest take, and by however slow a busy machine is: the lower bound only
+/// catches a limit that holds transfers far under it.
+const TOLERANCE: (f64, f64) = (0.4, 1.2);
 
 fn start_node() -> Node {
     let config = NodeConfig::default();

@@ -198,10 +198,26 @@ async fn fetch(
     peers: Vec<PeerRecord>,
     limits: FetchLimits,
 ) -> Option<Manifest> {
+    let mut last = None;
     for peer in &peers {
-        if let Ok(manifest) = fetch_manifest(&endpoint, bundle, peer, limits).await {
-            return Some(manifest);
+        tracing::debug!(
+            "asking {} at {:?} for {bundle}'s manifest",
+            peer.peer_id,
+            peer.addresses
+        );
+        match fetch_manifest(&endpoint, bundle, peer, limits).await {
+            Ok(manifest) => return Some(manifest),
+            Err(error) => {
+                tracing::debug!("{} didn't send {bundle}'s manifest: {error}", peer.peer_id);
+                last = Some(error);
+            }
         }
+    }
+    if let Some(error) = last {
+        tracing::warn!(
+            "cannot fetch {bundle}'s manifest from {} peers: {error}",
+            peers.len()
+        );
     }
     None
 }
@@ -253,6 +269,7 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                 };
                 let Some(bundle) = busy.remove(&id) else { continue };
                 if let Some(manifest) = &manifest {
+                    tracing::info!("fetched {bundle}'s manifest; listing it");
                     let content = content(manifest);
                     let stored = blocking(tracker.clone(), move |tracker| {
                         tracker.catalog().set_content(&bundle, &content)

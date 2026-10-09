@@ -39,6 +39,11 @@ const MTU_WAIT: Duration = Duration::from_secs(3);
 const MAX_ATTEMPTS: usize = 8;
 /// The most tracker-recommended relays remembered.
 const MAX_RECOMMENDED: usize = 16;
+/// The most relays taken from one tracker response, so one tracker can't push out the others'.
+const MAX_RECOMMENDED_AT_ONCE: usize = 4;
+/// How long a recommended relay is remembered after the last tracker response that named it.
+/// Trackers are asked far more often, so this forgets only relays no tracker recommends now.
+const RECOMMENDATION_LIFETIME: Duration = Duration::from_secs(60 * 60);
 /// The pause after the first failed attempt, doubled after each further one.
 const MIN_RETRY: Duration = Duration::from_secs(2);
 /// The longest pause between attempts.
@@ -171,15 +176,15 @@ impl Default for Shared {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Candidates {
     choice: RelayChoice,
-    recommended: Vec<RelayIdentity>,
+    /// The relays trackers recommended, each with when one last did, in the order first heard.
+    recommended: Vec<(RelayIdentity, Instant)>,
 }
 
 impl Candidates {
     /// Every relay to try, configured ones first, each once.
     fn list(&self) -> Vec<RelayIdentity> {
-        let recommended = self
-            .recommended
-            .iter()
+        let recommended = (self.recommended.iter())
+            .map(|(relay, _)| relay)
             .filter(|_| self.choice.from_trackers);
         let mut list: Vec<RelayIdentity> = Vec::new();
         for relay in self.choice.known.iter().chain(recommended) {
@@ -188,6 +193,33 @@ impl Candidates {
             }
         }
         list
+    }
+
+    /// Takes in the first few of a tracker's `relays` at `now`, and forgets the relays no
+    /// tracker has recommended for [`RECOMMENDATION_LIFETIME`]. Beyond [`MAX_RECOMMENDED`], a
+    /// newcomer replaces the relay recommended longest ago. Returns whether the relays changed.
+    fn recommend(&mut self, relays: &[RelayIdentity], now: Instant) -> bool {
+        let before = self.recommended.len();
+        self.recommended
+            .retain(|(_, at)| now.duration_since(*at) < RECOMMENDATION_LIFETIME);
+        let mut changed = self.recommended.len() != before;
+        for relay in relays.iter().take(MAX_RECOMMENDED_AT_ONCE) {
+            if let Some((_, at)) = self.recommended.iter_mut().find(|(r, _)| r == relay) {
+                *at = now;
+                continue;
+            }
+            if self.recommended.len() >= MAX_RECOMMENDED {
+                let oldest = (self.recommended.iter().enumerate())
+                    .min_by_key(|(_, (_, at))| *at)
+                    .map(|(i, _)| i);
+                if let Some(oldest) = oldest {
+                    self.recommended.remove(oldest);
+                }
+            }
+            self.recommended.push((relay.clone(), now));
+            changed = true;
+        }
+        changed
     }
 }
 
@@ -207,20 +239,11 @@ impl HomeRelay {
         self.0.status.borrow().relay_address()
     }
 
-    /// Adds relays a tracker recommends, used if the [`RelayChoice`] allows it.
+    /// Adds relays a tracker recommends, used if the [`RelayChoice`] allows it. Relays no
+    /// tracker has recommended for an hour are forgotten as further recommendations arrive.
     pub fn recommend(&self, relays: &[RelayIdentity]) {
-        self.0.choice.send_if_modified(|candidates| {
-            let mut changed = false;
-            for relay in relays {
-                if candidates.recommended.len() < MAX_RECOMMENDED
-                    && !candidates.recommended.contains(relay)
-                {
-                    candidates.recommended.push(relay.clone());
-                    changed = true;
-                }
-            }
-            changed
-        });
+        let now = Instant::now();
+        (self.0.choice).send_if_modified(|candidates| candidates.recommend(relays, now));
     }
 
     /// Sets the relays to choose from, and starts the home relay's task if it isn't running.
@@ -551,22 +574,68 @@ mod tests {
                 known: vec![relay(1), relay(2)],
                 from_trackers: false,
             },
-            recommended: vec![relay(2), relay(3)],
+            recommended: Vec::new(),
         };
+        candidates.recommend(&[relay(2), relay(3)], Instant::now());
         assert_eq!(candidates.list(), [relay(1), relay(2)]);
         candidates.choice.from_trackers = true;
         assert_eq!(candidates.list(), [relay(1), relay(2), relay(3)]);
     }
 
+    fn recommended(candidates: &Candidates) -> Vec<u8> {
+        let relays = candidates.recommended.iter();
+        let host = |relay: &RelayIdentity| match &relay.host {
+            RelayHost::Ip(std::net::IpAddr::V4(ip)) => ip.octets()[3],
+            host => panic!("{host:?}"),
+        };
+        relays.map(|(relay, _)| host(relay)).collect()
+    }
+
     #[test]
     fn recommendations_are_kept_once_and_capped() {
-        let home = HomeRelay::default();
+        let mut candidates = Candidates::default();
+        let start = Instant::now();
         let relays: Vec<_> = (0..40).map(relay).collect();
-        home.recommend(&relays[..3]);
-        home.recommend(&relays);
-        let recommended = home.0.choice.borrow().recommended.clone();
-        assert_eq!(recommended.len(), MAX_RECOMMENDED);
-        assert_eq!(recommended[..3], relays[..3]);
+        assert!(candidates.recommend(&relays[..3], start));
+        assert!(!candidates.recommend(&relays[..3], start));
+        // A response adds only its first few.
+        candidates.recommend(&relays[3..], start);
+        assert_eq!(recommended(&candidates), [0, 1, 2, 3, 4, 5, 6]);
+        for (n, chunk) in relays[7..].chunks(4).enumerate() {
+            candidates.recommend(chunk, start + Duration::from_secs(n as u64 + 1));
+        }
+        assert_eq!(candidates.recommended.len(), MAX_RECOMMENDED);
+    }
+
+    #[test]
+    fn newcomers_replace_the_relays_recommended_longest_ago() {
+        let mut candidates = Candidates::default();
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        for n in 0..4 {
+            let batch: Vec<_> = (n * 4..n * 4 + 4).map(relay).collect();
+            candidates.recommend(&batch, at(u64::from(n)));
+        }
+        assert_eq!(candidates.recommended.len(), MAX_RECOMMENDED);
+        // Relays 0 to 3 are recommended again, so 4 to 7 are the oldest.
+        candidates.recommend(&(0..4).map(relay).collect::<Vec<_>>(), at(10));
+        candidates.recommend(&[relay(50), relay(51)], at(11));
+        let kept = recommended(&candidates);
+        assert!(kept.contains(&0) && kept.contains(&50) && kept.contains(&51));
+        assert!(!kept.contains(&4) && !kept.contains(&5));
+    }
+
+    #[test]
+    fn relays_no_tracker_recommends_are_forgotten() {
+        let mut candidates = Candidates::default();
+        let start = Instant::now();
+        candidates.recommend(&[relay(1), relay(2)], start);
+        let later = start + RECOMMENDATION_LIFETIME - Duration::from_secs(1);
+        candidates.recommend(&[relay(2)], later);
+        assert!(candidates.recommend(&[], start + RECOMMENDATION_LIFETIME));
+        assert_eq!(recommended(&candidates), [2]);
+        assert!(candidates.recommend(&[], later + RECOMMENDATION_LIFETIME));
+        assert!(candidates.recommended.is_empty());
     }
 
     #[test]

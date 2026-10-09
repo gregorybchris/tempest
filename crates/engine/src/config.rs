@@ -148,10 +148,12 @@ pub struct SharingLimits {
     pub action: SharingAction,
 }
 
+/// A finished download shares until the swarm has no use for it: no ratio or time limit, only
+/// the idle timeout (D-255).
 impl Default for SharingLimits {
     fn default() -> Self {
         Self {
-            ratio: Some(1.0),
+            ratio: None,
             time: None,
             idle_timeout: Some(Duration::from_secs(600)),
             action: SharingAction::Stop,

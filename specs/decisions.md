@@ -1003,7 +1003,7 @@ Which one should be the default is one of the first questions for the simulator.
 
 ## D-065: Lingering
 
-**Date:** 2026-10-06 · **Status:** Decided (revised by D-224)
+**Date:** 2026-10-06 · **Status:** Decided (revised by D-224, D-255)
 
 **Decision:**
 
@@ -3616,7 +3616,7 @@ A core swarm test of 8 MiB over 40 Mbps and a 200 ms round trip took 3.2 s with 
 
 ## D-224: One set of sharing settings, and a farewell peer list
 
-**Date:** 2026-10-07 · **Status:** Decided
+**Date:** 2026-10-07 · **Status:** Decided (revised by D-255)
 
 **Context:** Two mechanisms decided when a finished download stops sharing: the core's lingering (`settings.lingering`, ratio 1.0 or ten idle minutes, D-065) and the engine's sharing limits (`sharing.*`, D-184). A downloader that knew the swarm only through peer exchange could be stranded when its sources left.
 
@@ -4157,3 +4157,15 @@ This revises D-175, D-182 and D-189.
 **Decision:** The website uses the words the client UIs use for a transfer's status: **sharing** (peers with the whole bundle, the glossary's complete peers), **downloading** (incomplete peers) and **downloads** (completed downloads), in both places. The sort by complete peers is **availability**, `sort=availability` in queries, replacing `seeders`.
 
 **Rationale:** One word per count, the same on every screen, and the same as what people see their own transfers called.
+
+---
+
+## D-255: Finished downloads share until no one wants them
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** D-065 meant ratio 1.0 as a floor: keep sharing at least until uploading as much as was downloaded. Since D-224 made it the default of the `sharing.ratio` limit, it acted as a ceiling, stopping a download that peers still wanted. Other clients share finished downloads until the user stops them.
+
+**Decision:** The engine's sharing limits default to no ratio and no time limit. The ten-minute idle timeout stays, so a finished download stops only once no connected peer has wanted anything for that long. Users can stop a transfer or set limits globally or per transfer. Simulated peers keep their ratio 1.0 default, which models departing peers rather than this client.
+
+**Rationale:** Leaving early is what D-065 set out to prevent. Sharing while someone wants the data serves the swarm, and the idle timeout keeps a download from sharing forever for no one.

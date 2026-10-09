@@ -19,5 +19,7 @@ install-path = "CARGO_HOME"
 install-updater = false
 # Steps to run before building, which build the embedded web UIs
 github-build-setup = "../build-setup.yml"
+# Build each released package alone, so the simulator and its DuckDB are never compiled
+precise-builds = true
 # The MSI template is edited by hand to set the product icon
 allow-dirty = ["msi"]

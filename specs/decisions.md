@@ -4199,6 +4199,7 @@ This revises D-175, D-182 and D-189.
 - The tracker and relay build for macOS and Linux only and ship a shell installer each, with no PowerShell script or MSI. The release setup step builds the tracker website, which the tracker embeds.
 - The Homebrew tap is dropped, and with it the formulas and the publish job. This supersedes the tap in D-211 and D-133.
 - The MSI template is edited by hand for the product icon, so dist's check of it is allowed to differ.
+- Dist builds each released package alone (`precise-builds`), not the whole workspace, so the simulator and its DuckDB are never compiled for a release; a workspace build failed to link the simulator's DuckDB for Intel macOS on an Apple Silicon Mac.
 
 **Rationale:** The protocol isn't frozen, so the programs are only known to work built from the same commit. A tap would need a second repository to maintain.
 

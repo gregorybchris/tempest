@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Flex, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
-use tempest_api::network;
+use tempest_api::{Kind, network};
 use unicode_width::UnicodeWidthStr;
 
 use super::help::draw_help;
@@ -30,7 +30,13 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Some(Modal::Remove {
             target,
             delete_files,
-        }) => draw_remove(frame, &app.theme, area, target, *delete_files),
+        }) => {
+            // A share's files are the user's originals, not copies Tempest made.
+            let share = app
+                .selected_transfer()
+                .is_some_and(|t| t.id == target.id && t.kind == Kind::Share);
+            draw_remove(frame, &app.theme, area, target, *delete_files, share);
+        }
         Some(Modal::Text {
             kind,
             target,
@@ -266,7 +272,14 @@ pub(super) fn draw_choice(frame: &mut Frame, theme: &Theme, area: Rect, text: &s
     );
 }
 
-fn draw_remove(frame: &mut Frame, theme: &Theme, area: Rect, target: &Target, delete: bool) {
+fn draw_remove(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    target: &Target,
+    delete: bool,
+    share: bool,
+) {
     let width = 56.min(area.width.saturating_sub(4));
     let inner = popup(frame, theme, area, (width, 7), "Remove");
     let name = fit(&target.name, usize::from(inner.width).saturating_sub(10));
@@ -284,10 +297,16 @@ fn draw_remove(frame: &mut Frame, theme: &Theme, area: Rect, target: &Target, de
         };
         Span::styled(format!(" {text} "), style)
     };
-    let explanation = if delete {
-        "Its files are deleted from disk too."
+    let explanation = match (delete, share) {
+        (true, true) => "Your original files are deleted for good.",
+        (true, false) => "Its files are deleted from disk too.",
+        (false, true) => "The share goes from the list; your files stay.",
+        (false, false) => "The transfer goes from the list; its files stay.",
+    };
+    let delete_label = if share {
+        "Delete originals"
     } else {
-        "The transfer goes from the list; its files stay."
+        "Delete files"
     };
     let lines = vec![
         Line::from(vec![
@@ -300,7 +319,7 @@ fn draw_remove(frame: &mut Frame, theme: &Theme, area: Rect, target: &Target, de
             Span::raw(" "),
             button("Keep files", !delete, false),
             Span::raw("  "),
-            button("Delete files", delete, true),
+            button(delete_label, delete, true),
         ]),
         Line::raw(""),
         Line::styled(format!(" {explanation}"), Style::new().fg(theme.dim)),

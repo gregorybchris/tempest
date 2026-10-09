@@ -147,12 +147,15 @@ pub(crate) fn transfer(id: BundleId) -> Option<TransferInfo> {
 fn Remove(id: BundleId) -> impl IntoView {
     let controls = expect_context::<Controls>();
     let name = transfer(id).map(|t| t.name).unwrap_or_default();
+    // A share's files are the user's originals, not copies Tempest made.
+    let share = transfer(id).is_some_and(|t| t.kind == Kind::Share);
     let remove = move |delete_files: bool| {
         let name = transfer(id).map(|t| t.name).unwrap_or_default();
         close();
-        let done = match delete_files {
-            true => format!("Removed {name} and deleted its files"),
-            false => format!("Removed {name}; its files stay"),
+        let done = match (delete_files, share) {
+            (true, true) => format!("Removed {name} and deleted its original files"),
+            (true, false) => format!("Removed {name} and deleted its files"),
+            (false, _) => format!("Removed {name}; its files stay"),
         };
         controls.run(api::remove(id, delete_files), done);
     };
@@ -164,10 +167,22 @@ fn Remove(id: BundleId) -> impl IntoView {
             actions=move || view! {
                 <Button kind=ButtonKind::Ghost on_click=close>"Cancel"</Button>
                 <Button on_click=move || remove(false)>"Remove, keep files"</Button>
-                <Button kind=ButtonKind::Danger on_click=move || remove(true)>"Delete files too"</Button>
+                <Button kind=ButtonKind::Danger on_click=move || remove(true)>
+                    {if share { "Delete originals" } else { "Delete files too" }}
+                </Button>
             }
         >
-            <p>"It stops and leaves the list. Its files stay on disk unless you delete them too."</p>
+            {match share {
+                true => view! {
+                    <p>
+                        "It stops and leaves the list. Its files are your originals, not copies, "
+                        "so deleting them can't be undone."
+                    </p>
+                }.into_any(),
+                false => view! {
+                    <p>"It stops and leaves the list. Its files stay on disk unless you delete them too."</p>
+                }.into_any(),
+            }}
         </Modal>
     }
 }

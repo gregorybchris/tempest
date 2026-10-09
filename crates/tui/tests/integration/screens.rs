@@ -477,6 +477,13 @@ fn the_remove_confirmation() {
 }
 
 #[test]
+fn removing_a_share_warns_that_its_files_are_originals() {
+    let mut app = app();
+    press(&mut app, "jxd");
+    insta::assert_snapshot!(draw(&app, 80, 24).backend());
+}
+
+#[test]
 fn text_modals() {
     let mut app = app();
     press(&mut app, "r");

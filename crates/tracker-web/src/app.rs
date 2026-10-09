@@ -122,8 +122,14 @@ impl Ctx {
     pub fn copy(&self, text: String, what: &'static str) {
         let toasts = use_toasts();
         spawn_local(async move {
-            let promise = window().navigator().clipboard().write_text(&text);
-            match JsFuture::from(promise).await.is_ok() {
+            let copied = match clipboard_available() {
+                true => {
+                    let promise = window().navigator().clipboard().write_text(&text);
+                    JsFuture::from(promise).await.is_ok()
+                }
+                false => copy_with_selection(&text),
+            };
+            match copied {
                 true => toasts.push(Tone::Neutral, format!("Copied the {what}")),
                 false => toasts.push(
                     Tone::Bad,
@@ -132,6 +138,39 @@ impl Ctx {
             }
         });
     }
+}
+
+/// Whether the async clipboard API exists. Browsers hide it on pages that aren't a secure
+/// context, such as plain HTTP to an address other than localhost.
+fn clipboard_available() -> bool {
+    js_sys::Reflect::get(&window().navigator(), &"clipboard".into())
+        .is_ok_and(|c| !c.is_undefined())
+}
+
+/// Copies by selecting the text in a hidden field, for pages without the clipboard API.
+fn copy_with_selection(text: &str) -> bool {
+    use wasm_bindgen::JsCast;
+    let Some(document) = window().document() else {
+        return false;
+    };
+    let (Some(body), Ok(field)) = (document.body(), document.create_element("textarea")) else {
+        return false;
+    };
+    let Ok(field) = field.dyn_into::<web_sys::HtmlTextAreaElement>() else {
+        return false;
+    };
+    field.set_value(text);
+    let _ = field.set_attribute("readonly", "");
+    let _ = field.set_attribute("style", "position:fixed;top:0;left:0;opacity:0");
+    if body.append_child(&field).is_err() {
+        return false;
+    }
+    field.select();
+    let copied = document
+        .dyn_ref::<web_sys::HtmlDocument>()
+        .is_some_and(|d| d.exec_command("copy").unwrap_or(false));
+    let _ = body.remove_child(&field);
+    copied
 }
 
 /// The shared context.

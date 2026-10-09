@@ -661,14 +661,17 @@ impl Catalog {
         self.listing(bundle, Some(key))
     }
 
-    /// The comments on `bundle`'s listing, oldest first, if `viewer` can see it.
+    /// Up to `limit` of the comments on `bundle`'s listing after the comment `after`, oldest
+    /// first, if `viewer` can see the listing. At most [`MAX_PAGE`] are returned.
     pub fn comments(
         &self,
         bundle: &BundleId,
         viewer: Option<&PeerId>,
+        after: u64,
+        limit: u32,
     ) -> Result<Vec<Comment>, Refusal> {
         self.listing(bundle, viewer)?;
-        Ok(self.store.comments(bundle)?)
+        Ok(self.store.comments(bundle, after, limit.min(MAX_PAGE))?)
     }
 
     /// Adds `key`'s comment to `bundle`'s listing.

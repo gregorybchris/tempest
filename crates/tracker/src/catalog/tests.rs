@@ -349,8 +349,12 @@ fn listings_that_stay_pending_are_dropped() {
     let alice = Key::new(1);
     let lifetime = std::time::Duration::from_secs(100);
     catalog.request_listing(0, &bundle(1), &alice.id()).unwrap();
-    catalog.request_listing(50, &bundle(2), &alice.id()).unwrap();
-    catalog.request_listing(50, &bundle(3), &alice.id()).unwrap();
+    catalog
+        .request_listing(50, &bundle(2), &alice.id())
+        .unwrap();
+    catalog
+        .request_listing(50, &bundle(3), &alice.id())
+        .unwrap();
     catalog.set_content(&bundle(3), &content("listed")).unwrap();
 
     assert_eq!(catalog.drop_pending(100, lifetime).unwrap(), 0);
@@ -367,7 +371,9 @@ fn listings_that_stay_pending_are_dropped() {
     assert_eq!(catalog.pending().unwrap(), [(bundle(2), alice.id())]);
     // Listed bundles stay, and a dropped one can be asked for again.
     assert!(catalog.listing(&bundle(3), None).is_ok());
-    catalog.request_listing(160, &bundle(1), &alice.id()).unwrap();
+    catalog
+        .request_listing(160, &bundle(1), &alice.id())
+        .unwrap();
     assert_eq!(catalog.pending().unwrap().len(), 2);
 }
 
@@ -468,7 +474,7 @@ fn comments_belong_to_their_authors() {
         400
     );
 
-    let comments = catalog.comments(&id, None).unwrap();
+    let comments = catalog.comments(&id, None, 0, 100).unwrap();
     assert_eq!(comments.len(), 2);
     assert_eq!(comments[0], first);
     assert_eq!(catalog.listing(&id, None).unwrap().comments, 2);
@@ -488,7 +494,34 @@ fn comments_belong_to_their_authors() {
             .status,
         404
     );
-    assert_eq!(catalog.comments(&id, None).unwrap().len(), 1);
+    assert_eq!(catalog.comments(&id, None, 0, 100).unwrap().len(), 1);
+}
+
+#[test]
+fn comments_come_a_page_at_a_time() {
+    let mut catalog = catalog(false);
+    let alice = Key::new(1);
+    let id = publish(&mut catalog, &alice, 1, 0);
+    sign_in(&mut catalog, &alice, 0);
+    for n in 0..250 {
+        let comment = NewComment {
+            body: format!("comment {n}"),
+        };
+        catalog.comment(n, &id, &alice.id(), &comment).unwrap();
+    }
+    let mut seen = Vec::new();
+    let mut after = 0;
+    loop {
+        // Asking for more than a page gets a page.
+        let page = catalog.comments(&id, None, after, 1000).unwrap();
+        assert!(page.len() <= 100);
+        let Some(last) = page.last() else { break };
+        after = last.id;
+        seen.extend(page.into_iter().map(|comment| comment.body));
+    }
+    let expected: Vec<String> = (0..250).map(|n| format!("comment {n}")).collect();
+    assert_eq!(seen, expected);
+    assert_eq!(catalog.comments(&id, None, 0, 3).unwrap().len(), 3);
 }
 
 #[test]

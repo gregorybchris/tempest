@@ -27,7 +27,7 @@ use tempest_protocol::tracker::{API_PREFIX, ErrorCode};
 use tempest_protocol::{BundleId, PeerId};
 use tempest_tracker_api::SESSION_COOKIE;
 use tempest_tracker_api::account::{AccountEdit, Poll, PollResponse, SignIn};
-use tempest_tracker_api::listing::{ListingEdit, NewComment, NewReport, VoteRequest};
+use tempest_tracker_api::listing::{ListingEdit, MAX_PAGE, NewComment, NewReport, VoteRequest};
 use tempest_tracker_api::query::{DEFAULT_LIMIT, ListingQuery};
 
 use super::unix_now as now;
@@ -414,16 +414,36 @@ async fn vote(
     .await
 }
 
+/// The query string of `GET /tempest/v1/listings/{bundle}/comments`.
+#[derive(Debug, Deserialize)]
+struct CommentsQuery {
+    /// Only the comments after this one.
+    #[serde(default)]
+    after: u64,
+    #[serde(default = "max_page")]
+    limit: u32,
+}
+
+fn max_page() -> u32 {
+    MAX_PAGE
+}
+
 async fn comments(
     State(tracker): State<Tracker>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    page: Result<Query<CommentsQuery>, QueryRejection>,
 ) -> Response {
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let viewer = viewer(&tracker, &headers);
-            ok(&tracker.catalog().comments(&id, viewer.as_ref())?)
+            let page = query(page)?;
+            let viewer = viewer(tracker, &headers);
+            let comments =
+                tracker
+                    .catalog()
+                    .comments(&id, viewer.as_ref(), page.after, page.limit)?;
+            ok(&comments)
         })())
     })
     .await

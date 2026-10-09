@@ -958,11 +958,22 @@ impl Store {
             .map(|comments| comments.into_iter().next())
     }
 
-    /// The comments on `bundle`, oldest first.
-    pub fn comments(&self, bundle: &BundleId) -> Result<Vec<Comment>, StoreError> {
-        self.comments_where("c.bundle = ?1", &[&bundle.as_bytes().as_slice()])
+    /// Up to `limit` of the comments on `bundle` after the comment `after`, oldest first.
+    /// Comment IDs grow, so they order comments by when they were written.
+    pub fn comments(
+        &self,
+        bundle: &BundleId,
+        after: u64,
+        limit: u32,
+    ) -> Result<Vec<Comment>, StoreError> {
+        self.comments_where(
+            "c.bundle = ?1 AND c.id > ?2 ORDER BY c.id LIMIT ?3",
+            &[&bundle.as_bytes().as_slice(), &to_i64(after), &limit],
+        )
     }
 
+    /// The comments matching `filter`, an SQL condition on `comments c` that may end with an
+    /// order and a limit.
     fn comments_where(
         &self,
         filter: &str,
@@ -971,7 +982,7 @@ impl Store {
         let sql = format!(
             "SELECT c.id, c.author, a.name, c.body, c.created
              FROM comments c JOIN accounts a ON a.key = c.author
-             WHERE {filter} ORDER BY c.created, c.id"
+             WHERE {filter}"
         );
         let mut statement = self.conn.prepare_cached(&sql)?;
         let rows = statement.query_map(filter_params, |row| {

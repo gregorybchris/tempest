@@ -181,7 +181,9 @@ pub struct FacetCount {
 /// The most listings on one page.
 pub const MAX_PAGE: u32 = 100;
 
-/// A comment on a listing.
+/// A comment on a listing. `GET /tempest/v1/listings/{bundle}/comments` answers with a page
+/// of them, oldest first: at most [`MAX_PAGE`], or `limit` if the query string asks for fewer,
+/// after the comment whose ID is `after`, if given.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Comment {
     /// Its identifier, for `DELETE /tempest/v1/comments/{id}`.

@@ -51,6 +51,10 @@ pub(super) fn run(command: &[String], notice: Notice, transfer: &TransferInfo) {
     let Some((program, args)) = command.split_first() else {
         return;
     };
+    tracing::debug!(
+        "running the {notice:?} notification for {}: {program}",
+        transfer.id
+    );
     let spawned = tokio::process::Command::new(program)
         .args(args)
         .envs(environment(notice, transfer))
@@ -58,10 +62,13 @@ pub(super) fn run(command: &[String], notice: Notice, transfer: &TransferInfo) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    if let Ok(mut child) = spawned {
-        // Waiting reaps the process once it exits.
-        tokio::spawn(async move {
-            let _ = child.wait().await;
-        });
+    match spawned {
+        Ok(mut child) => {
+            // Waiting reaps the process once it exits.
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
+        }
+        Err(error) => tracing::warn!("cannot run the notification command {program}: {error}"),
     }
 }

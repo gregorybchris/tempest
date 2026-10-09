@@ -33,6 +33,11 @@ impl From<EngineError> for ApiError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal")
             }
         };
+        // Client mistakes are routine; the rest are the engine's or a tracker's trouble.
+        match status.is_server_error() {
+            true => tracing::warn!("API request failed with {status} ({code}): {error}"),
+            false => tracing::debug!("API request refused with {status} ({code}): {error}"),
+        }
         Self::new(status.as_u16(), code, error.to_string())
     }
 }

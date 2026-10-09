@@ -119,6 +119,7 @@ impl Supervisor {
 
     /// Announces with `listing` to `tracker`, starting to announce there if it didn't.
     fn publish(&mut self, tracker: String) {
+        tracing::info!("{}: now announcing with its listing to {tracker}", self.id);
         match self.announcers.iter().find(|a| a.tracker() == tracker) {
             Some(announcer) => announcer.set_listing(Some(self.listing)),
             None => self.announcers.push(Announcer::spawn(
@@ -134,6 +135,10 @@ impl Supervisor {
     /// Announces to `tracker` without `listing`, or stops announcing there unless `keep`, then
     /// tells `settled`.
     fn unpublish(&mut self, tracker: &str, keep: bool, settled: oneshot::Sender<()>) {
+        tracing::info!(
+            "{}: announcing without its listing to {tracker} (keep announcing: {keep})",
+            self.id
+        );
         let Some(index) = self.announcers.iter().position(|a| a.tracker() == tracker) else {
             let _ = settled.send(());
             return;
@@ -154,13 +159,16 @@ impl Supervisor {
         let Some(storage) = self.handle.storage().await else {
             return;
         };
-        if let Ok(checkpoint) = storage.checkpoint().await {
-            let message = Internal::Checkpoint {
-                id: self.id,
-                generation: self.generation,
-                checkpoint,
-            };
-            let _ = self.internal.send(message).await;
+        match storage.checkpoint().await {
+            Ok(checkpoint) => {
+                let message = Internal::Checkpoint {
+                    id: self.id,
+                    generation: self.generation,
+                    checkpoint,
+                };
+                let _ = self.internal.send(message).await;
+            }
+            Err(error) => tracing::warn!("{}: cannot take a checkpoint: {error}", self.id),
         }
     }
 }

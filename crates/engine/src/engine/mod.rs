@@ -295,6 +295,43 @@ impl Engine {
         let lock = lock(&data_dir)?;
         let mut store = Store::open(&data_dir.join("state.db"))?;
         let (config, changes) = apply_saved_changes(&base, &mut store)?;
+        tracing::info!(
+            "engine {} on {}: data {}, saves to {}, peer port {} (bind {:?}), API {}:{} (remote {}), \
+             LAN {}, port mapping {}, queue {:?}, {} trackers [{}], {} publish [{}], {} relays \
+             (from trackers {}), saved setting overrides [{}]",
+            if hold { "held" } else { "starting" },
+            env!("CARGO_PKG_VERSION"),
+            data_dir.display(),
+            config
+                .save_folder
+                .as_ref()
+                .map_or("the default".into(), |p| p.display().to_string()),
+            config.peers.port,
+            config.peers.bind,
+            config.api.bind,
+            config.api.port,
+            config.api.remote,
+            config.lan.enabled,
+            config.port_mapping.enabled,
+            config.queue,
+            config.trackers.len(),
+            config
+                .trackers
+                .iter()
+                .map(|url| redact_url(url))
+                .collect::<Vec<_>>()
+                .join(", "),
+            config.publish.len(),
+            config
+                .publish
+                .iter()
+                .map(|url| redact_url(url))
+                .collect::<Vec<_>>()
+                .join(", "),
+            config.relays.known.len(),
+            config.relays.from_trackers,
+            changes.keys().cloned().collect::<Vec<_>>().join(", ")
+        );
         let identity = Identity::load_or_create(&data_dir.join("identity.pem"))?;
         let signer = identity.clone();
         let session = config.session()?;
@@ -336,7 +373,9 @@ impl Engine {
                     ..LanConfig::default()
                 };
                 // Without a network to discover peers on, transfers still work.
-                Lan::start(&endpoint, lan_config).ok()
+                Lan::start(&endpoint, lan_config)
+                    .inspect_err(|error| tracing::warn!("LAN discovery is off: {error}"))
+                    .ok()
             }
             false => None,
         };
@@ -451,13 +490,16 @@ impl Engine {
         let session = client
             .sign_in(tracker, &self.identity, invite)
             .await
+            .inspect_err(|error| tracing::warn!("{id}: cannot sign in to {tracker}: {error}"))
             .map_err(failed)?;
         let listing = client
             .edit_listing(tracker, &session.token, &id, edit)
-            .await;
+            .await
+            .inspect_err(|error| tracing::warn!("{id}: cannot list on {tracker}: {error}"));
         // The session was only for this; it would expire on its own.
         let _ = client.sign_out(tracker, &session.token).await;
         let listing = listing.map_err(failed)?;
+        tracing::info!("{id}: listed on {tracker} (pending until it fetches the manifest)");
         let tracker = tracker.to_owned();
         self.call(|reply| Command::Publish(id, tracker, reply))
             .await?;
@@ -491,8 +533,13 @@ impl Engine {
         let session = client
             .sign_in(tracker, &self.identity, None)
             .await
+            .inspect_err(|error| tracing::warn!("{id}: cannot sign in to {tracker}: {error}"))
             .map_err(failed)?;
         let unpublished = client.unpublish_listing(tracker, &session.token, &id).await;
+        match &unpublished {
+            Ok(()) => tracing::info!("{id}: unpublished from {tracker}"),
+            Err(error) => tracing::warn!("{id}: cannot unpublish from {tracker}: {error}"),
+        }
         let _ = client.sign_out(tracker, &session.token).await;
         match unpublished {
             Ok(()) | Err(TrackerError::Refused { status: 404, .. }) => Ok(info),
@@ -516,6 +563,15 @@ impl Engine {
             .tracker
             .sign_code(tracker, &self.identity, code, invite)
             .await
+            .inspect(|session| {
+                tracing::info!(
+                    "signed in to {tracker} for a browser as {}",
+                    session.account.key
+                );
+            })
+            .inspect_err(|error| {
+                tracing::warn!("cannot sign in to {tracker} for a browser: {error}");
+            })
             .map_err(|error| EngineError::Tracker {
                 tracker: tracker.to_owned(),
                 error,
@@ -829,10 +885,28 @@ fn apply_saved_changes(
                 config = changed;
                 changes.insert(key, value);
             }
-            false => store.remove_setting(&key)?,
+            false => {
+                tracing::warn!("dropping the saved setting {key}: it no longer applies");
+                store.remove_setting(&key)?;
+            }
         }
     }
     Ok((config, changes))
+}
+
+/// `url` without any credentials in it, for logs.
+fn redact_url(url: &str) -> String {
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+            let host = authority.rsplit('@').next().unwrap_or(authority);
+            format!(
+                "{scheme}://{host}{}",
+                if path.is_empty() { "" } else { "/..." }
+            )
+        }
+        None => url.to_owned(),
+    }
 }
 
 fn endpoint_config(config: &EngineConfig) -> EndpointConfig {

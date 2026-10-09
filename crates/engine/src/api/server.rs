@@ -144,6 +144,7 @@ impl ApiServer {
             });
         }
         let token = load_or_create_token(&data_dir.join(TOKEN_FILE))?;
+        tracing::info!("API remote access on: HTTPS, access token required");
         let (cert_path, key_path) = match (&settings.tls_cert, &settings.tls_key) {
             (Some(cert), Some(key)) => (cert.clone(), key.clone()),
             _ => {
@@ -202,6 +203,14 @@ impl ApiServer {
         engine: Engine,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), ServeError> {
+        tracing::info!(
+            "API serving at {} ({})",
+            self.url,
+            match self.access {
+                Access::Local => "local access",
+                Access::Token(_) => "remote access, token required",
+            }
+        );
         let mut app = router(engine, self.access.clone());
         if let Some(ui) = self.ui {
             app = app.merge(ui);

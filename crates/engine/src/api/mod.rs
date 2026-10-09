@@ -179,12 +179,14 @@ async fn sign_in(State(access): State<Access>, Json(request): Json<SignInRequest
         });
     };
     if !access::token_matches(&request.token, token) {
+        tracing::info!("API sign-in refused: wrong access token");
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED.as_u16(),
             "unauthorized",
             "that isn't the engine's access token",
         ));
     }
+    tracing::info!("API sign-in accepted");
     let info = SessionInfo {
         required: true,
         signed_in: true,

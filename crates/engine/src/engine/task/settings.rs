@@ -27,6 +27,10 @@ impl EngineTask {
         for (key, value) in &changes {
             self.store.set_setting(key, value)?;
         }
+        tracing::info!(
+            "settings changed: {}",
+            changes.keys().cloned().collect::<Vec<_>>().join(", ")
+        );
         Ok(self.settings_view())
     }
 
@@ -35,6 +39,7 @@ impl EngineTask {
         if all.remove(&key).is_some() {
             self.apply_settings(all).await?;
             self.store.remove_setting(&key)?;
+            tracing::info!("setting reset: {key}");
         }
         Ok(self.settings_view())
     }

@@ -294,10 +294,25 @@ impl EngineTask {
             let manifest = row
                 .manifest
                 .as_deref()
-                .and_then(|bytes| Manifest::from_bytes(bytes).ok())
-                .filter(|manifest| manifest.bundle_id() == row.id)
+                .and_then(|bytes| {
+                    Manifest::from_bytes(bytes)
+                        .inspect_err(|error| {
+                            tracing::warn!("{}: its saved manifest is unreadable: {error}", row.id);
+                        })
+                        .ok()
+                })
+                .filter(|manifest| {
+                    let matches = manifest.bundle_id() == row.id;
+                    if !matches {
+                        tracing::warn!("{}: its saved manifest is for another bundle", row.id);
+                    }
+                    matches
+                })
                 .map(Arc::new);
-            let link = row.link.parse().unwrap_or_else(|_| Link::new(row.id));
+            let link = row.link.parse().unwrap_or_else(|error| {
+                tracing::warn!("{}: its saved link is unreadable: {error}", row.id);
+                Link::new(row.id)
+            });
             self.transfers.insert(
                 row.id,
                 Transfer {
@@ -314,6 +329,18 @@ impl EngineTask {
         for (id, folder) in self.store.moves()? {
             self.recover_move(id, &folder);
         }
+        tracing::info!(
+            "loaded {} transfers ({} complete, {} with errors)",
+            self.transfers.len(),
+            self.transfers
+                .values()
+                .filter(|t| t.row.is_complete())
+                .count(),
+            self.transfers
+                .values()
+                .filter(|t| t.row.error.is_some())
+                .count()
+        );
         Ok(())
     }
 
@@ -391,7 +418,13 @@ impl EngineTask {
                 }
             }
         }
-        let _ = tokio::time::timeout(GOODBYE_TIMEOUT, self.node.shutdown()).await;
+        if tokio::time::timeout(GOODBYE_TIMEOUT, self.node.shutdown())
+            .await
+            .is_err()
+        {
+            tracing::warn!("the node didn't say goodbye within {GOODBYE_TIMEOUT:?}");
+        }
+        tracing::info!("engine stopped");
         let waiting = self.shutting_down.take();
         // Closes the database and releases the data directory before anyone hears it's done.
         drop(self);
@@ -424,6 +457,10 @@ impl EngineTask {
     }
 
     fn begin_shutdown(&mut self, done: Option<oneshot::Sender<()>>) {
+        tracing::info!(
+            "engine shutting down; stopping {} transfers",
+            self.transfers.len()
+        );
         self.shutting_down.get_or_insert_with(Vec::new).extend(done);
         let ids: Vec<_> = self.transfers.keys().copied().collect();
         for id in ids {
@@ -447,14 +484,24 @@ impl EngineTask {
                 let _ = reply.send(self.inside(id));
             }
             Command::AddLink(link, options, reply) => {
+                let id = link.bundle;
                 let result = self.add_link(link, *options).await;
+                match &result {
+                    Ok(_) => tracing::info!("{id}: added from a link"),
+                    Err(error) => tracing::info!("{id}: cannot add from a link: {error}"),
+                }
                 let _ = reply.send(result);
             }
             Command::AddShare(share, reply) => {
                 let result = self.add_share(*share).await;
+                match &result {
+                    Ok(info) => tracing::info!("{}: shared", info.id),
+                    Err(error) => tracing::info!("cannot share: {error}"),
+                }
                 let _ = reply.send(result);
             }
             Command::Start(id, forced, reply) => {
+                tracing::info!("{id}: start requested (forced {forced})");
                 let result = self
                     .change(id, |t| {
                         t.row.wanted = true;
@@ -468,6 +515,7 @@ impl EngineTask {
                 let _ = reply.send(result);
             }
             Command::Stop(id, reply) => {
+                tracing::info!("{id}: stop requested");
                 let result = self
                     .change(id, |t| {
                         t.row.wanted = false;
@@ -482,10 +530,14 @@ impl EngineTask {
                 let _ = reply.send(result);
             }
             Command::MoveStorage(id, folder, reply) => {
+                tracing::info!("{id}: move requested to {}", folder.display());
                 let result = self.move_storage(id, folder).await;
                 let _ = reply.send(result);
             }
-            Command::Remove(id, delete_files, reply) => self.remove(id, delete_files, reply),
+            Command::Remove(id, delete_files, reply) => {
+                tracing::info!("{id}: removal requested (delete files {delete_files})");
+                self.remove(id, delete_files, reply);
+            }
             Command::Rename(id, name, reply) => {
                 let name = name
                     .map(|name| name.trim().to_owned())
@@ -545,10 +597,12 @@ impl EngineTask {
                 let _ = reply.send(result);
             }
             Command::Publish(id, tracker, reply) => {
+                tracing::info!("{id}: publish on {} requested", tracker);
                 let result = self.publish(id, tracker).await;
                 let _ = reply.send(result);
             }
             Command::Unpublish(id, tracker, reply) => {
+                tracing::info!("{id}: unpublish from {} requested", tracker);
                 // Answered before the announces settle, which the caller waits for.
                 let result = self.unpublish(id, tracker).await;
                 let _ = reply.send(result);
@@ -1019,6 +1073,8 @@ impl EngineTask {
                     );
                     if current {
                         self.fail(id, error.to_string());
+                    } else {
+                        tracing::debug!("{id}: ignoring a stale storage failure: {error}");
                     }
                 }
             },
@@ -1084,12 +1140,24 @@ impl EngineTask {
             };
             let status = run.status.borrow().clone();
             if learn_manifest(&mut t.manifest, &mut t.row, &status) {
+                tracing::info!(
+                    "{}: manifest received ({} chunks), saving to {}",
+                    t.row.id,
+                    t.row.chunks,
+                    t.row.save_folder.display()
+                );
                 queue_changed |= !save_row(&mut self.store, &mut t.row);
             }
             t.row.have = u64::from(status.have);
             t.row.uploaded = run.base_uploaded + status.uploaded;
             t.row.downloaded = run.base_downloaded + status.downloaded;
             if status.complete && t.row.completed.is_none() {
+                tracing::info!(
+                    "{}: complete; {} bytes down, {} up",
+                    t.row.id,
+                    t.row.downloaded,
+                    t.row.uploaded
+                );
                 t.row.completed = Some(now_millis());
                 save_row(&mut self.store, &mut t.row);
                 queue_changed = true;

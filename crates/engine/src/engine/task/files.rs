@@ -21,6 +21,7 @@ impl EngineTask {
             let _ = reply.send(Err(error.into()));
             return;
         }
+        tracing::info!("{id}: removed");
         self.events.push(EngineEvent::Removed { id });
         let files = match (&t.row.content_dir, &t.manifest) {
             (Some(dir), Some(manifest)) if delete_files => Some(Files {
@@ -84,6 +85,7 @@ impl EngineTask {
         if items.iter().all(|item| item.from == item.to) {
             return;
         }
+        tracing::info!("{id}: moving its files to {}", folder.display());
         if let Err(error) = self.store.begin_move(&id, &folder) {
             tracing::error!("couldn't record moving transfer {id}: {error}");
             t.row.error = Some(format!("Couldn't move the files: {error}"));
@@ -135,6 +137,7 @@ impl EngineTask {
                 t.row.content_dir = Some(new_dir);
                 match self.store.finish_move(&t.row) {
                     Ok(()) => {
+                        tracing::info!("{id}: moved its files to {}", folder.display());
                         tokio::task::spawn_blocking(move || {
                             relocate::remove_originals(&originals);
                         });
@@ -154,6 +157,10 @@ impl EngineTask {
                 }
             }
             Err(error) => {
+                tracing::warn!(
+                    "{id}: moving its files to {} failed: {error}",
+                    folder.display()
+                );
                 t.row.error = Some(format!(
                     "Couldn't move the files to {}: {error}. They are still in {}.",
                     folder.display(),

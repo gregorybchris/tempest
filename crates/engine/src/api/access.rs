@@ -152,7 +152,16 @@ pub(super) async fn guard(State(access): State<Access>, request: Request, next: 
         Access::Token(token) => token_refusal(headers, token),
     };
     match refusal {
-        Some(error) => error.into_response(),
+        Some(error) => {
+            // Never the credentials presented.
+            tracing::info!(
+                "API {} {} refused: {}",
+                request.method(),
+                request.uri().path(),
+                error.message
+            );
+            error.into_response()
+        }
         None => next.run(request).await,
     }
 }

@@ -13,8 +13,14 @@ impl EngineTask {
         for id in ids {
             let live = &self.transfers[&id].live;
             match (running.contains(&id), live) {
-                (true, Live::Idle) => self.launch(id, false).await,
-                (false, Live::Running(_) | Live::Opening { recheck: false, .. }) => self.halt(id),
+                (true, Live::Idle) => {
+                    tracing::debug!("{id}: the queue starts it");
+                    self.launch(id, false).await;
+                }
+                (false, Live::Running(_) | Live::Opening { recheck: false, .. }) => {
+                    tracing::debug!("{id}: the queue stops it");
+                    self.halt(id);
+                }
                 _ => {}
             }
         }
@@ -34,6 +40,7 @@ impl EngineTask {
         let t = self.transfers.get_mut(&id).expect("launching a transfer");
         t.recheck = false;
         let Some(manifest) = t.manifest.clone() else {
+            tracing::debug!("{id}: starting; fetching its manifest from the swarm");
             let session = match self.config.transfer(t.row.kind, &t.row.settings) {
                 Ok(transfer) => transfer.session,
                 Err(error) => return self.fail(id, error.to_string()),
@@ -60,6 +67,15 @@ impl EngineTask {
             false => load_checkpoint(&self.store, &id),
         };
         let kind = t.row.kind;
+        tracing::debug!(
+            "{id}: starting; opening its {kind:?} storage in {} ({})",
+            dir.display(),
+            match (recheck, checkpoint.is_some()) {
+                (true, _) => "checking every file",
+                (false, true) => "resuming from a checkpoint",
+                (false, false) => "no checkpoint, checking every file",
+            }
+        );
         let internal = self.internal.clone();
         let task = tokio::spawn(async move {
             let config = StorageConfig::default();
@@ -132,15 +148,22 @@ impl EngineTask {
                 } else {
                     t.row.completed.get_or_insert_with(now_millis);
                 }
+                tracing::debug!(
+                    "{id}: storage opened with {} of {} chunks",
+                    t.row.have,
+                    t.row.chunks
+                );
                 save_checkpoint(&mut self.store, &id, &checkpoint);
                 save_row(&mut self.store, &mut t.row);
             }
             Err(error) => {
+                tracing::warn!("{id}: cannot read its storage: {error}");
                 t.row.error = Some(error.to_string());
                 save_row(&mut self.store, &mut t.row);
             }
         }
         if !self.should_run(id) {
+            tracing::debug!("{id}: checked; the queue doesn't want it running");
             let _ = storage.close().await;
             return;
         }
@@ -175,6 +198,11 @@ impl EngineTask {
         }
         // It depends on the bundle alone, so one signature serves every tracker and announce.
         let listing = self.identity.listing(&id);
+        tracing::info!(
+            "{id}: running, announcing to {} trackers ({} listing)",
+            trackers.len(),
+            t.row.publish.len()
+        );
         let announcers = trackers
             .into_iter()
             .map(|url| {
@@ -193,7 +221,10 @@ impl EngineTask {
                 limits.upload.set_rate(transfer.limits.upload);
                 transfer.sharing
             }
-            Err(_) => SharingLimits::NONE,
+            Err(error) => {
+                tracing::warn!("{id}: its limits don't apply, running without: {error}");
+                SharingLimits::NONE
+            }
         };
         let (stop, stop_receiver) = watch::channel(false);
         let (checkpoint, checkpoint_receiver) = mpsc::channel(1);
@@ -244,6 +275,7 @@ impl EngineTask {
             return Err(EngineError::NoData(id));
         }
         self.store.clear_checkpoint(&id)?;
+        tracing::info!("{id}: recheck requested");
         t.recheck = true;
         // A failure that sent the user here may be fixed by what the check finds.
         t.row.error = None;
@@ -275,6 +307,7 @@ impl EngineTask {
         let Some(t) = self.transfers.get_mut(&id) else {
             return;
         };
+        tracing::warn!("{id}: failed to start: {reason}");
         t.live = Live::Idle;
         t.row.error = Some(reason);
         save_row(&mut self.store, &mut t.row);
@@ -285,6 +318,7 @@ impl EngineTask {
         let t = self.transfers.get_mut(&id).expect("halting a transfer");
         t.live = match std::mem::replace(&mut t.live, Live::Idle) {
             Live::Running(run) => {
+                tracing::debug!("{id}: stopping");
                 run.stop.send_replace(true);
                 if learn_manifest(&mut t.manifest, &mut t.row, &run.status.borrow()) {
                     save_row(&mut self.store, &mut t.row);
@@ -338,7 +372,16 @@ impl EngineTask {
                     t.row.have = checkpoint.chunks_stored();
                     save_checkpoint(&mut self.store, &id, &checkpoint);
                 }
+                tracing::debug!(
+                    "{id}: stopped; complete {}, {} bytes down and {} up this run, asked {asked}",
+                    summary.complete,
+                    summary.downloaded,
+                    summary.uploaded
+                );
                 if summary.complete {
+                    if t.row.completed.is_none() {
+                        tracing::info!("{id}: complete");
+                    }
                     t.row.completed.get_or_insert_with(now_millis);
                     // It stopped sharing by itself: the idle timeout passed (D-065), and the
                     // action for a sharing limit applies (D-224).
@@ -349,7 +392,10 @@ impl EngineTask {
                     removed = !asked && run.sharing.action == SharingAction::Remove;
                 }
             }
-            Err(error) => t.row.error = Some(error.to_string()),
+            Err(error) => {
+                tracing::warn!("{id}: stopped with an error: {error}");
+                t.row.error = Some(error.to_string());
+            }
         }
         save_row(&mut self.store, &mut t.row);
         if removed {
@@ -391,6 +437,7 @@ impl EngineTask {
         action: SharingAction,
         stop: SharingStop,
     ) {
+        tracing::info!("{id}: reached its sharing limit {stop:?}; action {action:?}");
         match action {
             SharingAction::Stop => {
                 let t = self.transfers.get_mut(&id).expect("a running transfer");

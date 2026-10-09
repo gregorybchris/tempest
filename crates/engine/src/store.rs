@@ -226,6 +226,9 @@ impl Store {
         if found > known {
             return Err(StoreError::TooNew { found, known });
         }
+        if found < known {
+            tracing::info!("migrating the state database from version {found} to {known}");
+        }
         for migration in &MIGRATIONS[found as usize..] {
             tx.execute_batch(migration)?;
         }

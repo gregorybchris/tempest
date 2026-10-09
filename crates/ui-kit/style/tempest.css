@@ -1417,9 +1417,19 @@ th[aria-sort] .sort {
   bottom: 44px;
   z-index: 40;
   display: grid;
-  gap: var(--gap-2);
   width: min(380px, calc(100vw - 32px));
   pointer-events: none;
+}
+
+/* Errors and other toasts are announced from separate regions, stacked as one. An empty region
+   stays rendered, at no height, so screen readers keep listening to it. */
+.toasts__region {
+  display: grid;
+  gap: var(--gap-2);
+}
+
+.toasts__region:has(.toast) + .toasts__region:has(.toast) {
+  margin-top: var(--gap-2);
 }
 
 .toast {

@@ -16,6 +16,13 @@ pub struct Toast {
     pub text: String,
 }
 
+impl Toast {
+    /// Whether it reports an error, which is announced at once and stays longer.
+    pub fn urgent(&self) -> bool {
+        self.tone == Tone::Bad
+    }
+}
+
 /// The page's toasts. [`Toaster`] provides it as context.
 #[derive(Clone, Copy)]
 pub struct Toasts {
@@ -66,6 +73,10 @@ pub fn use_toasts() -> Toasts {
 }
 
 /// Provides [`Toasts`] to its children and shows them at the bottom right.
+///
+/// Errors are announced at once, from an `alert` region; other toasts wait for a pause, in a
+/// `status` region. Both regions stay in the page while empty, so that screen readers hear
+/// what is added to them.
 #[component]
 pub fn Toaster(children: Children) -> impl IntoView {
     let toasts = Toasts {
@@ -73,17 +84,52 @@ pub fn Toaster(children: Children) -> impl IntoView {
         next: StoredValue::new(0),
     };
     provide_context(toasts);
+    let region = move |urgent: bool| {
+        let shown = move || {
+            toasts.shown.with(|shown| {
+                shown
+                    .iter()
+                    .filter(|t| t.urgent() == urgent)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+        };
+        let (role, live) = if urgent {
+            ("alert", "assertive")
+        } else {
+            ("status", "polite")
+        };
+        view! {
+            <div class="toasts__region" role=role aria-live=live>
+                <For each=shown key=|t| t.id let:toast>
+                    <div class=format!("toast {}", toast.tone.class())>
+                        <span class="toast__text">{toast.text}</span>
+                        <button class="close" type="button" aria-label="Dismiss" on:click=move |_| toasts.dismiss(toast.id)>
+                            "×"
+                        </button>
+                    </div>
+                </For>
+            </div>
+        }
+    };
     view! {
         {children()}
-        <div class="toasts" role="status" aria-live="polite">
-            <For each=move || toasts.shown.get() key=|t| t.id let:toast>
-                <div class=format!("toast {}", toast.tone.class())>
-                    <span class="toast__text">{toast.text}</span>
-                    <button class="close" type="button" aria-label="Dismiss" on:click=move |_| toasts.dismiss(toast.id)>
-                        "×"
-                    </button>
-                </div>
-            </For>
-        </div>
+        <div class="toasts">{region(false)} {region(true)}</div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_errors_are_urgent() {
+        let toast = |tone| Toast {
+            id: 0,
+            tone,
+            text: String::new(),
+        };
+        assert!(toast(Tone::Bad).urgent());
+        assert!(!toast(Tone::Warn).urgent() && !toast(Tone::Neutral).urgent());
     }
 }

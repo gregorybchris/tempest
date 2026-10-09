@@ -91,6 +91,21 @@ pub enum Modal {
     },
 }
 
+impl Modal {
+    /// Shows why the engine refused what the modal sent, returning whether it can.
+    pub(super) fn refused(&mut self, error: &str) -> bool {
+        let shown = match self {
+            Self::Add(form) => &mut form.error,
+            Self::Text { error, .. } => error,
+            Self::Value(edit) => &mut edit.error,
+            Self::Form(form) => &mut form.1.error,
+            _ => return false,
+        };
+        *shown = Some(error.to_owned());
+        true
+    }
+}
+
 /// What a [`Modal::Value`] sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueTarget {
@@ -347,6 +362,8 @@ enum Outcome {
     Run(Command),
     /// It closes, asking this.
     Ask(Request),
+    /// It stays open, asking this, until the engine accepts it; a refusal shows in it.
+    Submit(Modal, Request),
 }
 
 fn is(key: KeyEvent, code: KeyCode) -> bool {
@@ -360,6 +377,8 @@ fn ctrl(key: KeyEvent, c: char) -> bool {
 impl App {
     /// Handles `key` while `modal` is open.
     pub(super) fn modal_key(&mut self, modal: Modal, key: KeyEvent) -> Option<Request> {
+        // A key on the modal starts over: an answer to what it sent before shows as a notice.
+        self.submitted = None;
         let outcome = if key.code == KeyCode::Esc {
             if let Modal::Filter(_) = modal {
                 self.set_filter_text(String::new());
@@ -399,6 +418,11 @@ impl App {
             Outcome::Close => None,
             Outcome::Run(command) => self.run(command),
             Outcome::Ask(request) => Some(request),
+            Outcome::Submit(modal, request) => {
+                self.modal = Some(modal);
+                self.submitted = Some(request.clone());
+                Some(request)
+            }
         }
     }
 
@@ -475,7 +499,12 @@ impl App {
             return Outcome::Open(Modal::Value(Box::new(edit)));
         }
         match self.value_request(&edit.target, &edit.input.text()) {
-            Ok(request) => Outcome::Ask(request),
+            // A view's name is kept at once, as the theme and columns are.
+            Ok(request) if edit.target == ValueTarget::ViewName => Outcome::Ask(request),
+            Ok(request) => {
+                edit.error = None;
+                Outcome::Submit(Modal::Value(Box::new(edit)), request)
+            }
             Err(error) => {
                 edit.error = Some(error);
                 Outcome::Open(Modal::Value(Box::new(edit)))
@@ -488,7 +517,10 @@ impl App {
             return Outcome::Open(Modal::Form(Box::new((kind, form))));
         }
         match self.form_request(&kind, &form) {
-            Ok(request) => Outcome::Ask(request),
+            Ok(request) => {
+                form.error = None;
+                Outcome::Submit(Modal::Form(Box::new((kind, form))), request)
+            }
             Err(error) => {
                 form.error = Some(error);
                 Outcome::Open(Modal::Form(Box::new((kind, form))))
@@ -570,7 +602,10 @@ impl App {
         let focus = form.focus;
         if is(key, KeyCode::Enter) {
             return match form.request() {
-                Ok(request) => Outcome::Ask(Request::Add(Box::new(request))),
+                Ok(request) => {
+                    form.error = None;
+                    Outcome::Submit(Modal::Add(Box::new(form)), Request::Add(Box::new(request)))
+                }
                 Err(error) => {
                     form.error = Some(error);
                     Outcome::Open(Modal::Add(Box::new(form)))
@@ -913,7 +948,16 @@ fn text_key(
         TextKind::Move => Err("Enter an absolute path.".to_owned()),
     };
     match action {
-        Ok(action) => Outcome::Ask(Request::Transfer(target, action)),
+        Ok(action) => {
+            let request = Request::Transfer(target.clone(), action);
+            let modal = Modal::Text {
+                kind,
+                target,
+                input,
+                error: None,
+            };
+            Outcome::Submit(modal, request)
+        }
         Err(error) => Outcome::Open(Modal::Text {
             kind,
             target,

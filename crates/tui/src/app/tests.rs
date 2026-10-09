@@ -191,7 +191,9 @@ fn the_add_modal_sends_every_field() {
             ..AddRequest::default()
         }
     );
-    assert_eq!(app.modal, None);
+    assert!(matches!(app.modal, Some(Modal::Add(_))), "it waits");
+    app.finished(&Request::Add(request), Ok(Reply::Added("thing".to_owned())));
+    assert_eq!(app.modal, None, "accepted, it closes");
 }
 
 #[test]

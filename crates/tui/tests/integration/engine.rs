@@ -177,17 +177,15 @@ async fn keys_rename_tag_reorder_and_remove_through_the_api() {
         "Removed a.txt-notes. Its files stay."
     );
 
-    // A refusal comes back as a notice.
+    // A refusal shows in the modal, which stays open to fix the link.
     let mut keys = vec![KeyCode::Char('a')];
     keys.extend(chars("tempest:nonsense"));
     keys.push(KeyCode::Enter);
     press(&mut app, &client, &keys).await;
-    let notice = app.notice.as_ref().unwrap();
-    assert!(notice.error, "{notice:?}");
-    assert!(
-        notice.text.starts_with("Couldn't add the link: "),
-        "{notice:?}"
-    );
+    let Some(Modal::Add(form)) = &app.modal else {
+        panic!("{:?}", app.modal);
+    };
+    assert!(form.error.is_some(), "{form:?}");
 
     engine.shutdown().await;
     serving.abort();

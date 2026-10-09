@@ -110,6 +110,9 @@ pub struct App {
     pub size: (u16, u16),
     /// What is open over the list.
     pub modal: Option<Modal>,
+    /// What the open modal sent and waits on: it closes once the engine accepts it, and shows
+    /// a refusal.
+    submitted: Option<Request>,
     /// Every category's save folder by name, once fetched.
     pub categories: Option<BTreeMap<String, PathBuf>>,
     /// The engine's settings, once fetched.
@@ -161,6 +164,7 @@ impl App {
             inside: Inside::default(),
             size: (80, 24),
             modal: None,
+            submitted: None,
             categories: None,
             settings: None,
             settings_error: None,
@@ -418,6 +422,10 @@ impl App {
         request: &Request,
         result: Result<Reply, String>,
     ) -> Option<Request> {
+        let from_modal = self.submitted.as_ref() == Some(request);
+        if from_modal {
+            self.submitted = None;
+        }
         match request {
             Request::Look(id, look) => {
                 let result = result.map_err(|error| request.failure(&error));
@@ -455,6 +463,9 @@ impl App {
                 next = self.explain_network();
             }
             Ok(reply) => {
+                if from_modal {
+                    self.modal = None;
+                }
                 if let Reply::Settings(view) = &reply {
                     self.take_settings((**view).clone());
                 }
@@ -467,7 +478,10 @@ impl App {
             }
             Err(_) if matches!(request, Request::Settings) => {}
             Err(error) => {
-                self.notify(request.failure(&error), true);
+                let shown = from_modal && self.modal.as_mut().is_some_and(|m| m.refused(&error));
+                if !shown {
+                    self.notify(request.failure(&error), true);
+                }
                 // A refused change to what the user keeps: show what the engine has.
                 if matches!(request, Request::ChangeSettings { .. }) && self.ui_pending == 0 {
                     next = self.load_settings();

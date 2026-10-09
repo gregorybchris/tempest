@@ -78,5 +78,3 @@ CI builds releases when a version tag is pushed (D-211). Releases contain `tempe
 - **Smoke test** each binary that can run here: `--version`, `--help` and `tempest web --set api.port=<spare port>`. The Intel macOS binaries run under Rosetta.
 - **Publishing** is separate: a GitHub release with these files.
 - **Disk:** each target's `dist` profile build takes several GB. Delete a target's `target/<triple>/dist` once it is packaged.
-
-What a Mac can't build: the `.msi` installers, since WiX runs only on Windows. They come from CI, or from a Windows machine.

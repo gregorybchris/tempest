@@ -8,7 +8,7 @@ cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
-installers = ["shell", "powershell", "msi"]
+installers = ["shell", "powershell"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Which actions to run on pull requests
@@ -21,5 +21,3 @@ install-updater = false
 github-build-setup = "../build-setup.yml"
 # Build each released package alone, so the simulator and its DuckDB are never compiled
 precise-builds = true
-# The MSI template is edited by hand to set the product icon
-allow-dirty = ["msi"]

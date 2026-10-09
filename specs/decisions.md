@@ -4196,9 +4196,9 @@ This revises D-175, D-182 and D-189.
 **Decision:**
 
 - One tag releases `tempest`, `tempest-tracker` and `tempest-relay` together, at the workspace version. Tracker and relay archives are named after their packages (`tempest-tracker-cli`, `tempest-relay-cli`).
-- The tracker and relay build for macOS and Linux only and ship a shell installer each, with no PowerShell script or MSI. The release setup step builds the tracker website, which the tracker embeds.
+- The tracker and relay build for the same five platforms as `tempest` and ship a shell and a PowerShell installer each. The release setup step builds the tracker website, which the tracker embeds.
 - The Homebrew tap is dropped, and with it the formulas and the publish job. This supersedes the tap in D-211 and D-133.
-- The MSI template is edited by hand for the product icon, so dist's check of it is allowed to differ.
+- There is no MSI installer: WiX runs only on Windows, so a release built on a Mac can't make one. Windows users have the zip and the PowerShell installer. The WiX template and its icon are removed.
 - Dist builds each released package alone (`precise-builds`), not the whole workspace, so the simulator and its DuckDB are never compiled for a release; a workspace build failed to link the simulator's DuckDB for Intel macOS on an Apple Silicon Mac.
 
 **Rationale:** The protocol isn't frozen, so the programs are only known to work built from the same commit. A tap would need a second repository to maintain.

@@ -36,9 +36,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/r
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/gregorybchris/tempest/releases/latest/download/tempest-installer.ps1 | iex"
 ```
 
-Windows users can instead download the `.msi` from the release page.
-
-**Tracker** (`tempest-tracker`) and **relay** (`tempest-relay`), for macOS and Linux:
+**Tracker** (`tempest-tracker`) and **relay** (`tempest-relay`), for the same platforms. The Windows installers are `tempest-tracker-cli-installer.ps1` and `tempest-relay-cli-installer.ps1`:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/gregorybchris/tempest/releases/latest/download/tempest-tracker-cli-installer.sh | sh

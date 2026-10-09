@@ -48,9 +48,10 @@ The simulator can link an installed DuckDB instead of the feature ([development]
 ## Usage
 
 ```sh
-(cd crates/web && trunk build --release --cargo-profile web)         # the web UI, to embed (optional)
-(cd crates/sim-web && trunk build --release --cargo-profile web)     # the results UI, likewise
-(cd crates/tracker-web && trunk build --release --cargo-profile web) # the tracker website, likewise
+(cd crates/web && trunk build)         # the web UI, to embed (optional)
+(cd crates/sim-web && trunk build)     # the results UI, likewise
+(cd crates/tracker-web && trunk build) # the tracker website, likewise
+# `trunk serve` iterates on a UI, and releases use `--release --cargo-profile web`: see specs/development.md
 
 tempest share ./photos   # prints a tempest: link, then shares until Ctrl-C
 tempest get '<link>'     # downloads the bundle into ./<its name>

@@ -215,6 +215,15 @@
 }
 
 .facts__link {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  min-width: 0;
+}
+
+.facts__url {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

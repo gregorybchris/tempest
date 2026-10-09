@@ -153,7 +153,6 @@ fn ControlsRow(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
             </Button>
             <Button small=true title="R" on_click=with(Controls::recheck)>"Recheck"</Button>
             <Button small=true title="r" on_click=dialog(Dialog::Rename)>"Rename"</Button>
-            <Button small=true title="y" on_click=with(Controls::copy_link)>"Copy link"</Button>
             <Button small=true title="t" on_click=dialog(Dialog::Tags)>"Tags…"</Button>
             <Button small=true title="C" on_click=dialog(Dialog::Category)>"Category…"</Button>
             <Button small=true title="L: its own speed and sharing limits" on_click=dialog(Dialog::Limits)>"Limits…"</Button>
@@ -175,6 +174,7 @@ fn ControlsRow(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
 #[component]
 fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     let ui = expect_context::<Ui>();
+    let controls = expect_context::<Controls>();
     let field = move |f: fn(&TransferInfo) -> String| {
         Signal::derive(move || transfer.with(|t| t.as_ref().map(f).unwrap_or_default()))
     };
@@ -212,8 +212,24 @@ fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
                 <FolderActions transfer />
             </dd>
             <dt>"link"</dt>
-            <dd class="facts__link" title=move || transfer.with(|t| t.as_ref().map(|t| t.link.clone()))>
-                {move || transfer.with(|t| t.as_ref().map(|t| t.link.clone()))}
+            <dd class="facts__link">
+                <span class="facts__url" title=move || transfer.with(|t| t.as_ref().map(|t| t.link.clone()))>
+                    {move || transfer.with(|t| t.as_ref().map(|t| t.link.clone()))}
+                </span>
+                <span class="facts__actions">
+                    <Button
+                        small=true
+                        kind=ButtonKind::Ghost
+                        title="Copy the link, which anyone can open to download this (y)"
+                        on_click=move || {
+                            if let Some(t) = transfer.get_untracked() {
+                                controls.copy_link(&t);
+                            }
+                        }
+                    >
+                        "Copy link"
+                    </Button>
+                </span>
             </dd>
         </dl>
         <div class="detail__deeper">

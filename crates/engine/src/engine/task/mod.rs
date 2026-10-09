@@ -783,7 +783,11 @@ impl EngineTask {
     /// Stops listing a transfer on `tracker`: forgotten, and told to its running
     /// bundle's supervisor, which stops announcing there unless the transfer has another reason
     /// to. The receivers resolve once no announce asking for the listing can still arrive.
-    async fn unpublish(&mut self, id: BundleId, tracker: String) -> Result<Unpublished, EngineError> {
+    async fn unpublish(
+        &mut self,
+        id: BundleId,
+        tracker: String,
+    ) -> Result<Unpublished, EngineError> {
         let t = self.transfers.get(&id).ok_or(EngineError::NotFound(id))?;
         let same = |url: &String| url.trim_end_matches('/') == tracker.trim_end_matches('/');
         let published: Vec<String> = t.row.publish.iter().filter(|u| same(u)).cloned().collect();

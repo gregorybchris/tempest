@@ -235,8 +235,7 @@ fn open_shared_file(
             let unchanged = saved.size == info.size
                 && saved.modified.is_some()
                 && saved.modified == super::checkpoint::modified(&metadata);
-            if !unchanged && matching_chunks(&file, &path, info.size, &tree, &all, cancel)? != all
-            {
+            if !unchanged && matching_chunks(&file, &path, info.size, &tree, &all, cancel)? != all {
                 return Err(changed());
             }
             tree
@@ -250,8 +249,7 @@ fn open_shared_file(
         }
     };
     Ok(Opened {
-        file: BundleFile::new(path.clone(), info.clone(), &file, false)
-            .map_err(io_error(&path))?,
+        file: BundleFile::new(path.clone(), info.clone(), &file, false).map_err(io_error(&path))?,
         tree,
         have: all,
     })
@@ -777,8 +775,14 @@ mod tests {
             executable: false,
             modified: 0,
         };
-        let manifest =
-            Manifest::new("f", "", 0, "", vec![tempest_protocol::Entry::file("f", info)]).unwrap();
+        let manifest = Manifest::new(
+            "f",
+            "",
+            0,
+            "",
+            vec![tempest_protocol::Entry::file("f", info)],
+        )
+        .unwrap();
         let layout = ChunkLayout::new(&manifest);
         let cancel = Cancel::default();
         assert!(open_shared(dir.path(), &manifest, &layout, &cancel).is_ok());
@@ -790,7 +794,10 @@ mod tests {
     #[test]
     fn stored_bytes_stop_at_the_end_of_the_file() {
         let size = 2 * CHUNK_SIZE as u64 + 10;
-        assert_eq!(stored(size, &RangeList::from_chunks([0, 2])), CHUNK_SIZE as u64 + 10);
+        assert_eq!(
+            stored(size, &RangeList::from_chunks([0, 2])),
+            CHUNK_SIZE as u64 + 10
+        );
         assert_eq!(stored(size, &RangeList::new()), 0);
     }
 }

@@ -344,7 +344,10 @@ impl Store {
     pub fn finish_move(&mut self, transfer: &TransferRow) -> Result<(), StoreError> {
         let tx = self.conn.transaction()?;
         save_transfer(&tx, transfer)?;
-        tx.execute("DELETE FROM moves WHERE transfer = ?1", [transfer.id.as_bytes()])?;
+        tx.execute(
+            "DELETE FROM moves WHERE transfer = ?1",
+            [transfer.id.as_bytes()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -359,7 +362,9 @@ impl Store {
     /// The moves begun and neither finished nor ended: each transfer and the folder its files
     /// were moving into.
     pub fn moves(&self) -> Result<Vec<(BundleId, PathBuf)>, StoreError> {
-        let mut statement = self.conn.prepare("SELECT transfer, folder FROM moves ORDER BY transfer")?;
+        let mut statement = self
+            .conn
+            .prepare("SELECT transfer, folder FROM moves ORDER BY transfer")?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
         })?;

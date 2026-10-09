@@ -12,10 +12,10 @@ use tempest_core::{
     Action, ChunkCell, ChunkSet, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response,
     Session, StreamId, Time,
 };
+use tempest_protocol::hash::manifest_hash;
 use tempest_protocol::message::{
     GoodbyeReason, Hello, ManifestMessage, PeerRecord, Reject, RejectReason,
 };
-use tempest_protocol::hash::manifest_hash;
 use tempest_protocol::wire::{Decode, Encode};
 use tempest_protocol::{Address, BundleId, Manifest, Message, PeerId, RangeList};
 use tokio::sync::mpsc::error::TrySendError;

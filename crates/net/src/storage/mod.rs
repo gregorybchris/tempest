@@ -577,7 +577,9 @@ impl Task {
                     self.jobs.spawn_blocking(move || {
                         let info = &files.files()[file].info;
                         let result = files
-                            .read(file, |handle| files::read_chunks(handle, info, position, count))
+                            .read(file, |handle| {
+                                files::read_chunks(handle, info, position, count)
+                            })
                             .map(|chunks| Data { proof, chunks });
                         let _ = reply.send(result);
                         Done::Read
@@ -768,12 +770,11 @@ impl Task {
         let files = self.files.files();
         let mut states = Vec::with_capacity(files.len());
         for ((file, tree), span) in files.iter().zip(&self.trees).zip(self.layout.files()) {
-            let metadata = std::fs::symlink_metadata(&file.path).map_err(|source| {
-                StorageError::Io {
+            let metadata =
+                std::fs::symlink_metadata(&file.path).map_err(|source| StorageError::Io {
                     path: file.path.clone(),
                     source,
-                }
-            })?;
+                })?;
             let span = ChunkRange {
                 start: span.first_chunk,
                 end: span.end(),
@@ -846,5 +847,3 @@ fn verify_and_write(
         proof: data.proof,
     })
 }
-
-

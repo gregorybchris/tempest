@@ -64,7 +64,7 @@ The last column lists the workspace crates each may use besides `protocol`, whic
 | Transport | QUIC via quinn, TLS 1.3 raw public keys via rustls | D-018, D-020 |
 | Port mapping | PCP and NAT-PMP by hand, UPnP-IGD via igd-next | D-188 |
 | Hashing | SHA-256 | D-008 |
-| Disk I/O | Positioned reads/writes on a thread pool, batched syncs | D-086 |
+| Disk I/O | Positioned reads/writes on a thread pool, batched syncs, a bounded set of open files | D-086, D-238 |
 | Client state | SQLite (rusqlite, bundled) | D-082 |
 | Client config | YAML, with profiles + overrides | D-005, D-081 |
 | Engine API | HTTP + JSON, server-sent events with resumable IDs | D-080 |

@@ -70,7 +70,10 @@ fn move_all_with(
 pub(super) fn remove_originals(originals: &[PathBuf]) {
     for original in originals {
         if let Err(error) = remove(original) {
-            tracing::warn!("couldn't delete {} after moving it: {error}", original.display());
+            tracing::warn!(
+                "couldn't delete {} after moving it: {error}",
+                original.display()
+            );
         }
     }
 }

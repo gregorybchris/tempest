@@ -158,7 +158,10 @@ impl OpenFiles {
     fn fail(&self, cache: &mut Cache, index: usize, source: io::Error) -> StorageError {
         let failure = cache.failure.get_or_insert_with(|| {
             let path = self.files[index].path.clone();
-            tracing::error!("syncing {} failed, so storage stops: {source}", path.display());
+            tracing::error!(
+                "syncing {} failed, so storage stops: {source}",
+                path.display()
+            );
             SyncFailure {
                 path,
                 source: Arc::new(source),
@@ -238,7 +241,9 @@ mod tests {
 
     fn write(files: &OpenFiles, index: usize, bytes: &[u8]) {
         files
-            .write(index, |file| super::super::files::write_all_at(file, bytes, 0))
+            .write(index, |file| {
+                super::super::files::write_all_at(file, bytes, 0)
+            })
             .unwrap();
     }
 
@@ -252,7 +257,10 @@ mod tests {
         }
         files.sync(0..5).unwrap();
         for i in 0..5 {
-            assert_eq!(std::fs::read(dir.path().join(format!("{i}"))).unwrap(), [i as u8; 4]);
+            assert_eq!(
+                std::fs::read(dir.path().join(format!("{i}"))).unwrap(),
+                [i as u8; 4]
+            );
         }
     }
 
@@ -297,7 +305,10 @@ mod tests {
             files.write(0, |_| Ok(())),
             Err(StorageError::SyncFailed { .. })
         ));
-        assert!(matches!(files.sync([0]), Err(StorageError::SyncFailed { .. })));
+        assert!(matches!(
+            files.sync([0]),
+            Err(StorageError::SyncFailed { .. })
+        ));
         assert!(files.failure().is_some());
         // Reads still work: what was synced before is intact.
         files.read(0, |_| Ok(())).unwrap();

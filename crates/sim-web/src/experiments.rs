@@ -9,8 +9,9 @@ use tempest_sim_api::query::{
 };
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
+use tempest_ui_kit::shell::{debounce, synced};
 
-use crate::app::{debounce, synced, use_ctx};
+use crate::app::use_ctx;
 use crate::baselines::BaselinePanel;
 use crate::compare::ComparisonView;
 use crate::present::{plural, short};

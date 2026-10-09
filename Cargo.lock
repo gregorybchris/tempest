@@ -4945,11 +4945,8 @@ dependencies = [
  "console_error_panic_hook",
  "leptos",
  "serde",
- "serde_json",
  "tempest-sim-api",
  "tempest-ui-kit",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -5060,7 +5057,10 @@ dependencies = [
  "leptos-use",
  "proptest",
  "send_wrapper",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

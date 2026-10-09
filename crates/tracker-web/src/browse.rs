@@ -6,9 +6,10 @@ use tempest_tracker_api::listing::{FacetCount, Listing, ListingPage};
 use tempest_tracker_api::query::{ListingQuery, Sort};
 use tempest_ui_kit::components::*;
 use tempest_ui_kit::format;
+use tempest_ui_kit::shell::{debounce, synced};
 use wasm_bindgen::JsCast;
 
-use crate::app::{debounce, on_command, synced, use_ctx};
+use crate::app::{on_command, use_ctx};
 use crate::keys::Command;
 use crate::present::{self, PageButton, plural};
 use crate::route::Route;

@@ -9,6 +9,7 @@ use tempest_sim_api::data::{
 use tempest_sim_api::query::{CompareQuery, VariantRef};
 
 use super::{BrowseError, Measured, Result, completion_times, measured};
+use crate::results::Database;
 use crate::stats::{self, Bootstrap, Meaningful, Metric, Samples};
 
 /// What a metric's values mean.
@@ -71,7 +72,8 @@ fn estimate(e: stats::Estimate) -> Estimate {
 }
 
 /// The variants `query` names, each compared with its reference metric by metric.
-pub fn compare(conn: &Connection, query: &CompareQuery) -> Result<Comparison> {
+pub fn compare(db: &Database, query: &CompareQuery) -> Result<Comparison> {
+    let conn = &*db.conn();
     let loaded = query
         .variants
         .iter()
@@ -214,7 +216,8 @@ fn band(
 /// The variants `query` names over time: the fraction of downloaders completed, the
 /// rarest chunk's copies and the peers present, each a median across seeds with its interval.
 /// A quantity no run has two moments of is left out.
-pub fn compare_series(conn: &Connection, query: &CompareQuery) -> Result<ComparisonSeries> {
+pub fn compare_series(db: &Database, query: &CompareQuery) -> Result<ComparisonSeries> {
+    let conn = &*db.conn();
     let variants = query
         .variants
         .iter()

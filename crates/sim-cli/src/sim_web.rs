@@ -17,7 +17,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
 use tempest_sim::browse::{self, Baselines, BrowseError};
-use tempest_sim::results::duckdb::Connection;
 use tempest_sim::results::{self, Database};
 use tempest_sim_api::query::{CompareQuery, ExperimentQuery, QueryError, RunQuery};
 use tempest_sim_api::{ApiError, PREFIX};
@@ -178,15 +177,14 @@ fn id(text: &str) -> Result<i64, Failure> {
 async fn answer<T: Serialize + Send + 'static>(
     sources: Arc<Sources>,
     missing: &'static str,
-    read: impl FnOnce(&Connection, &Baselines) -> Result<Option<T>, BrowseError> + Send + 'static,
+    read: impl FnOnce(&Database, &Baselines) -> Result<Option<T>, BrowseError> + Send + 'static,
 ) -> Response {
     let task = tokio::task::spawn_blocking(move || {
         let db = match Database::open_read_only(&sources.db) {
             Ok(db) => db,
             Err(e) => return Err(unavailable(&sources, e)),
         };
-        let conn = db.connection();
-        read(&conn, &sources.baselines).map_err(|e| match e {
+        read(&db, &sources.baselines).map_err(|e| match e {
             BrowseError::NotFound(why) => error(StatusCode::NOT_FOUND, "not_found", why),
             other => error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -221,8 +219,7 @@ fn unavailable(sources: &Sources, e: results::Error) -> Failure {
             "schema",
             format!("{path}: {e}"),
         ),
-        // DuckDB lets one process write a file or many read it, so a recording run locks it.
-        results::Error::Database(e) if e.to_string().contains("lock") => error(
+        results::Error::Database(e) if e.is_locked() => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "busy",
             format!(

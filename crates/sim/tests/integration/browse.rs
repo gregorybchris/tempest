@@ -109,7 +109,7 @@ impl Fixture {
 #[test]
 fn the_results_ui_reads_what_the_runs_recorded() {
     let f = fixture();
-    let conn = f.db.connection();
+    let conn = &f.db;
     let baselines = f.baselines();
 
     // Experiments: newest first by default, searchable, and flagged with their logs and
@@ -253,7 +253,7 @@ fn the_results_ui_reads_what_the_runs_recorded() {
 #[test]
 fn comparisons_match_the_statistics_sim_run_prints() {
     let f = fixture();
-    let conn = f.db.connection();
+    let conn = &f.db;
     let (scenario, results) = &f.swarm;
     let query = CompareQuery::experiment(1, 2);
     let compared = browse::compare(&conn, &query).unwrap();
@@ -338,7 +338,7 @@ fn comparisons_match_the_statistics_sim_run_prints() {
 #[test]
 fn experiments_are_checked_against_their_golden_baseline() {
     let f = fixture();
-    let conn = f.db.connection();
+    let conn = &f.db;
     let baselines = f.baselines();
     assert!(
         browse::baseline_report(&conn, 1, &baselines)
@@ -417,7 +417,7 @@ fn a_database_opens_read_only_beside_its_writer_closing() {
     let first = Database::open_read_only(&path).unwrap();
     let second = Database::open_read_only(&path).unwrap();
     for db in [&first, &second] {
-        let runs = browse::runs(&db.connection(), &RunQuery::default()).unwrap();
+        let runs = browse::runs(&db, &RunQuery::default()).unwrap();
         assert_eq!(runs.total, 4);
     }
     assert!(Database::open_read_only(&dir.path().join("missing.duckdb")).is_err());

@@ -4908,6 +4908,7 @@ dependencies = [
  "sha2",
  "tempest-core",
  "tempest-protocol",
+ "tempest-sim",
  "tempest-sim-api",
  "tempfile",
  "thiserror 2.0.21",

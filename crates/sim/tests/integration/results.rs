@@ -4,10 +4,10 @@
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
+use duckdb::Connection;
+use duckdb::types::FromSql;
 use tempest_sim::experiment::{run_all, seeds};
 use tempest_sim::log::{Row, Sink};
-use tempest_sim::results::duckdb::Connection;
-use tempest_sim::results::duckdb::types::FromSql;
 use tempest_sim::results::{Database, GIT_COMMIT, ScenarioFile};
 use tempest_sim::{RunOptions, RunResult, Scenario, run, run_with_sink};
 

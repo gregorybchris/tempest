@@ -14,6 +14,8 @@ results = ["dep:duckdb", "dep:tempest-sim-api"]
 # Compile DuckDB from its bundled source instead of linking the system library, so the binary
 # needs no DuckDB installed.
 bundled-duckdb = ["results", "duckdb/bundled", "duckdb/json"]
+# The database's DuckDB connection, for tests that check its tables with SQL.
+testing = ["results"]
 
 [dependencies]
 tempest-core.workspace = true
@@ -31,6 +33,8 @@ sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+tempest-sim = { workspace = true, features = ["testing"] }
+duckdb.workspace = true
 tempest-sim-api.workspace = true
 proptest.workspace = true
 tempfile.workspace = true

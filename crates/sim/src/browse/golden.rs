@@ -12,6 +12,7 @@ use tempest_sim_api::data::{
 
 use super::{BrowseError, Result, measured};
 use crate::baseline::{self, Baseline, BaselineError, QUICK_SEEDS};
+use crate::results::Database;
 use crate::stats::Bootstrap;
 
 /// Where the golden baselines are, if anywhere. They are read afresh for every answer, so an
@@ -61,10 +62,11 @@ fn display(path: &Path) -> String {
 /// Experiment `id` checked against the baseline of its scenario's name, or `None` if it has
 /// none. A missing experiment is [`BrowseError::NotFound`].
 pub fn baseline_report(
-    conn: &Connection,
+    db: &Database,
     id: i64,
     baselines: &Baselines,
 ) -> Result<Option<BaselineReport>> {
+    let conn = &*db.conn();
     let name: Option<String> = duckdb::OptionalExt::optional(conn.query_row(
         "SELECT name FROM experiments WHERE experiment_id = ?",
         [id],
@@ -145,7 +147,8 @@ fn report(
 }
 
 /// Every golden baseline, with the experiments of its scenario and how each fared.
-pub fn baselines(conn: &Connection, baselines: &Baselines) -> Result<Vec<BaselineInfo>> {
+pub fn baselines(db: &Database, baselines: &Baselines) -> Result<Vec<BaselineInfo>> {
+    let conn = &*db.conn();
     let mut statement = conn.prepare(
         "SELECT experiment_id, strftime(created_at, '%Y-%m-%d %H:%M:%S'), git_commit
          FROM experiments WHERE name = ? ORDER BY experiment_id DESC",

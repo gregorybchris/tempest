@@ -429,6 +429,16 @@ impl Scenario {
         Ok((scenario, text))
     }
 
+    /// The SHA-256 of a scenario file's text, in hex: how experiments and baselines name the
+    /// version of the file they ran.
+    pub fn file_sha256(text: &str) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(text.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
     /// Reads and checks a scenario from YAML text.
     pub fn from_yaml(text: &str) -> Result<Self, ScenarioError> {
         // YAML 1.2 booleans only, so that values such as `off` stay strings.

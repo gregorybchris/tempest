@@ -234,7 +234,7 @@ async fn poll(
             let polled: PollResponse = tracker.catalog().poll(now(), &request)?;
             let mut response = json(StatusCode::OK, &polled);
             if let Some(session) = &polled.session {
-                let cookie = session_cookie(&tracker, &session.token, session.expires_in_secs);
+                let cookie = session_cookie(tracker, &session.token, session.expires_in_secs);
                 response.headers_mut().insert(header::SET_COOKIE, cookie);
             }
             Ok(response)
@@ -275,7 +275,7 @@ async fn edit_me(
 ) -> Response {
     blocking(tracker, move |tracker| {
         answer((|| {
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             let edit: AccountEdit = body(&headers, raw)?;
             ok(&tracker.catalog().edit_account(&key, &edit)?)
         })())
@@ -309,7 +309,7 @@ async fn my_listings(
 ) -> Response {
     blocking(tracker, move |tracker| {
         answer((|| {
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             let page = query(page)?;
             let mut page = tracker
                 .catalog()
@@ -330,7 +330,7 @@ async fn listings(
         answer((|| {
             let listing_query = ListingQuery::parse(raw.as_deref().unwrap_or(""))
                 .map_err(|error| Refusal::new(ErrorCode::InvalidRequest, error.to_string()))?;
-            let viewer = viewer(&tracker, &headers);
+            let viewer = viewer(tracker, &headers);
             let page =
                 tracker
                     .catalog()
@@ -351,7 +351,7 @@ async fn listing(
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let viewer = viewer(&tracker, &headers);
+            let viewer = viewer(tracker, &headers);
             let mut listing = tracker.catalog().listing(&id, viewer.as_ref())?;
             tracker.add_swarms(std::slice::from_mut(&mut listing));
             ok(&listing)
@@ -369,7 +369,7 @@ async fn edit_listing(
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             let edit: ListingEdit = body(&headers, raw)?;
             let mut listing = tracker.catalog().edit_listing(now(), &id, &key, &edit)?;
             tracker.add_swarms(std::slice::from_mut(&mut listing));
@@ -387,7 +387,7 @@ async fn unpublish(
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             tracker.catalog().unpublish(now(), &id, &key)?;
             ok(&serde_json::json!({}))
         })())
@@ -404,7 +404,7 @@ async fn vote(
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             let request: VoteRequest = body(&headers, raw)?;
             let mut listing = tracker.catalog().vote(now(), &id, &key, request.vote)?;
             tracker.add_swarms(std::slice::from_mut(&mut listing));
@@ -458,7 +458,7 @@ async fn comment(
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             let comment: NewComment = body(&headers, raw)?;
             let comment = tracker.catalog().comment(now(), &id, &key, &comment)?;
             Ok(json(StatusCode::CREATED, &comment))
@@ -476,7 +476,7 @@ async fn report(
     blocking(tracker, move |tracker| {
         answer((|| {
             let id = bundle(&id)?;
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             let report: NewReport = body(&headers, raw)?;
             tracker.catalog().report(now(), &id, &key, &report)?;
             Ok(json(StatusCode::CREATED, &serde_json::json!({})))
@@ -495,7 +495,7 @@ async fn delete_comment(
             let id: u64 = id
                 .parse()
                 .map_err(|_| Refusal::new(ErrorCode::InvalidRequest, "a comment ID is a number"))?;
-            let key = signed_in(&tracker, &headers)?;
+            let key = signed_in(tracker, &headers)?;
             tracker.catalog().delete_comment(id, &key)?;
             ok(&serde_json::json!({}))
         })())

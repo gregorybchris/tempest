@@ -65,7 +65,7 @@ The last column lists the workspace crates each may use besides `protocol`, whic
 | Transport | QUIC via quinn, TLS 1.3 raw public keys via rustls | D-018, D-020 |
 | Port mapping | PCP and NAT-PMP by hand, UPnP-IGD via igd-next | D-188 |
 | Hashing | SHA-256 | D-008 |
-| Disk I/O | Positioned reads/writes on a thread pool, batched syncs | D-086 |
+| Disk I/O | Positioned reads/writes on a thread pool, batched syncs, a bounded set of open files | D-086, D-242 |
 | Client state | SQLite (rusqlite, bundled) | D-082 |
 | Client config | YAML, with profiles + overrides | D-005, D-081 |
 | Engine API | HTTP + JSON, server-sent events with resumable IDs | D-080 |
@@ -73,7 +73,8 @@ The last column lists the workspace crates each may use besides `protocol`, whic
 | Tracker's catalog | SQLite store, Tantivy search index in memory | D-206, D-130, D-209 |
 | Simulation results | DuckDB | D-075 |
 | Web UIs | Leptos 0.8 (client-side, with server rendering and islands where useful) | D-117 |
+| Logging | `tracing` in libraries; binaries print events to stderr with `tracing-subscriber`, filtered by `RUST_LOG` | D-243 |
 
 ## Open questions
 
-- Error handling, logging and metrics conventions.
+- Error handling and metrics conventions.

@@ -50,8 +50,9 @@ sha2 = "0.10"
 # The tracker catalog's search (D-130), in memory: no mmap, compression or stemmers.
 tantivy = { version = "0.26", default-features = false }
 thiserror = "2"
-# Logging; each binary chooses where it goes.
-tracing = "0.1"
+# Logging (D-243): libraries emit events, binaries print them to stderr, filtered by RUST_LOG.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 unicode-normalization = "0.1"
 
 # Network interfaces' addresses, to advertise in links.
@@ -60,6 +61,8 @@ if-addrs = "0.15"
 igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }
 # The default gateway, which NAT-PMP and PCP requests go to.
 netdev = { version = "0.46", default-features = false, features = ["gateway"] }
+# Free disk space, before laying out a download.
+fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 # For O_NOFOLLOW when opening downloaded files.
 libc = "0.2"
 # Raising the limit on open files without unsafe code.

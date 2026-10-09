@@ -581,8 +581,81 @@ async fn syncs_happen_after_the_interval() {
         .await
         .unwrap();
     transfer(&shared, &download, &[(0, 1)]).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No flush asks for it: the interval alone makes the sync happen.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while download.stats().await.unwrap().syncs == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "no sync");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     assert_eq!(download.stats().await.unwrap().syncs, 1);
+}
+
+#[tokio::test]
+async fn downloads_of_many_files_keep_few_open() {
+    let source = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let files: Vec<(String, Vec<u8>)> = (0..20)
+        .map(|i| (format!("dir/{i}"), contents(CHUNK_SIZE + i, i as u8)))
+        .collect();
+    let files: Vec<(&str, Vec<u8>)> = files.iter().map(|(p, d)| (p.as_str(), d.clone())).collect();
+    let manifest = make_bundle(source.path(), &files, vec![]);
+    let few = StorageConfig {
+        open_files: 3,
+        ..StorageConfig::default()
+    };
+    let shared = Storage::open_shared(source.path(), manifest.clone(), few.clone())
+        .await
+        .unwrap();
+    let (download, _) = Storage::create_download(dest.path(), manifest.clone(), few)
+        .await
+        .unwrap();
+    let mut requests = all_requests(&manifest);
+    requests.retain(|&(_, count)| count == 1);
+    // Interleaved across files, so handles close while their writes still need a sync.
+    requests.sort_by_key(|&(start, _)| (start % 2, start));
+    let completes = transfer(&shared, &download, &requests).await;
+    assert_eq!(completes.iter().filter(|&&c| c).count(), 1);
+    for (path, data) in &files {
+        assert_eq!(&fs::read(dest.path().join(path)).unwrap(), data, "{path}");
+    }
+}
+
+/// A manifest of one file of `size` bytes, which exists nowhere.
+fn declared(size: u64) -> Arc<Manifest> {
+    let info = FileInfo {
+        size,
+        root: leaf_hash(b"nothing"),
+        executable: false,
+        modified: 0,
+    };
+    Arc::new(Manifest::new("huge", "", 0, "", vec![Entry::file("huge", info)]).unwrap())
+}
+
+#[tokio::test]
+async fn bundles_over_the_limit_are_refused() {
+    let dest = tempfile::tempdir().unwrap();
+    // The most chunks a manifest may have: 64 TiB.
+    let manifest = declared(u64::from(u32::MAX) * CHUNK_SIZE as u64);
+    let refused = Storage::create_download(dest.path(), manifest, StorageConfig::default()).await;
+    assert!(matches!(refused, Err(StorageError::TooLarge { .. })));
+    assert!(!dest.path().join("huge").exists(), "nothing is laid out");
+}
+
+#[tokio::test]
+async fn downloads_that_dont_fit_on_disk_are_refused() {
+    let dest = tempfile::tempdir().unwrap();
+    // Larger than any disk the tests run on, and allowed through the size limit.
+    let manifest = declared(u64::from(u32::MAX) * CHUNK_SIZE as u64);
+    let config = StorageConfig {
+        max_bundle_size: u64::MAX,
+        ..StorageConfig::default()
+    };
+    let refused = Storage::create_download(dest.path().join("new"), manifest, config).await;
+    let Err(StorageError::NoSpace { needed, .. }) = refused else {
+        panic!("expected no space: {refused:?}");
+    };
+    assert_eq!(needed, u64::from(u32::MAX) * CHUNK_SIZE as u64);
+    assert!(!dest.path().join("new").exists(), "nothing is laid out");
 }
 
 #[tokio::test]

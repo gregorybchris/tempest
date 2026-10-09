@@ -12,13 +12,15 @@ use tempest_core::{
     Action, ChunkCell, ChunkSet, ConnId, Event, Inbound, LocalPeer, Reply, RequestId, Response,
     Session, StreamId, Time,
 };
+use tempest_protocol::hash::manifest_hash;
 use tempest_protocol::message::{
     GoodbyeReason, Hello, ManifestMessage, PeerRecord, Reject, RejectReason,
 };
-use tempest_protocol::{Address, BundleId, Message, PeerId, RangeList};
+use tempest_protocol::wire::{Decode, Encode};
+use tempest_protocol::{Address, BundleId, Manifest, Message, PeerId, RangeList};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
-use tokio::task::JoinSet;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::Instant;
 
 use super::conn::{self, ConnTask, LEAVE_GRACE};
@@ -80,6 +82,8 @@ pub(crate) enum Report {
     Closed { conn: ConnId, closed: Closed },
     /// Storage failed while writing; the bundle can't go on.
     StorageFailed(StorageError),
+    /// Storage for the fetched manifest is laid out, or failed to be.
+    LaidOut(Result<Storage, StorageError>),
     /// More peers to dial.
     AddPeers(Vec<PeerRecord>),
     /// Asks for a handle to storage, once laid out.
@@ -118,9 +122,13 @@ pub(super) struct BundleTask {
     endpoint: Endpoint,
     config: Arc<NodeConfig>,
     throttle: Throttle,
-    storage: Option<Storage>,
+    /// The bundle's storage: from the start when shared, once laid out when downloaded.
+    /// Requests wait on it to store what they receive.
+    storage: watch::Sender<Option<Storage>>,
     /// Where to download to, until the manifest arrives and storage is laid out there.
     destination: Option<Destination>,
+    /// Laying out storage for the fetched manifest, off the task's loop.
+    laying_out: Option<JoinHandle<()>>,
     inbox: mpsc::Sender<Report>,
     conns: HashMap<ConnId, Conn>,
     next_conn: u64,
@@ -172,8 +180,9 @@ impl BundleTask {
             endpoint,
             config,
             throttle,
-            storage,
+            storage: watch::Sender::new(storage),
             destination,
+            laying_out: None,
             inbox,
             conns: HashMap::new(),
             next_conn: 0,
@@ -225,7 +234,17 @@ impl BundleTask {
 
         // Let the last messages, such as the farewell list, reach the peers before returning.
         while self.leaving.join_next().await.is_some() {}
-        let closed = match self.storage.take() {
+        // Storage still being laid out is cancelled, unless it has just finished.
+        if let Some(laying_out) = self.laying_out.take() {
+            laying_out.abort();
+            let _ = laying_out.await;
+            while let Ok(report) = inbox.try_recv() {
+                if let Report::LaidOut(Ok(storage)) = report {
+                    self.storage.send_replace(Some(storage));
+                }
+            }
+        }
+        let closed = match self.storage.send_replace(None) {
             Some(storage) => storage.close().await.map(Some),
             None => Ok(None),
         };
@@ -329,6 +348,12 @@ impl BundleTask {
                 response,
             } => {
                 self.cancels.remove(&(conn, request));
+                if let Some(error) = self.refusal(&response) {
+                    self.failure.get_or_insert(error);
+                    self.session.shutdown(now);
+                    return;
+                }
+                let session = &mut self.session;
                 session.handle_message(now, conn, Inbound::Response { request, response });
             }
             Report::Violation { conn, message } => session.handle_violation(now, conn, message),
@@ -341,9 +366,23 @@ impl BundleTask {
                 self.failure.get_or_insert(error);
                 session.shutdown(now);
             }
+            Report::LaidOut(result) => {
+                self.laying_out = None;
+                match result {
+                    // Chunks already on disk are verified again as they arrive, and not
+                    // rewritten.
+                    Ok(storage) => {
+                        self.storage.send_replace(Some(storage));
+                    }
+                    Err(error) => {
+                        self.failure.get_or_insert(error);
+                        session.shutdown(now);
+                    }
+                }
+            }
             Report::AddPeers(peers) => session.add_peers(now, peers),
             Report::Storage(reply) => {
-                let _ = reply.send(self.storage.clone());
+                let _ = reply.send(self.storage.borrow().clone());
             }
             Report::Peers(reply) => {
                 let peers = session.peers(now).into_iter().filter_map(|status| {
@@ -463,7 +502,7 @@ impl BundleTask {
                     request,
                     message,
                     connection: entry.connection.clone(),
-                    storage: self.storage.clone(),
+                    storage: self.storage.subscribe(),
                     throttle: self.throttle.clone(),
                     inbox: self.inbox.clone(),
                 };
@@ -515,20 +554,18 @@ impl BundleTask {
                     return;
                 };
                 let config = self.config.storage.clone();
-                let created = match destination.resolve(&manifest).await {
-                    Ok(dir) => Storage::create_download(dir, manifest, config).await,
-                    Err(error) => Err(error),
-                };
-                match created {
-                    // Chunks already on disk are verified again as they arrive, and not
-                    // rewritten.
-                    Ok((storage, _have)) => self.storage = Some(storage),
-                    Err(error) => {
-                        self.failure.get_or_insert(error);
-                        let now = self.now();
-                        self.session.shutdown(now);
-                    }
-                }
+                let inbox = self.inbox.clone();
+                // Laying out may create many files or hash existing ones: the loop goes on
+                // meanwhile, and requests wait for storage to store what they receive.
+                self.laying_out = Some(tokio::spawn(async move {
+                    let created = match destination.resolve(&manifest).await {
+                        Ok(dir) => Storage::create_download(dir, manifest, config).await,
+                        Err(error) => Err(error),
+                    };
+                    let _ = inbox
+                        .send(Report::LaidOut(created.map(|(storage, _)| storage)))
+                        .await;
+                }));
             }
         }
     }
@@ -584,7 +621,8 @@ impl BundleTask {
 
     /// What to send for the session's reply.
     fn answer(&self, reply: Reply) -> Answer {
-        match (reply, &self.storage) {
+        let storage = self.storage.borrow();
+        match (reply, &*storage) {
             (Reply::Data { start, count }, Some(storage)) => Answer::Data {
                 bytes: self.session.data_len(start, count).unwrap_or(0),
                 storage: storage.clone(),
@@ -594,9 +632,14 @@ impl BundleTask {
             (Reply::Manifest, Some(storage)) => Answer::Manifest(ManifestMessage {
                 manifest: storage.manifest_bytes().to_vec(),
             }),
+            // Storage is still being laid out.
+            (Reply::Manifest, None) if self.session.manifest().is_some() => {
+                let manifest = self.session.manifest().expect("checked").to_bytes();
+                Answer::Manifest(ManifestMessage { manifest })
+            }
             (Reply::Reject(reject), _) => Answer::Message(Message::Reject(reject)),
-            // The session answers with Data or the manifest only once it has the manifest, by
-            // which time storage exists, unless laying it out failed.
+            // The session answers with Data only for chunks it has, which are stored, unless
+            // laying storage out failed.
             (Reply::Data { .. } | Reply::Manifest, None) => {
                 Answer::Message(Message::Reject(Reject {
                     reason: RejectReason::DontHave,
@@ -604,6 +647,23 @@ impl BundleTask {
                 }))
             }
         }
+    }
+
+    /// Why a response can't be taken, if it is a manifest this bundle's storage won't take. A
+    /// manifest's size is checked here, before the session sets up its state for every chunk.
+    fn refusal(&self, response: &Response) -> Option<StorageError> {
+        let Response::Manifest(message) = response else {
+            return None;
+        };
+        // Anything else wrong with it is the session's to judge.
+        if self.session.manifest().is_some()
+            || manifest_hash(&message.manifest) != self.session.bundle_id()
+        {
+            return None;
+        }
+        let size = Manifest::from_bytes(&message.manifest).ok()?.total_size();
+        let max = self.config.storage.max_bundle_size;
+        (size > max).then_some(StorageError::TooLarge { size, max })
     }
 }
 

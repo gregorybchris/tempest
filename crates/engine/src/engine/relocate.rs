@@ -1,8 +1,9 @@
 //! Moving a transfer's files to another folder, all or nothing.
 //!
 //! Each item, a file or a folder, is renamed into place. Across file systems, where renaming
-//! fails, it is copied instead, and the originals are deleted only once every item is in place.
-//! If anything fails, what was moved is moved back and what was copied is deleted.
+//! fails, it is copied instead, and the originals are deleted only once the move is recorded.
+//! If anything fails, what was moved is moved back and what was copied is deleted. A move a
+//! crash interrupted is undone at the next start (see [`undo_interrupted`]).
 
 use std::fs;
 use std::io;
@@ -21,8 +22,9 @@ enum Placed {
     Copied,
 }
 
-/// Moves every item, or none.
-pub(super) fn move_all(items: &[Item]) -> io::Result<()> {
+/// Moves every item, or none. Returns the originals of the items copied rather than renamed,
+/// for [`remove_originals`] once the move is recorded.
+pub(super) fn move_all(items: &[Item]) -> io::Result<Vec<PathBuf>> {
     move_all_with(items, |from, to| fs::rename(from, to))
 }
 
@@ -30,7 +32,7 @@ pub(super) fn move_all(items: &[Item]) -> io::Result<()> {
 fn move_all_with(
     items: &[Item],
     rename: impl Fn(&Path, &Path) -> io::Result<()>,
-) -> io::Result<()> {
+) -> io::Result<Vec<PathBuf>> {
     for item in items {
         if item.to.symlink_metadata().is_ok() {
             return Err(io::Error::new(
@@ -56,13 +58,51 @@ fn move_all_with(
             }
         }
     }
-    for (item, how) in &placed {
-        if let Placed::Copied = how {
-            // The data is safe at its new place; a leftover original is only clutter.
-            let _ = remove(&item.from);
+    Ok(placed
+        .into_iter()
+        .filter(|(_, how)| matches!(how, Placed::Copied))
+        .map(|(item, _)| item.from.clone())
+        .collect())
+}
+
+/// Deletes the originals of copied items. The data is safe at its new place, so an original
+/// left behind is only clutter.
+pub(super) fn remove_originals(originals: &[PathBuf]) {
+    for original in originals {
+        if let Err(error) = remove(original) {
+            tracing::warn!(
+                "couldn't delete {} after moving it: {error}",
+                original.display()
+            );
         }
     }
-    Ok(())
+}
+
+/// Undoes a move that a crash interrupted before it was recorded: each item found at its new
+/// place and not at its old one was renamed, and is renamed back. An item at both places was
+/// being copied, perhaps not completely, so the copy is left alone; its path is returned.
+pub(super) fn undo_interrupted(items: &[Item]) -> io::Result<Vec<PathBuf>> {
+    let mut copies = Vec::new();
+    for item in items {
+        let at_new = item.to.symlink_metadata().is_ok();
+        let at_old = item.from.symlink_metadata().is_ok();
+        match (at_old, at_new) {
+            (false, true) => {
+                if let Some(parent) = item.from.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::rename(&item.to, &item.from).map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("{} can't go back: {error}", item.to.display()),
+                    )
+                })?;
+            }
+            (true, true) => copies.push(item.to.clone()),
+            (_, false) => {}
+        }
+    }
+    Ok(copies)
 }
 
 fn place(item: &Item, rename: &impl Fn(&Path, &Path) -> io::Result<()>) -> io::Result<Placed> {
@@ -166,7 +206,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (from, to) = (dir.path().join("from"), dir.path().join("to/deeper"));
         tree(&from);
-        move_all(&items(&from, &to)).unwrap();
+        assert!(move_all(&items(&from, &to)).unwrap().is_empty());
         assert_eq!(fs::read(to.join("folder/inner/a.txt")).unwrap(), b"a");
         assert_eq!(fs::read(to.join("b.txt")).unwrap(), b"b");
         assert!(!from.join("folder").exists() && !from.join("b.txt").exists());
@@ -184,11 +224,33 @@ mod tests {
             .unwrap();
         file.set_modified(then).unwrap();
         drop(file);
-        move_all_with(&items(&from, &to), cross_device).unwrap();
+        let originals = move_all_with(&items(&from, &to), cross_device).unwrap();
         assert_eq!(fs::read(to.join("folder/inner/a.txt")).unwrap(), b"a");
         let modified = fs::metadata(to.join("b.txt")).unwrap().modified().unwrap();
         assert_eq!(modified, then);
+        // The originals stay until the move is recorded.
+        assert_eq!(originals, [from.join("folder"), from.join("b.txt")]);
+        assert!(from.join("b.txt").exists());
+        remove_originals(&originals);
         assert!(!from.join("folder").exists() && !from.join("b.txt").exists());
+    }
+
+    #[test]
+    fn an_interrupted_move_is_undone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("from"), dir.path().join("to"));
+        tree(&from);
+        // The crash came after "folder" was renamed and while "b.txt" was being copied.
+        fs::create_dir_all(&to).unwrap();
+        fs::rename(from.join("folder"), to.join("folder")).unwrap();
+        fs::write(to.join("b.txt"), "partial").unwrap();
+        let copies = undo_interrupted(&items(&from, &to)).unwrap();
+        assert_eq!(copies, [to.join("b.txt")]);
+        assert_eq!(fs::read(from.join("folder/inner/a.txt")).unwrap(), b"a");
+        assert_eq!(fs::read(from.join("b.txt")).unwrap(), b"b");
+        assert!(!to.join("folder").exists());
+        // Undoing again changes nothing.
+        assert_eq!(undo_interrupted(&items(&from, &to)).unwrap(), copies);
     }
 
     #[test]

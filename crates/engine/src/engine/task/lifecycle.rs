@@ -27,7 +27,8 @@ impl EngineTask {
 
     /// Starts a transfer: opens its storage if the manifest is known, or starts fetching it.
     /// With `recheck`, every file is hashed, ignoring the saved checkpoint, and the transfer
-    /// runs afterwards only if the queue says it should.
+    /// runs afterwards only if the queue says it should. A share's files are only ever read, so
+    /// a recheck that finds one changed fails it (D-244).
     pub(super) async fn launch(&mut self, id: BundleId, recheck: bool) {
         let generation = self.generation();
         let t = self.transfers.get_mut(&id).expect("launching a transfer");
@@ -37,7 +38,7 @@ impl EngineTask {
                 Ok(transfer) => transfer.session,
                 Err(error) => return self.fail(id, error.to_string()),
             };
-            let mut peers = self.store.peers(&id).unwrap_or_default();
+            let mut peers = load_peers(&self.store, &id);
             peers.extend(link_record(&t.link));
             let destination = Destination::NewFolderIn(t.row.save_folder.clone());
             let started = self
@@ -56,36 +57,21 @@ impl EngineTask {
             .expect("a transfer with a manifest has a content folder");
         let checkpoint = match recheck {
             true => None,
-            false => self
-                .store
-                .checkpoint(&id)
-                .ok()
-                .flatten()
-                .and_then(|bytes| Checkpoint::from_bytes(&bytes).ok()),
+            false => load_checkpoint(&self.store, &id),
         };
         let kind = t.row.kind;
-        t.live = Live::Opening {
-            generation,
-            recheck,
-        };
         let internal = self.internal.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let config = StorageConfig::default();
             let result = match (kind, checkpoint) {
                 (Kind::Share, Some(c)) => Storage::resume_shared(dir, manifest, config, c).await,
-                // A recheck finds what is intact even in a damaged share, which then downloads
-                // the rest.
-                (Kind::Share, None) if !recheck => {
-                    Storage::open_shared(dir, manifest, config).await
-                }
+                (Kind::Share, None) => Storage::open_shared(dir, manifest, config).await,
                 (Kind::Download, Some(c)) => Storage::resume_download(dir, manifest, config, c)
                     .await
                     .map(|(storage, _)| storage),
-                (Kind::Share | Kind::Download, None) => {
-                    Storage::create_download(dir, manifest, config)
-                        .await
-                        .map(|(storage, _)| storage)
-                }
+                (Kind::Download, None) => Storage::create_download(dir, manifest, config)
+                    .await
+                    .map(|(storage, _)| storage),
             };
             let _ = internal
                 .send(Internal::Opened {
@@ -95,6 +81,11 @@ impl EngineTask {
                 })
                 .await;
         });
+        t.live = Live::Opening {
+            generation,
+            recheck,
+            task: task.abort_handle(),
+        };
     }
 
     /// Whether the queue would run a transfer now.
@@ -131,16 +122,22 @@ impl EngineTask {
         }
         t.live = Live::Idle;
         // What storage found may differ from the record, if files changed while stopped.
-        if let Ok(checkpoint) = storage.checkpoint().await {
-            t.row.have = checkpoint.chunks_stored();
-            if t.row.have < t.row.chunks {
-                t.row.completed = None;
-                t.row.done = false;
-            } else {
-                t.row.completed.get_or_insert_with(now_millis);
+        match storage.checkpoint().await {
+            Ok(checkpoint) => {
+                t.row.have = checkpoint.chunks_stored();
+                if t.row.have < t.row.chunks {
+                    t.row.completed = None;
+                    t.row.done = false;
+                } else {
+                    t.row.completed.get_or_insert_with(now_millis);
+                }
+                save_checkpoint(&mut self.store, &id, &checkpoint);
+                save_row(&mut self.store, &mut t.row);
             }
-            let _ = self.store.save_checkpoint(&id, &checkpoint.to_bytes());
-            let _ = self.store.save_transfer(&t.row);
+            Err(error) => {
+                t.row.error = Some(error.to_string());
+                save_row(&mut self.store, &mut t.row);
+            }
         }
         if !self.should_run(id) {
             let _ = storage.close().await;
@@ -153,10 +150,7 @@ impl EngineTask {
         };
         match self.node.share_with(storage, Some(session)).await {
             Ok(handle) => {
-                let peers: Vec<_> = self
-                    .store
-                    .peers(&id)
-                    .unwrap_or_default()
+                let peers: Vec<_> = load_peers(&self.store, &id)
                     .into_iter()
                     .chain(link_record(&t.link))
                     .collect();
@@ -282,21 +276,25 @@ impl EngineTask {
         };
         t.live = Live::Idle;
         t.row.error = Some(reason);
-        let _ = self.store.save_transfer(&t.row);
+        save_row(&mut self.store, &mut t.row);
     }
 
-    /// Asks a running transfer to stop, or forgets a storage still opening.
+    /// Asks a running transfer to stop, or stops a storage still opening.
     pub(super) fn halt(&mut self, id: BundleId) {
         let t = self.transfers.get_mut(&id).expect("halting a transfer");
         t.live = match std::mem::replace(&mut t.live, Live::Idle) {
             Live::Running(run) => {
                 run.stop.send_replace(true);
                 if learn_manifest(&mut t.manifest, &mut t.row, &run.status.borrow()) {
-                    let _ = self.store.save_transfer(&t.row);
+                    save_row(&mut self.store, &mut t.row);
                 }
                 Live::Stopping(run)
             }
-            Live::Opening { .. } | Live::Idle => Live::Idle,
+            Live::Opening { task, .. } => {
+                task.abort();
+                Live::Idle
+            }
+            Live::Idle => Live::Idle,
             unchanged @ (Live::Stopping(_) | Live::Moving { .. }) => unchanged,
         };
     }
@@ -337,7 +335,7 @@ impl EngineTask {
                 t.row.downloaded = run.base_downloaded + summary.downloaded;
                 if let Some(checkpoint) = summary.checkpoint.filter(|_| !t.recheck) {
                     t.row.have = checkpoint.chunks_stored();
-                    let _ = self.store.save_checkpoint(&id, &checkpoint.to_bytes());
+                    save_checkpoint(&mut self.store, &id, &checkpoint);
                 }
                 if summary.complete {
                     t.row.completed.get_or_insert_with(now_millis);
@@ -349,7 +347,7 @@ impl EngineTask {
             }
             Err(error) => t.row.error = Some(error.to_string()),
         }
-        let _ = self.store.save_transfer(&t.row);
+        save_row(&mut self.store, &mut t.row);
         if removed {
             let (reply, _) = oneshot::channel();
             self.remove(id, false, reply);
@@ -373,7 +371,7 @@ impl EngineTask {
                 // Nothing is on disk yet: the download starts again in the new folder.
                 None => {
                     t.row.save_folder = folder;
-                    let _ = self.store.save_transfer(&t.row);
+                    save_row(&mut self.store, &mut t.row);
                 }
             }
         }
@@ -389,7 +387,7 @@ impl EngineTask {
                 let t = self.transfers.get_mut(&id).expect("a running transfer");
                 // Stopped by a rule, not by the user: completed (D-180).
                 t.row.done = true;
-                let _ = self.store.save_transfer(&t.row);
+                save_row(&mut self.store, &mut t.row);
             }
             SharingAction::Remove => {
                 let (reply, _) = oneshot::channel();

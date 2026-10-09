@@ -224,6 +224,8 @@ pub struct Announcer {
     pub state: watch::Receiver<TrackerState>,
     tracker: String,
     listing: watch::Sender<Option<ListingRequest>>,
+    /// Whether an announce is on its way.
+    announcing: watch::Receiver<bool>,
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
@@ -242,6 +244,7 @@ impl Announcer {
         let (state, state_receiver) = watch::channel(TrackerState::default());
         let (stop, stop_receiver) = watch::channel(false);
         let (listing, listing_receiver) = watch::channel(listing);
+        let (announcing, announcing_receiver) = watch::channel(false);
         let task = AnnounceTask {
             client,
             tracker: tracker.clone(),
@@ -253,11 +256,13 @@ impl Announcer {
             home_relay: bundle.home_relay().clone(),
             port_mapping: bundle.port_mapping().clone(),
             state,
+            announcing,
         };
         Self {
             state: state_receiver,
             tracker,
             listing,
+            announcing: announcing_receiver,
             stop,
             task: tokio::spawn(task.run(stop_receiver)),
         }
@@ -276,6 +281,17 @@ impl Announcer {
             *current = listing;
             changed
         });
+    }
+
+    /// Resolves once no announce sent with the listing request this announcer had before
+    /// [`set_listing`](Self::set_listing) can still be on its way: when the announce in
+    /// progress, if any, is done. Call it after setting the new listing.
+    pub fn listing_settled(&self) -> impl Future<Output = ()> + Send + 'static {
+        let mut announcing = self.announcing.clone();
+        async move {
+            // A closed channel means the task has ended, and announces with it.
+            let _ = announcing.wait_for(|announcing| !announcing).await;
+        }
     }
 
     /// Sends `stopped` (unless the tracker never heard `started`) and stops announcing.
@@ -389,6 +405,8 @@ struct AnnounceTask {
     home_relay: HomeRelay,
     port_mapping: PortMapping,
     state: watch::Sender<TrackerState>,
+    /// Set while an announce is on its way, from before it reads the listing request.
+    announcing: watch::Sender<bool>,
 }
 
 impl AnnounceTask {
@@ -449,6 +467,17 @@ impl AnnounceTask {
     /// Sends one announce and delivers the peers it lists. Returns the interval until the next
     /// one, or when to retry if the tracker said.
     async fn announce(
+        &mut self,
+        event: AnnounceEvent,
+        complete: bool,
+    ) -> Result<Duration, Option<Duration>> {
+        self.announcing.send_replace(true);
+        let result = self.send_announce(event, complete).await;
+        self.announcing.send_replace(false);
+        result
+    }
+
+    async fn send_announce(
         &mut self,
         event: AnnounceEvent,
         complete: bool,

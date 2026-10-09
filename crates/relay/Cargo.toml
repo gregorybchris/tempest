@@ -14,6 +14,7 @@ tempest-protocol.workspace = true
 quinn.workspace = true
 socket2.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

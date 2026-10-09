@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
+use tempest_net::storage::find_entry;
 use tempest_net::{
     AnnounceConfig, Announcer, BundleHandle, Checkpoint, Destination, DriverError, Identity,
     Inspector, Lan, Node, SpeedLimits, Storage, StorageConfig, Summary, TrackerClient,
@@ -26,7 +27,7 @@ use super::relocate::{self, Item};
 use super::supervisor::{ListingChange, Supervisor};
 use super::{
     AddOptions, CHECKPOINT_INTERVAL, Command, EVENT_BUFFER, EngineError, GOODBYE_TIMEOUT, Inside,
-    Internal, NewShare, Reply, SettingsView, TICK,
+    Internal, NewShare, Reply, SHUTDOWN_TIMEOUT, SettingsView, TICK, Unpublished,
 };
 use crate::TransferInfo;
 use crate::config::{EngineConfig, SharingAction, SharingLimits};
@@ -41,7 +42,7 @@ mod files;
 mod lifecycle;
 mod settings;
 
-use self::files::bury;
+use self::files::{bury, move_items};
 use self::lifecycle::{learn_manifest, link_record};
 
 /// What the engine task starts with.
@@ -92,6 +93,8 @@ enum Live {
     Opening {
         generation: u64,
         recheck: bool,
+        /// Aborting it stops the opening's work.
+        task: tokio::task::AbortHandle,
     },
     Running(Run),
     Stopping(Run),
@@ -185,6 +188,48 @@ fn checked_path(path: &Path) -> Result<PathBuf, EngineError> {
     }
 }
 
+/// Saves a transfer's record. If the store fails, the error is logged and put on the transfer,
+/// which stops it at the next reschedule: the engine can't keep what it does. Returns whether
+/// it saved.
+fn save_row(store: &mut Store, row: &mut TransferRow) -> bool {
+    match store.save_transfer(row) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::error!("couldn't save transfer {}: {error}", row.id);
+            row.error
+                .get_or_insert_with(|| format!("Couldn't save the transfer's state: {error}"));
+            false
+        }
+    }
+}
+
+/// Saves a transfer's checkpoint. A failure is logged: the transfer would resume from an older
+/// checkpoint, checking again what it has stored since.
+fn save_checkpoint(store: &mut Store, id: &BundleId, checkpoint: &Checkpoint) {
+    if let Err(error) = store.save_checkpoint(id, &checkpoint.to_bytes()) {
+        tracing::warn!("couldn't save the checkpoint of transfer {id}: {error}");
+    }
+}
+
+/// A transfer's saved checkpoint, if there is one that decodes.
+fn load_checkpoint(store: &Store, id: &BundleId) -> Option<Checkpoint> {
+    let bytes = store
+        .checkpoint(id)
+        .inspect_err(|error| tracing::warn!("couldn't read the checkpoint of {id}: {error}"))
+        .ok()??;
+    Checkpoint::from_bytes(&bytes)
+        .inspect_err(|error| tracing::warn!("ignoring the checkpoint of {id}: {error}"))
+        .ok()
+}
+
+/// The peers saved for a transfer.
+fn load_peers(store: &Store, id: &BundleId) -> Vec<PeerRecord> {
+    store
+        .peers(id)
+        .inspect_err(|error| tracing::warn!("couldn't read the peers of {id}: {error}"))
+        .unwrap_or_default()
+}
+
 fn checked_tags(tags: BTreeSet<String>) -> Result<BTreeSet<String>, EngineError> {
     tags.into_iter()
         .map(|tag| {
@@ -265,7 +310,48 @@ impl EngineTask {
                 },
             );
         }
+        for (id, folder) in self.store.moves()? {
+            self.recover_move(id, &folder);
+        }
         Ok(())
+    }
+
+    /// Settles a move a crash interrupted: forgets it if the transfer's record already has the
+    /// new folder, and otherwise undoes it, since the record has the old one.
+    fn recover_move(&mut self, id: BundleId, folder: &Path) {
+        let Some(t) = self.transfers.get_mut(&id) else {
+            return;
+        };
+        if let (Some(manifest), Some(dir)) = (&t.manifest, &t.row.content_dir)
+            && t.row.save_folder != folder
+        {
+            let items = move_items(&t.row, manifest, dir, folder, true);
+            match relocate::undo_interrupted(&items) {
+                Ok(copies) => {
+                    tracing::warn!(
+                        "undid moving transfer {id} to {}, which was interrupted",
+                        folder.display()
+                    );
+                    for copy in copies {
+                        tracing::warn!("left {}, maybe incomplete, in place", copy.display());
+                    }
+                }
+                Err(error) => {
+                    t.row.error = Some(format!(
+                        "Moving the files to {} was interrupted, and they couldn't all be put \
+                         back in {}: {error}",
+                        folder.display(),
+                        dir.display()
+                    ));
+                    // Undoing is tried again at the next start.
+                    save_row(&mut self.store, &mut t.row);
+                    return;
+                }
+            }
+        }
+        if let Err(error) = self.store.end_move(&id) {
+            tracing::error!("couldn't forget transfer {id}'s move: {error}");
+        }
     }
 
     pub async fn run(
@@ -277,9 +363,14 @@ impl EngineTask {
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut commands_open = true;
+        // When shutting down gives up on transfers still stopping.
+        let mut give_up = None;
         loop {
-            if self.shutting_down.is_some() && self.is_idle() {
-                break;
+            if self.shutting_down.is_some() {
+                if self.is_idle() {
+                    break;
+                }
+                give_up.get_or_insert_with(|| Instant::now() + SHUTDOWN_TIMEOUT);
             }
             tokio::select! {
                 command = commands.recv(), if commands_open => match command {
@@ -291,6 +382,12 @@ impl EngineTask {
                 },
                 Some(message) = internal.recv() => self.internal(message).await,
                 _ = tick.tick() => self.tick().await,
+                () = tokio::time::sleep_until(give_up.unwrap_or_else(Instant::now)),
+                    if give_up.is_some() =>
+                {
+                    self.abandon_stopping();
+                    break;
+                }
             }
         }
         let _ = tokio::time::timeout(GOODBYE_TIMEOUT, self.node.shutdown()).await;
@@ -299,6 +396,20 @@ impl EngineTask {
         drop(self);
         for done in waiting.into_iter().flatten() {
             let _ = done.send(());
+        }
+    }
+
+    /// Logs what shutting down leaves unfinished. Each transfer keeps its last saved checkpoint.
+    fn abandon_stopping(&self) {
+        for (id, t) in &self.transfers {
+            if !matches!(t.live, Live::Idle) {
+                tracing::warn!(
+                    "transfer {id} didn't stop within {SHUTDOWN_TIMEOUT:?}; shutting down anyway"
+                );
+            }
+        }
+        for id in self.burials.keys() {
+            tracing::warn!("removed transfer {id} didn't stop within {SHUTDOWN_TIMEOUT:?}");
         }
     }
 
@@ -436,11 +547,16 @@ impl EngineTask {
                 let _ = reply.send(result);
             }
             Command::Unpublish(id, tracker, reply) => {
+                // Answered before the announces settle, which the caller waits for.
                 let result = self.unpublish(id, tracker).await;
                 let _ = reply.send(result);
             }
             Command::Categories(reply) => {
-                let _ = reply.send(self.store.categories().unwrap_or_default());
+                let categories = self.store.categories().unwrap_or_else(|error| {
+                    tracing::error!("couldn't read the categories: {error}");
+                    BTreeMap::new()
+                });
+                let _ = reply.send(categories);
             }
             Command::SetCategoryFolder(name, folder, reply) => {
                 let name = name.trim().to_owned();
@@ -666,16 +782,17 @@ impl EngineTask {
 
     /// Stops listing a transfer on `tracker`: forgotten, and told to its running
     /// bundle's supervisor, which stops announcing there unless the transfer has another reason
-    /// to.
+    /// to. The receivers resolve once no announce asking for the listing can still arrive.
     async fn unpublish(
         &mut self,
         id: BundleId,
         tracker: String,
-    ) -> Result<TransferInfo, EngineError> {
+    ) -> Result<Unpublished, EngineError> {
         let t = self.transfers.get(&id).ok_or(EngineError::NotFound(id))?;
         let same = |url: &String| url.trim_end_matches('/') == tracker.trim_end_matches('/');
         let published: Vec<String> = t.row.publish.iter().filter(|u| same(u)).cloned().collect();
-        if let Live::Running(run) = &t.live {
+        let mut settled = Vec::new();
+        if let Live::Running(run) | Live::Stopping(run) = &t.live {
             let keep = t
                 .link
                 .trackers
@@ -683,19 +800,27 @@ impl EngineTask {
                 .chain(&self.config.trackers)
                 .any(same);
             for tracker in &published {
-                let _ = run.listing.send(ListingChange::Unpublish {
+                let (done, waiting) = oneshot::channel();
+                let change = ListingChange::Unpublish {
                     tracker: tracker.clone(),
                     keep,
-                });
+                    settled: done,
+                };
+                // A supervisor that is gone announces nothing more.
+                if run.listing.send(change).is_ok() {
+                    settled.push(waiting);
+                }
             }
         }
-        self.change(id, |t| {
-            for tracker in &published {
-                t.row.publish.remove(tracker);
-            }
-            Ok(())
-        })
-        .await
+        let info = self
+            .change(id, |t| {
+                for tracker in &published {
+                    t.row.publish.remove(tracker);
+                }
+                Ok(())
+            })
+            .await?;
+        Ok(Unpublished { info, settled })
     }
 
     /// A share's link: the bundle, this peer and its addresses, and its trackers, those it was
@@ -773,9 +898,7 @@ impl EngineTask {
     /// them once complete.
     fn stored_chunks(&self, id: BundleId, row: &TransferRow, manifest: &Manifest) -> RangeList {
         let layout = ChunkLayout::new(manifest);
-        let checkpoint = (self.store.checkpoint(&id).ok().flatten())
-            .and_then(|bytes| Checkpoint::from_bytes(&bytes).ok());
-        match checkpoint {
+        match load_checkpoint(&self.store, &id) {
             Some(checkpoint) => checkpoint.have(&layout),
             None if row.is_complete() && layout.chunk_count() > 0 => {
                 let all = ChunkRange {
@@ -923,8 +1046,10 @@ impl EngineTask {
                 // A recheck has cleared the checkpoint, and will take its own.
                 if current && !t.recheck {
                     t.row.have = checkpoint.chunks_stored();
-                    let _ = self.store.save_checkpoint(&id, &checkpoint.to_bytes());
-                    let _ = self.store.save_transfer(&t.row);
+                    save_checkpoint(&mut self.store, &id, &checkpoint);
+                    if !save_row(&mut self.store, &mut t.row) {
+                        self.reschedule().await;
+                    }
                 }
             }
             Internal::Finished {
@@ -954,14 +1079,14 @@ impl EngineTask {
             };
             let status = run.status.borrow().clone();
             if learn_manifest(&mut t.manifest, &mut t.row, &status) {
-                let _ = self.store.save_transfer(&t.row);
+                queue_changed |= !save_row(&mut self.store, &mut t.row);
             }
             t.row.have = u64::from(status.have);
             t.row.uploaded = run.base_uploaded + status.uploaded;
             t.row.downloaded = run.base_downloaded + status.downloaded;
             if status.complete && t.row.completed.is_none() {
                 t.row.completed = Some(now_millis());
-                let _ = self.store.save_transfer(&t.row);
+                save_row(&mut self.store, &mut t.row);
                 queue_changed = true;
             }
 
@@ -997,9 +1122,7 @@ impl EngineTask {
                 run.last_checkpoint = now;
                 match status.complete {
                     // What a complete bundle holds doesn't change; its time sharing does.
-                    true => {
-                        let _ = self.store.save_transfer(&t.row);
-                    }
+                    true => queue_changed |= !save_row(&mut self.store, &mut t.row),
                     false if t.manifest.is_some() => {
                         let _ = run.checkpoint.try_send(());
                     }

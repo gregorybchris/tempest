@@ -239,6 +239,7 @@ impl Shared {
             Err(reject) => return refuse(&conn, send, reject).await,
         };
         if let Some(old) = admitted.replaced {
+            tracing::info!("{peer} registered again, from {observed}; closing its old connection");
             close(&old, GoodbyeReason::Duplicate, "registered again");
         }
 
@@ -247,8 +248,13 @@ impl Shared {
             relay_address: Address::new(relay_ip, port),
             observed_address: observed.into(),
         };
+        tracing::info!(
+            "registered {peer} from {observed}, lent {}",
+            registered.relay_address
+        );
         let mut forwarder = Forwarder::new(&conn, &admitted.socket, self.config.rate_limit);
         forwarder.run(send, recv, registered).await;
+        tracing::info!("{peer} left");
         self.registry()
             .release(peer, admitted.generation, Instant::now());
     }
@@ -281,6 +287,10 @@ fn admit_opening(
     incoming: quinn::Incoming,
 ) -> Option<(quinn::Incoming, OwnedSemaphorePermit)> {
     let Ok(permit) = slots.clone().try_acquire_owned() else {
+        tracing::debug!(
+            "refused {}: every opening slot is taken",
+            incoming.remote_address()
+        );
         incoming.refuse();
         return None;
     };
@@ -308,6 +318,7 @@ async fn open(incoming: quinn::Incoming) -> Option<(Connection, PeerId, SendStre
         None => None,
     };
     let Some((peer, send, recv)) = opened else {
+        tracing::info!("closed {}: it didn't register", conn.remote_address());
         close(&conn, GoodbyeReason::ProtocolViolation, "");
         return None;
     };
@@ -316,6 +327,12 @@ async fn open(incoming: quinn::Incoming) -> Option<(Connection, PeerId, SendStre
 
 /// Sends RelayReject, waits a moment for it to arrive, and closes the connection.
 async fn refuse(conn: &Connection, mut send: SendStream, reject: RelayReject) {
+    tracing::info!(
+        "refused {}: {:?} {}",
+        conn.remote_address(),
+        reject.reason,
+        reject.message
+    );
     let sent = async {
         write_relay_message(&mut send, &reject.into()).await.ok()?;
         send.finish().ok()?;
@@ -385,6 +402,7 @@ impl<'a> Forwarder<'a> {
                     control_open = false;
                     if !matches!(message, Ok(None)) {
                         if !matches!(message, Err(ReadMessageError::Read(_))) {
+                            tracing::info!("closed {}: it broke the protocol", self.conn.remote_address());
                             close(self.conn, GoodbyeReason::ProtocolViolation, "");
                         }
                         break;

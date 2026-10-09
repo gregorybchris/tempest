@@ -228,7 +228,7 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                 let pending = match pending.await {
                     Ok(pending) => pending,
                     Err(error) => {
-                        eprintln!("cannot read the pending listings: {error}");
+                        tracing::error!("cannot read the pending listings: {error}");
                         continue;
                     }
                 };
@@ -258,7 +258,7 @@ pub(crate) async fn run(tracker: Tracker, config: FetcherConfig) -> io::Result<(
                         tracker.catalog().set_content(&bundle, &content)
                     });
                     if let Err(error) = stored.await {
-                        eprintln!("cannot list {bundle}: {error}");
+                        tracing::error!("cannot list {bundle}: {error}");
                         continue;
                     }
                 }

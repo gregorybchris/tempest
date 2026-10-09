@@ -387,17 +387,17 @@ async fn announce(
                 && match catalog.knows_listing(&bundle) {
                     Ok(known) => known || tracker.limit(Action::Publish, observed).is_ok(),
                     Err(error) => {
-                        eprintln!("cannot list {bundle}: {error}");
+                        tracing::error!("cannot list {bundle}: {error}");
                         false
                     }
                 };
             if publish && let Err(error) = catalog.request_listing(now, &bundle, &peer) {
-                eprintln!("cannot list {bundle}: {error}");
+                tracing::error!("cannot list {bundle}: {error}");
             }
             // Fresh peer IDs could otherwise inflate the counts.
             let downloaded = downloaded && tracker.limit(Action::Download, observed).is_ok();
             if downloaded && let Err(error) = catalog.record_download(now, &bundle) {
-                eprintln!("cannot count a download of {bundle}: {error}");
+                tracing::error!("cannot count a download of {bundle}: {error}");
             }
         })
         .await;

@@ -3,7 +3,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::time::Duration;
 
 use serde_json::json;
 use tempest_core::EventKind;
@@ -320,9 +319,10 @@ async fn a_held_engine_changes_state_but_runs_nothing() {
         .await
         .unwrap();
     let id = added.id;
-    // It wants to run, but waits for an engine that runs transfers.
+    // It wants to run, but waits for an engine that runs transfers, even when asked to start:
+    // starting runs the queue, which a held engine leaves alone.
     assert_eq!(added.status, Status::Queued);
-    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(held.start(id).await.unwrap().status, Status::Queued);
     assert_eq!(held.get(id).await.unwrap().status, Status::Queued);
     held.shutdown().await;
 

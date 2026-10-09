@@ -72,6 +72,12 @@ CREATE TABLE publications (
     PRIMARY KEY (transfer, tracker)
 ) STRICT;
 ",
+    "
+CREATE TABLE moves (
+    transfer BLOB PRIMARY KEY NOT NULL REFERENCES transfers (id) ON DELETE CASCADE,
+    folder TEXT NOT NULL
+) STRICT;
+",
 ];
 
 /// Why the state store failed.
@@ -318,6 +324,55 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Records that a transfer's files are about to move into `folder`, synced to disk before
+    /// it returns, so that a crash during the move is noticed at the next start.
+    pub fn begin_move(&mut self, id: &BundleId, folder: &Path) -> Result<(), StoreError> {
+        self.conn.pragma_update(None, "synchronous", "FULL")?;
+        let saved = self.conn.execute(
+            "INSERT INTO moves (transfer, folder) VALUES (?1, ?2)
+             ON CONFLICT (transfer) DO UPDATE SET folder = excluded.folder",
+            params![id.as_bytes(), path_text(folder)?],
+        );
+        self.conn.pragma_update(None, "synchronous", "NORMAL")?;
+        saved?;
+        Ok(())
+    }
+
+    /// Records a transfer whose files have moved, and forgets the move, in one transaction.
+    pub fn finish_move(&mut self, transfer: &TransferRow) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        save_transfer(&tx, transfer)?;
+        tx.execute(
+            "DELETE FROM moves WHERE transfer = ?1",
+            [transfer.id.as_bytes()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Forgets a transfer's move, which didn't happen or was undone.
+    pub fn end_move(&mut self, id: &BundleId) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM moves WHERE transfer = ?1", [id.as_bytes()])?;
+        Ok(())
+    }
+
+    /// The moves begun and neither finished nor ended: each transfer and the folder its files
+    /// were moving into.
+    pub fn moves(&self) -> Result<Vec<(BundleId, PathBuf)>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT transfer, folder FROM moves ORDER BY transfer")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.map(|row| {
+            let (id, folder) = row?;
+            Ok((bundle_id(&id)?, PathBuf::from(folder)))
+        })
+        .collect()
     }
 
     /// Removes a transfer and everything saved for it.
@@ -659,6 +714,25 @@ mod tests {
         assert_eq!(peers, [peer(5, 3), peer(6, 2)]);
         store.remove_transfer(&transfer.id).unwrap();
         assert!(store.peers(&transfer.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn moves_are_kept_until_finished_or_ended() {
+        let mut store = Store::in_memory().unwrap();
+        let (mut a, b) = (row(1, 0), row(2, 1));
+        store.save_transfer(&a).unwrap();
+        store.save_transfer(&b).unwrap();
+        store.begin_move(&a.id, Path::new("/new")).unwrap();
+        store.begin_move(&b.id, Path::new("/other")).unwrap();
+        assert_eq!(
+            store.moves().unwrap(),
+            [(a.id, "/new".into()), (b.id, "/other".into())]
+        );
+        a.save_folder = "/new".into();
+        store.finish_move(&a).unwrap();
+        store.end_move(&b.id).unwrap();
+        assert!(store.moves().unwrap().is_empty());
+        assert_eq!(store.transfers().unwrap()[0].save_folder, Path::new("/new"));
     }
 
     #[test]

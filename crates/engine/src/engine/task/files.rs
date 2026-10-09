@@ -40,8 +40,11 @@ impl EngineTask {
                 };
                 self.burials.insert(id, burial);
             }
-            // A storage still opening is dropped when it reports back.
-            Live::Idle | Live::Opening { .. } | Live::Moving { .. } => bury(files, reply),
+            Live::Opening { task, .. } => {
+                task.abort();
+                bury(files, reply);
+            }
+            Live::Idle | Live::Moving { .. } => bury(files, reply),
         }
     }
 
@@ -69,35 +72,21 @@ impl EngineTask {
         Ok(self.info(&id).expect("the transfer exists"))
     }
 
-    /// Starts moving an idle transfer's files to `folder`.
+    /// Starts moving an idle transfer's files to `folder`, once the move is recorded so that a
+    /// crash during it can be undone.
     pub(super) fn start_move(&mut self, id: BundleId, folder: PathBuf) {
         let generation = self.generation();
         let t = self.transfers.get_mut(&id).expect("moving a transfer");
         let (Some(manifest), Some(dir)) = (&t.manifest, &t.row.content_dir) else {
             return;
         };
-        let single = single_file_in_place(&t.row, manifest);
-        let new_dir = moved_dir(t.row.kind, manifest, dir, &folder, single);
-        let items: Vec<Item> = match (t.row.kind, single) {
-            // A download's folder holds only its bundle.
-            (Kind::Download, None) => vec![Item {
-                from: dir.clone(),
-                to: new_dir,
-            }],
-            // Otherwise the entries move one by one: the base folder may hold other things.
-            _ => manifest
-                .entries()
-                .iter()
-                .filter_map(|entry| entry.path.split('/').next())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .map(|top| Item {
-                    from: dir.join(top),
-                    to: new_dir.join(top),
-                })
-                .collect(),
-        };
+        let items = move_items(&t.row, manifest, dir, &folder, false);
         if items.iter().all(|item| item.from == item.to) {
+            return;
+        }
+        if let Err(error) = self.store.begin_move(&id, &folder) {
+            tracing::error!("couldn't record moving transfer {id}: {error}");
+            t.row.error = Some(format!("Couldn't move the files: {error}"));
             return;
         }
         t.live = Live::Moving {
@@ -120,7 +109,7 @@ impl EngineTask {
         &mut self,
         id: BundleId,
         generation: u64,
-        result: std::io::Result<()>,
+        result: std::io::Result<Vec<PathBuf>>,
     ) {
         let Some(t) = self.transfers.get_mut(&id) else {
             return;
@@ -141,9 +130,28 @@ impl EngineTask {
         let single = single_file_in_place(&t.row, &manifest);
         let new_dir = moved_dir(t.row.kind, &manifest, &old_dir, &folder, single);
         match result {
-            Ok(()) => {
-                t.row.save_folder = folder;
+            Ok(originals) => {
+                let old_folder = std::mem::replace(&mut t.row.save_folder, folder.clone());
                 t.row.content_dir = Some(new_dir);
+                match self.store.finish_move(&t.row) {
+                    Ok(()) => {
+                        tokio::task::spawn_blocking(move || {
+                            relocate::remove_originals(&originals);
+                        });
+                    }
+                    // The next start finds the move unrecorded and undoes it, so the record
+                    // and the files stay together.
+                    Err(error) => {
+                        tracing::error!("couldn't record moving transfer {id}: {error}");
+                        t.row.save_folder = old_folder;
+                        t.row.content_dir = Some(old_dir);
+                        t.row.error = Some(format!(
+                            "Moved the files to {}, but couldn't record it: {error}. They go \
+                             back when the engine next starts.",
+                            folder.display()
+                        ));
+                    }
+                }
             }
             Err(error) => {
                 t.row.error = Some(format!(
@@ -151,12 +159,56 @@ impl EngineTask {
                     folder.display(),
                     old_dir.display()
                 ));
+                if let Err(error) = self.store.end_move(&id) {
+                    tracing::error!("couldn't forget transfer {id}'s move: {error}");
+                }
+                save_row(&mut self.store, &mut t.row);
             }
         }
-        let _ = self.store.save_transfer(&t.row);
         self.after_stop(id).await;
         self.reschedule().await;
     }
+}
+
+/// What moving a transfer's files from `dir` into `folder` moves. A download's own folder moves
+/// whole; otherwise each top-level entry moves, since the folder may hold other things.
+///
+/// Entries are found under whatever Unicode normal form their names have on disk, and keep it.
+/// With `undoing`, they are looked for at the new place, to put back a move a crash
+/// interrupted.
+pub(super) fn move_items(
+    row: &TransferRow,
+    manifest: &Manifest,
+    dir: &Path,
+    folder: &Path,
+    undoing: bool,
+) -> Vec<Item> {
+    let single = single_file_in_place(row, manifest);
+    let new_dir = moved_dir(row.kind, manifest, dir, folder, single);
+    if let (Kind::Download, None) = (row.kind, single) {
+        return vec![Item {
+            from: dir.to_owned(),
+            to: new_dir,
+        }];
+    }
+    let tops: BTreeSet<&str> = (manifest.entries().iter())
+        .filter_map(|entry| entry.path.split('/').next())
+        .collect();
+    let name = |path: &Path| path.file_name().unwrap_or_default().to_owned();
+    tops.into_iter()
+        .map(|top| match undoing {
+            false => {
+                let from = find_entry(dir, top);
+                let to = new_dir.join(name(&from));
+                Item { from, to }
+            }
+            true => {
+                let to = find_entry(&new_dir, top);
+                let from = dir.join(name(&to));
+                Item { from, to }
+            }
+        })
+        .collect()
 }
 
 /// The file of a transfer that is one file stored directly in its save folder (or shared from
@@ -202,11 +254,7 @@ pub(super) fn bury(files: Option<Files>, reply: Reply<()>) {
 pub(super) fn delete_files(files: &Files) -> Result<(), EngineError> {
     use tempest_protocol::EntryKind;
 
-    let fs_path = |path: &str| -> PathBuf {
-        let mut fs_path = files.dir.clone();
-        fs_path.extend(path.split('/'));
-        fs_path
-    };
+    let fs_path = |path: &str| find_entry(&files.dir, path);
     let io_error = |path: &Path| {
         let path = path.to_owned();
         move |source| EngineError::Io { path, source }

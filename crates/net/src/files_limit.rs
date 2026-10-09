@@ -1,6 +1,6 @@
 //! Raising the process's limit on open files.
 //!
-//! A download keeps every file of its bundle open, and servers keep a descriptor per connection
+//! Running bundles keep some of their files open, and servers keep a descriptor per connection
 //! or lent socket. The default soft limit is low (256 on macOS, 1,024 on most Linux systems),
 //! while the hard limit a process may raise it to is usually far higher.
 

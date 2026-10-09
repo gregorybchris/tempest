@@ -8,6 +8,10 @@ use tempest_protocol::Hash;
 use tempest_protocol::hash::node_hash;
 use tempest_protocol::tree::{TreeNode, padding_hash, tree_height};
 
+/// How many nodes of a level share one allocation. Nodes are stored a page at a time, as they
+/// become known, so a download's tree takes memory only for what it has learned.
+const PAGE: u64 = 1024;
+
 /// The known nodes of one file's chunk tree.
 ///
 /// Only nodes over real chunks are stored. Nodes made entirely of padding are computed by
@@ -15,30 +19,78 @@ use tempest_protocol::tree::{TreeNode, padding_hash, tree_height};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FileTree {
     /// `levels[0]` holds the leaf hashes; each level above holds their parents; the last holds
-    /// the root. `None` is a node not yet known.
-    levels: Vec<Vec<Option<Hash>>>,
+    /// the root.
+    levels: Vec<Level>,
+}
+
+/// One level of a tree: `len` nodes, in pages allocated once one of their nodes is known. A
+/// page is only allocated to store a node, so trees that know the same nodes are equal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Level {
+    len: u64,
+    pages: Vec<Option<Box<[Option<Hash>]>>>,
+}
+
+impl Level {
+    fn new(len: u64) -> Self {
+        Self {
+            len,
+            pages: vec![None; len.div_ceil(PAGE) as usize],
+        }
+    }
+
+    /// The node at `index`: `None` past the level's end, `Some(None)` if not known.
+    fn get(&self, index: u64) -> Option<Option<Hash>> {
+        if index >= self.len {
+            return None;
+        }
+        let page = &self.pages[(index / PAGE) as usize];
+        Some(page.as_ref().and_then(|page| page[(index % PAGE) as usize]))
+    }
+
+    /// The slot for the node at `index`, allocating its page; `None` past the level's end.
+    fn slot(&mut self, index: u64) -> Option<&mut Option<Hash>> {
+        if index >= self.len {
+            return None;
+        }
+        let page = self.pages[(index / PAGE) as usize]
+            .get_or_insert_with(|| vec![None; PAGE as usize].into_boxed_slice());
+        Some(&mut page[(index % PAGE) as usize])
+    }
+
+    /// The known nodes and their indexes, in order.
+    fn known(&self) -> impl Iterator<Item = (u64, Hash)> + '_ {
+        self.pages.iter().enumerate().flat_map(|(p, page)| {
+            let first = p as u64 * PAGE;
+            page.iter()
+                .flat_map(|page| page.iter().enumerate())
+                .filter_map(move |(i, hash)| hash.map(|hash| (first + i as u64, hash)))
+        })
+    }
 }
 
 impl FileTree {
     /// The tree of a file of `chunk_count` chunks, knowing only its root.
     pub fn new(chunk_count: u64, root: Hash) -> Self {
+        let mut tree = Self::empty(chunk_count);
+        tree.set(tree.height(), 0, root);
+        tree
+    }
+
+    /// The tree of a file of `chunk_count` chunks, knowing nothing.
+    fn empty(chunk_count: u64) -> Self {
         let height = tree_height(chunk_count);
-        let mut levels: Vec<Vec<Option<Hash>>> = (0..=height)
-            .map(|level| vec![None; chunk_count.div_ceil(1 << level) as usize])
-            .collect();
-        levels[height as usize][0] = Some(root);
-        Self { levels }
+        Self {
+            levels: (0..=height)
+                .map(|level| Level::new(chunk_count.div_ceil(1 << level)))
+                .collect(),
+        }
     }
 
     /// The whole tree over a file's leaf hashes.
     pub fn from_leaves(leaves: &[Hash]) -> Self {
-        let count = leaves.len() as u64;
-        let height = tree_height(count);
-        let mut tree = Self {
-            levels: (0..=height)
-                .map(|level| vec![None; count.div_ceil(1 << level) as usize])
-                .collect(),
-        };
+        let mut tree = Self::empty(leaves.len() as u64);
+        let height = tree.height();
         tree.insert(
             TreeNode {
                 level: height,
@@ -52,7 +104,7 @@ impl FileTree {
 
     /// The file's root, if known.
     pub fn root(&self) -> Option<Hash> {
-        self.levels.last().expect("levels is never empty")[0]
+        self.get(self.height(), 0)
     }
 
     fn height(&self) -> u32 {
@@ -62,16 +114,13 @@ impl FileTree {
     /// The hash of the node at `level` and `index`, if known. Nodes past the file's last chunk
     /// are padding, and always known.
     fn get(&self, level: u32, index: u64) -> Option<Hash> {
-        let nodes = &self.levels[level as usize];
-        match usize::try_from(index) {
-            Ok(i) if i < nodes.len() => nodes[i],
-            _ => Some(padding_hash(level)),
-        }
+        self.levels[level as usize]
+            .get(index)
+            .unwrap_or(Some(padding_hash(level)))
     }
 
     fn set(&mut self, level: u32, index: u64, hash: Hash) {
-        let nodes = &mut self.levels[level as usize];
-        if let Some(slot) = usize::try_from(index).ok().and_then(|i| nodes.get_mut(i)) {
+        if let Some(slot) = self.levels[level as usize].slot(index) {
             debug_assert!(slot.is_none_or(|known| known == hash), "conflicting hash");
             *slot = Some(hash);
         }
@@ -108,9 +157,7 @@ impl FileTree {
         let mut known = Vec::new();
         for (level, nodes) in self.levels.iter().enumerate() {
             let level = level as u32;
-            for (index, hash) in nodes.iter().enumerate() {
-                let index = index as u64;
-                let Some(hash) = *hash else { continue };
+            for (index, hash) in nodes.known() {
                 let computable = level > 0
                     && self.get(level - 1, 2 * index).is_some()
                     && self.get(level - 1, 2 * index + 1).is_some();
@@ -128,22 +175,26 @@ impl FileTree {
     pub fn from_known(chunk_count: u64, root: Hash, nodes: &[(TreeNode, Hash)]) -> Option<Self> {
         let mut tree = Self::new(chunk_count, root);
         for &(node, hash) in nodes {
-            let slot = tree
-                .levels
-                .get_mut(node.level as usize)?
-                .get_mut(usize::try_from(node.index).ok()?)?;
+            let slot = tree.levels.get_mut(node.level as usize)?.slot(node.index)?;
             if slot.is_some_and(|known| known != hash) {
                 return None;
             }
             *slot = Some(hash);
         }
         for level in 0..tree.height() {
-            for parent in 0..tree.levels[level as usize + 1].len() as u64 {
+            // Only the parent of a known node can be computed.
+            let mut parents: Vec<u64> = tree.levels[level as usize]
+                .known()
+                .map(|(index, _)| index / 2)
+                .collect();
+            parents.dedup();
+            for parent in parents {
                 let left = tree.get(level, 2 * parent);
                 let right = tree.get(level, 2 * parent + 1);
                 if let (Some(left), Some(right)) = (left, right) {
                     let hash = node_hash(&left, &right);
-                    let slot = &mut tree.levels[level as usize + 1][parent as usize];
+                    let slot = (tree.levels[level as usize + 1].slot(parent))
+                        .expect("a node's parent is in the tree");
                     if slot.is_some_and(|known| known != hash) {
                         return None;
                     }
@@ -162,10 +213,7 @@ impl FileTree {
 
     /// The leaf hash of chunk `position`, if known.
     pub fn leaf(&self, position: u64) -> Option<Hash> {
-        self.levels[0]
-            .get(usize::try_from(position).ok()?)
-            .copied()
-            .flatten()
+        self.levels[0].get(position).flatten()
     }
 
     /// The proof for `node`: the sibling of each node on the path from `node` up to (but not
@@ -240,6 +288,29 @@ mod tests {
         // A leaf whose sibling isn't known can't be checked against the root, whatever it is.
         let orphan = [(TreeNode { level: 0, index: 0 }, leaf_hash(b"other"))];
         assert_eq!(FileTree::from_known(4, reference.root(), &orphan), None);
+    }
+
+    #[test]
+    fn a_large_tree_allocates_only_what_it_knows() {
+        // A file of 2^30 chunks (16 TiB): full levels would take tens of gigabytes.
+        let count = 1u64 << 30;
+        let leaves = leaves(2);
+        // The first two leaves, then every sibling on the way up stands for unknown chunks.
+        let proof: Vec<Hash> = (1..30).map(|level| leaf_hash(&[level as u8])).collect();
+        let root = (proof.iter()).fold(node_hash(&leaves[0], &leaves[1]), |node, sibling| {
+            node_hash(&node, sibling)
+        });
+        let mut tree = FileTree::new(count, root);
+        let pages = |tree: &FileTree| -> usize {
+            (tree.levels.iter())
+                .map(|level| level.pages.iter().flatten().count())
+                .sum()
+        };
+        assert_eq!(pages(&tree), 1, "only the root's page");
+        tree.insert(TreeNode { level: 1, index: 0 }, &leaves, &proof);
+        assert_eq!(tree.leaf(1), Some(leaves[1]));
+        // A page per level for the inserted leaves, their ancestors and the proof's siblings.
+        assert!(pages(&tree) <= 31, "{} pages", pages(&tree));
     }
 
     proptest! {

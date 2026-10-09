@@ -224,6 +224,39 @@ async fn a_new_folder_is_made_for_the_bundle_and_never_reused() {
     .await;
 }
 
+#[tokio::test]
+async fn a_manifest_over_the_size_limit_stops_the_download() {
+    within(async {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let manifest = sample_bundle(source.path());
+        let seeder = start_node(config());
+        let (_seeding, _) = share(&seeder, source.path(), &manifest).await;
+        let mut small = config();
+        small.storage.max_bundle_size = manifest.total_size() - 1;
+        let leecher = start_node(small);
+        let parent = target.path().join("downloads");
+        let downloading = leecher
+            .download(
+                manifest.bundle_id(),
+                Destination::NewFolderIn(parent.clone()),
+                vec![record(seeder.endpoint())],
+            )
+            .await
+            .unwrap();
+        let error = downloading.finished().await.unwrap_err();
+        assert!(
+            matches!(error, DriverError::Storage(StorageError::TooLarge { size, .. })
+                if size == manifest.total_size()),
+            "{error:?}"
+        );
+        assert!(!parent.exists(), "nothing was laid out");
+        leecher.shutdown().await;
+        seeder.shutdown().await;
+    })
+    .await;
+}
+
 /// A bundle of one file goes straight into the directory, and a file already there stops it.
 #[tokio::test]
 async fn a_single_file_lands_in_the_directory_and_never_replaces_one() {

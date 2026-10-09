@@ -213,9 +213,13 @@ async fn unpublishing_through_the_api_unpublishes_the_listing() {
         matches!(result, Err(TrackerError::Refused { status: 404, .. }))
     };
     assert!(gone(browse.listing(&tracker, None, &id).await));
-    // Past a few announce intervals, it stays unpublished.
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert!(gone(browse.listing(&tracker, None, &id).await));
+    // Unpublishing returned once no announce asking for the listing could still arrive, so it
+    // stays unpublished over the next few announce intervals and fetcher scans.
+    let watch_until = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < watch_until {
+        assert!(gone(browse.listing(&tracker, None, &id).await));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Withdrawing again changes nothing; an unknown transfer is refused.
     api.unpublish(id, &tracker).await.unwrap();

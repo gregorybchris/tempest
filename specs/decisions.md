@@ -2880,7 +2880,7 @@ D-224 removes the lingering from `cooperative` and `background`: profiles no lon
 **Decision:**
 
 - `sharing.ratio`, `sharing.time` and `sharing.action` (`stop` or `remove`, keeping files) are defaults in the config, and a transfer can override each. A complete running transfer that reaches either limit stops, showing "completed", or is removed. Time spent sharing is kept in the state database.
-- Recheck forgets the transfer's saved checkpoint, stops it if running, and opens its storage as a fresh download would, hashing every file ("checking"). The chunks found are saved, and it runs again if the queue says so, fetching the rest. A file whose root doesn't match is fetched again whole: the manifest gives only each file's root (D-013), so a damaged chunk can't be told from its neighbours without proofs from peers. A share rechecked this way can repair itself from the swarm.
+- Recheck forgets the transfer's saved checkpoint, stops it if running, and opens its storage as a fresh download would, hashing every file ("checking"). The chunks found are saved, and it runs again if the queue says so, fetching the rest. A file whose root doesn't match is fetched again whole: the manifest gives only each file's root (D-013), so a damaged chunk can't be told from its neighbours without proofs from peers. A share rechecked this way can repair itself from the swarm. D-244 reverses this last point: a share's files are only read.
 - Move storage stops the transfer, moves a download's bundle folder, or a share's top-level entries, into the new folder ("moving"), and runs it again. Each item is renamed; across file systems it is copied with its modification time, and originals are deleted only once everything is in place. Nothing is moved onto something that exists. On failure everything is put back and the transfer shows an error saying where the files are. A download without its manifest just changes folder.
 - `notifications.command` is a program and its arguments, run without a shell when a transfer completes during a run or newly fails. `TEMPEST_EVENT`, `TEMPEST_ID`, `TEMPEST_NAME`, `TEMPEST_KIND`, `TEMPEST_SAVE_FOLDER`, `TEMPEST_LINK`, and when known `TEMPEST_SIZE`, `TEMPEST_CONTENT_DIR` and `TEMPEST_ERROR` describe the transfer.
 
@@ -3932,3 +3932,60 @@ This revises D-175, D-182 and D-189.
 
 - The workspace's unit tests run in about 4 s.
 - `cargo nextest run` no longer runs integration tests; specs/development.md says when to add `--profile full`.
+
+---
+
+## D-242: Storage limits: bundle size, disk space, open files and failed syncs
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A manifest can declare up to 64 TiB, and a download allocated its chunk trees in full when its storage opened, about 66 bytes per chunk. A link to a bundle declaring a huge file aborted the engine, and again at every start, as the transfer resumed. Every file of a running bundle stayed open, so a bundle of 100,000 files ran out of file descriptors. A failed sync was retried, and the retry, which succeeds once the kernel has dropped the failed pages, was trusted.
+
+**Decision:**
+
+- **Trees grow as they learn.** A file's chunk tree is allocated in pages of 1,024 nodes, each when one of its nodes becomes known.
+- **A size limit.** Storage refuses a bundle over 1 TiB (`StorageConfig::max_bundle_size`), as a transfer error, before allocating anything. The bundle task checks a fetched manifest's size before its session takes the manifest, since the session's per-chunk state is large too. A stored transfer over the limit fails when it starts, rather than crashing the engine.
+- **Disk space.** A download is laid out only if its folder's file system has room for the bytes it doesn't hold yet: the files' sizes less what is already on disk, or less the chunks its checkpoint records when resuming. Otherwise the transfer fails with the space needed and free. Space isn't reserved, so downloads started together can still run out.
+- **Open files.** A bundle keeps at most 64 files open (`StorageConfig::open_files`), opening them as they are used and closing the least recently used one no read or write holds. A file written since its last sync is synced before its handle closes. A file reopened must be the same file (device and inode, on Unix), or storage refuses it.
+- **A failed sync is final.** Once a sync fails, every later write, sync and checkpoint of that storage fails with that error, so the transfer stops and its last checkpoint, which only records synced chunks, is what it resumes from.
+
+**Rationale:** 1 TiB covers real bundles while keeping a download's memory in the low gigabytes; the limit can be raised once per-chunk state shrinks. Checking free space up front turns a disk filling up mid-download into an error the user sees before anything is written. Syncing a handle before it closes keeps a write's failure from going unreported, and treating a failed sync as final is how databases learned to handle Linux dropping dirty pages after an I/O error.
+
+---
+
+## D-243: Logging with tracing
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** The architecture left logging conventions open. Libraries reported trouble with `eprintln!`, or not at all: the tracker printed failed catalog writes, the relay logged nothing, and the engine dropped failed state saves. The binaries' own stderr lines, such as `tracker listening on …`, are their interface, and tests read them.
+
+**Options:** `eprintln!` in libraries; the `log` facade; `tracing` (chosen).
+
+**Decision:**
+
+- Libraries (`net`, `engine`, `tracker`, `relay`) emit events with `tracing`, never print. `error` is something an operator or user must act on, such as the state database failing; `warn` is something that went wrong and was handled; `info` is a server's routine events, such as a relay registration; `debug` is detail, such as a connection refused at a limit.
+- Each binary prints events to stderr with `tracing-subscriber`, filtered by `RUST_LOG` (`EnvFilter` syntax). Without it, `tempest-tracker` and `tempest-relay` show `info` and above, `tempest` and `tempest-sim` `warn` and above, except quinn-udp's warnings about packets the network refused, which are routine. Colors only on a terminal.
+- `tempest tui` installs no subscriber, since the terminal UI owns the terminal; transfer errors reach it through the API.
+- What a command prints for its user stays plain `eprintln!`/`println!` in the binaries, unchanged.
+
+**Rationale:** `tracing` is what tokio, quinn and hyper already use, so their events can be switched on with the same filter, and its spans fit async tasks. Leaving user-facing lines alone keeps the binaries' output stable for people and tests.
+
+---
+
+## D-244: The engine keeps the user's files and its record consistent
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** A review before launch found ways the engine could change files it shouldn't, or lose track of them. A share's recheck laid out storage as a download does (D-184), resizing the user's edited originals and writing over them. A crash while moving a transfer left the database naming the old folder. A failed save to the state database was ignored. Shutting down waited for every transfer to stop, without a bound, and a halted transfer's opening went on hashing. A share whose file names a file system stored in decomposed Unicode (NFD) failed to open on Linux, since manifests hold names in NFC. Unpublishing deleted the listing before announces stopped asking for it, so one on its way could list it again.
+
+**Decision:**
+
+- **A share's files are only read.** A recheck of a share hashes every file, as opening it without a checkpoint does, and a file that changed fails the transfer with "has changed since the bundle was made". Nothing repairs it from the swarm; sharing the edited files means making a new bundle.
+- **Moves are recorded before they start.** The engine saves the destination, synced, then moves the files, then saves the new folder and forgets the move in one transaction. Originals copied across file systems are deleted only after that. At start, a move still recorded is undone: what was renamed is renamed back, and a copy beside its original, perhaps incomplete, is left and logged. If the record already names the new folder, the move is only forgotten.
+- **Failed state saves stop the transfer.** If saving a transfer's record fails, the error is logged and becomes the transfer's error, which stops it: the engine can't keep what it does, and the user sees why. A failed checkpoint save is only logged, since the transfer resumes from an older one, checking the rest.
+- **Shutting down is bounded.** The engine waits up to 10 seconds for transfers to stop and save where they got to, then logs those still stopping and shuts down anyway. Each keeps its last saved checkpoint.
+- **Halting an opening stops it.** Stopping, moving, removing or rechecking a transfer whose storage is still opening cancels the opening, which stops hashing within a batch.
+- **Names in either form.** Storage looks a shared file's name up as the manifest has it, then among its directory's names by their NFC form (`tempest_net::storage::find_entry`). Moving and deleting a share's files do the same.
+- **Unpublishing stops asking first.** The engine first stops announcing the listing request, waits until no announce carrying it can still arrive, and only then removes the listing.
+
+**Rationale:** A seeder that writes to the user's originals can destroy work the user did after sharing, which no transfer is worth. Recording a move before and after it gives a restart one way to read the disk. A database that can't be written makes everything after it unrecoverable at the next start, so stopping and saying so beats carrying on silently.

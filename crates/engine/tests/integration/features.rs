@@ -10,12 +10,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use tempest_engine::store::{Kind, Store, TransferRow};
 use tempest_engine::{
     AddOptions, Engine, EngineError, EngineEvent, ShareOptions, Status, Subscription, TransferInfo,
 };
 use tempest_net::{Identity, RelayStatus};
 use tempest_protocol::relay::RelayHost;
-use tempest_protocol::{Link, RelayIdentity};
+use tempest_protocol::wire::Encode;
+use tempest_protocol::{Entry, FileInfo, Hash, Link, Manifest, RelayIdentity};
 use tempest_relay::{Relay, RelayConfig};
 
 use common::{config, contents, wait_for};
@@ -169,6 +171,139 @@ async fn a_recheck_finds_damage_and_downloads_it_again() {
 
     a.shutdown().await;
     b.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_share_recheck_never_changes_its_files() {
+    let root = tempfile::tempdir().unwrap();
+    let (source, _) = album(root.path());
+    let a = Engine::open(config(&root.path().join("a"))).await.unwrap();
+    let share = a.add_path(&source, ShareOptions::default()).await.unwrap();
+    wait_for(&a, share.id, "sharing", |t| t.status == Status::Sharing).await;
+
+    // The user edits both files: one keeps its size, the other shrinks.
+    let edited = contents(MIB + 12_345, 9);
+    fs::write(source.join("one.bin"), &edited).unwrap();
+    fs::write(source.join("two.bin"), b"short").unwrap();
+    a.recheck(share.id).await.unwrap();
+    let failed = wait_for(&a, share.id, "failed", |t| {
+        matches!(t.status, Status::Errored { .. })
+    })
+    .await;
+    let Status::Errored { reason } = &failed.status else {
+        unreachable!()
+    };
+    assert!(reason.contains("has changed"), "{reason}");
+    assert!(fs::read(source.join("one.bin")).unwrap() == edited);
+    assert_eq!(fs::read(source.join("two.bin")).unwrap(), b"short");
+    a.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn names_in_either_unicode_form_are_shared() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("accents");
+    fs::create_dir_all(&source).unwrap();
+    // "é" decomposed, as macOS's older file systems store names. Manifests hold them composed.
+    let data = contents(MIB, 3);
+    fs::write(source.join("e\u{301}.bin"), &data).unwrap();
+    fs::write(source.join("plain.bin"), b"plain").unwrap();
+    let a = Engine::open(config(&root.path().join("a"))).await.unwrap();
+    let b_dir = root.path().join("b");
+    let b = Engine::open(config(&b_dir)).await.unwrap();
+    share_and_download(&a, &b, &source).await;
+    assert!(fs::read(b_dir.join("downloads/accents/\u{e9}.bin")).unwrap() == data);
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_a_crash_interrupted_is_undone_at_the_next_start() {
+    let root = tempfile::tempdir().unwrap();
+    let (source, files) = album(root.path());
+    let a_dir = root.path().join("a");
+    let a = Engine::open(config(&a_dir)).await.unwrap();
+    let share = a.add_path(&source, ShareOptions::default()).await.unwrap();
+    let id = share.id;
+    wait_for(&a, id, "sharing", |t| t.status == Status::Sharing).await;
+    a.shutdown().await;
+
+    // A crash in the middle of moving the share: the move was recorded and one file renamed,
+    // and the record still names the old folder.
+    let dir = share.content_dir.unwrap();
+    let elsewhere = root.path().join("elsewhere");
+    let mut store = Store::open(&a_dir.join("data/state.db")).unwrap();
+    store.begin_move(&id, &elsewhere).unwrap();
+    drop(store);
+    fs::create_dir_all(elsewhere.join("album")).unwrap();
+    fs::rename(dir.join("one.bin"), elsewhere.join("album/one.bin")).unwrap();
+
+    let a = Engine::open(config(&a_dir)).await.unwrap();
+    let back = wait_for(&a, id, "sharing", |t| t.status == Status::Sharing).await;
+    assert_eq!(back.content_dir, Some(dir.clone()));
+    assert_files(&dir, &files);
+    assert!(!elsewhere.join("album/one.bin").exists());
+    a.shutdown().await;
+    let store = Store::open(&a_dir.join("data/state.db")).unwrap();
+    assert!(store.moves().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_transfer_too_large_to_store_fails_when_it_starts() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("a");
+    fs::create_dir_all(dir.join("data")).unwrap();
+    // A manifest may declare up to 64 TiB, far over what the engine stores.
+    let info = FileInfo {
+        size: u64::from(u32::MAX) * 16_384,
+        root: Hash::new([1; 32]),
+        executable: false,
+        modified: 0,
+    };
+    let manifest = Manifest::new("huge", "", 0, "", vec![Entry::file("huge", info)]).unwrap();
+    let id = manifest.bundle_id();
+    let downloads = dir.join("downloads");
+    let row = TransferRow {
+        id,
+        kind: Kind::Download,
+        link: Link::new(id).to_string(),
+        manifest: Some(manifest.to_bytes()),
+        name: None,
+        save_folder: downloads.clone(),
+        content_dir: Some(downloads.clone()),
+        wanted: true,
+        forced: false,
+        done: false,
+        error: None,
+        added: 0,
+        completed: None,
+        queue_position: 0,
+        tags: Default::default(),
+        category: None,
+        settings: BTreeMap::new(),
+        uploaded: 0,
+        downloaded: 0,
+        have: 0,
+        chunks: u64::from(u32::MAX),
+        seeding_time: 0,
+        publish: Default::default(),
+    };
+    Store::open(&dir.join("data/state.db"))
+        .unwrap()
+        .save_transfer(&row)
+        .unwrap();
+
+    let engine = Engine::open(config(&dir)).await.unwrap();
+    let failed = wait_for(&engine, id, "failed", |t| {
+        matches!(t.status, Status::Errored { .. })
+    })
+    .await;
+    let Status::Errored { reason } = &failed.status else {
+        unreachable!()
+    };
+    assert!(reason.contains("more than"), "{reason}");
+    assert!(!downloads.join("huge").exists());
+    engine.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

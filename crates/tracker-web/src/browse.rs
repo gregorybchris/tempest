@@ -113,7 +113,7 @@ pub fn BrowsePage() -> impl IntoView {
                         node_ref=ctx.search
                         class="bigsearch__input"
                         type="search"
-                        placeholder="search datasets, models, software…"
+                        placeholder="search bundles…"
                         aria-label="Search listings"
                         spellcheck="false"
                         autocomplete="off"

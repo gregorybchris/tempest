@@ -171,6 +171,22 @@ impl Relay {
     /// Serves until `shutdown` completes, then closes every relay connection.
     pub async fn serve(&self, shutdown: impl Future<Output = ()>) {
         let mut shutdown = std::pin::pin!(shutdown);
+        tracing::info!(
+            "relay {} serving on {:?}: lent ports {:?}, rate limit {:?} bytes/s, public IP {:?}, \
+             max {} peers ({} per IP), allowlist {}",
+            self.key,
+            self.endpoint.local_addr(),
+            self.shared.config.ports,
+            self.shared.config.rate_limit,
+            self.shared.config.public_ip,
+            self.shared.config.max_registrations,
+            self.shared.config.max_per_ip,
+            self.shared
+                .config
+                .allowlist
+                .as_ref()
+                .map_or(0, std::collections::HashSet::len)
+        );
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
         let opening = Arc::new(Semaphore::new(MAX_OPENING));
         loop {
@@ -187,6 +203,10 @@ impl Relay {
                 () = &mut shutdown => break,
             }
         }
+        tracing::info!(
+            "relay shutting down; {} peers registered",
+            self.registrations()
+        );
         self.endpoint
             .close(VarInt::from_u32(GoodbyeReason::ShuttingDown as u32), &[]);
         let _ = timeout(DRAIN_TIMEOUT, self.endpoint.wait_idle()).await;
@@ -205,9 +225,13 @@ impl Shared {
         let opened = timeout(REGISTER_TIMEOUT, open(incoming)).await;
         drop(permit);
         let Ok(Some((conn, peer, send, recv))) = opened else {
+            if opened.is_err() {
+                tracing::debug!("a connection didn't register within {REGISTER_TIMEOUT:?}");
+            }
             return;
         };
         let Some(relay_ip) = self.config.public_ip.or_else(|| conn.local_ip()) else {
+            tracing::warn!("cannot register {peer}: the relay doesn't know its public address");
             let reject = RelayReject {
                 reason: RelayRejectReason::Full,
                 message: "the relay doesn't know its public address".into(),
@@ -223,7 +247,8 @@ impl Shared {
             Ok(false) => None,
             Ok(true) => match self.lend_socket().await {
                 Ok(socket) => Some(socket),
-                Err(_) => {
+                Err(error) => {
+                    tracing::warn!("cannot lend {peer} a port: {error}");
                     let reject = RelayReject {
                         reason: RelayRejectReason::Full,
                         message: "the relay has no port to lend".into(),
@@ -295,6 +320,10 @@ fn admit_opening(
         return None;
     };
     if slots.available_permits() < MAX_OPENING / 2 && !incoming.remote_address_validated() {
+        tracing::debug!(
+            "asked {} to retry: address unproven and the opening slots are over half full",
+            incoming.remote_address()
+        );
         // Fails only if the address is validated, which was just checked.
         let _ = incoming.retry();
         return None;
@@ -305,7 +334,11 @@ fn admit_opening(
 /// Completes the handshake and reads Register from the control stream. Closes the connection
 /// if the peer breaks a rule; returns `None` if it failed.
 async fn open(incoming: quinn::Incoming) -> Option<(Connection, PeerId, SendStream, RecvStream)> {
-    let conn = incoming.await.ok()?;
+    let remote = incoming.remote_address();
+    let conn = incoming
+        .await
+        .inspect_err(|error| tracing::debug!("handshake with {remote} failed: {error}"))
+        .ok()?;
     let peer = tls::peer_id(&conn).filter(|_| tls::alpn(&conn).as_deref() == Some(RELAY_ALPN));
     let opened = match peer {
         Some(peer) => {
@@ -418,6 +451,7 @@ impl<'a> Forwarder<'a> {
         let now = Instant::now();
         self.permissions.grant(from, now);
         if self.inbound.take(packet.len() as u64, now).is_some() {
+            tracing::trace!("dropped a packet from {from}: over the rate limit");
             return true;
         }
         let datagram = RelayDatagram::Forwarded { from, packet }.encode();
@@ -435,8 +469,12 @@ impl<'a> Forwarder<'a> {
             return;
         };
         let now = Instant::now();
-        if !self.permissions.send(to, now) || self.outbound.take(packet.len() as u64, now).is_some()
-        {
+        if !self.permissions.send(to, now) {
+            tracing::trace!("dropped a packet to {to}: no permission");
+            return;
+        }
+        if self.outbound.take(packet.len() as u64, now).is_some() {
+            tracing::trace!("dropped a packet to {to}: over the rate limit");
             return;
         }
         if let Some(to) = destination(to, self.socket) {

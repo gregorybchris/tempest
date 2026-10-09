@@ -463,6 +463,14 @@ mod tests {
 
     use super::*;
 
+    /// A bootstrap small enough for unoptimized tests, which run it many times.
+    fn quick() -> Bootstrap {
+        Bootstrap {
+            resamples: 500,
+            ..Bootstrap::default()
+        }
+    }
+
     fn by_seed(values: &[f64]) -> BTreeMap<u64, f64> {
         (1..).zip(values.iter().copied()).collect()
     }
@@ -477,7 +485,7 @@ mod tests {
 
     #[test]
     fn intervals_are_deterministic_and_narrow_with_more_samples() {
-        let bootstrap = Bootstrap::default();
+        let bootstrap = quick();
         let few: Vec<f64> = (0..10).map(|i| 100.0 + f64::from(i % 7) * 3.0).collect();
         let many: Vec<f64> = (0..200).map(|i| 100.0 + f64::from(i % 7) * 3.0).collect();
         let a = bootstrap.median(&few).unwrap();
@@ -493,7 +501,7 @@ mod tests {
 
     #[test]
     fn a_consistent_shift_is_meaningful_and_has_a_direction() {
-        let bootstrap = Bootstrap::default();
+        let bootstrap = quick();
         let reference: Vec<f64> = (0..20).map(|i| 100.0 + f64::from(i) * 5.0).collect();
         let faster: Vec<f64> = reference
             .iter()
@@ -518,7 +526,7 @@ mod tests {
 
     #[test]
     fn small_or_rare_effects_are_not_meaningful() {
-        let bootstrap = Bootstrap::default();
+        let bootstrap = quick();
         let rule = Meaningful::default();
         let reference: Vec<f64> = (0..20).map(|i| 100.0 + f64::from(i)).collect();
         // Consistent, but only 1%.
@@ -549,7 +557,7 @@ mod tests {
     fn only_seeds_both_variants_have_are_paired() {
         let reference = by_seed(&[10.0, 20.0, 30.0]);
         let other: BTreeMap<u64, f64> = [(2, 25.0), (3, 35.0), (4, 1000.0)].into();
-        let d = Bootstrap::default()
+        let d = quick()
             .compare(&reference, &other, Meaningful::default())
             .unwrap();
         assert_eq!(d.estimate.n, 2);
@@ -557,7 +565,7 @@ mod tests {
         assert_eq!(d.relative, Some(0.2));
         let none: BTreeMap<u64, f64> = [(9, 1.0)].into();
         assert_eq!(
-            Bootstrap::default().compare(&reference, &none, Meaningful::default()),
+            quick().compare(&reference, &none, Meaningful::default()),
             None
         );
     }
@@ -572,12 +580,7 @@ mod tests {
             name: "b".into(),
             values: [(Metric::CompletionP50, by_seed(&[80.0; 6]))].into(),
         };
-        let rows = compare(
-            &[reference, other],
-            0,
-            Bootstrap::default(),
-            Meaningful::default(),
-        );
+        let rows = compare(&[reference, other], 0, quick(), Meaningful::default());
         let text = table(&rows, 0.95);
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].contains("95% CI"), "{text}");
@@ -601,7 +604,7 @@ mod tests {
             values in prop::collection::vec(0.0..1e4f64, 1..40),
             seed in any::<u64>(),
         ) {
-            let bootstrap = Bootstrap { resamples: 2_000, seed, ..Bootstrap::default() };
+            let bootstrap = Bootstrap { seed, ..quick() };
             let e = bootstrap.median(&values).unwrap();
             prop_assert!(e.interval.contains(e.median), "{:?}", e);
             let min = values.iter().copied().fold(f64::INFINITY, f64::min);
@@ -614,7 +617,7 @@ mod tests {
             values in prop::collection::vec(0.0..1e4f64, 1..40),
         ) {
             let values = by_seed(&values);
-            let d = Bootstrap::default()
+            let d = quick()
                 .compare(&values, &values, Meaningful::default())
                 .unwrap();
             prop_assert_ne!(d.verdict, Verdict::Meaningful);
@@ -633,7 +636,7 @@ mod tests {
                 .zip(&noise)
                 .map(|((&seed, &r), n)| (seed, r * (1.0 + shift) + n))
                 .collect();
-            let d = Bootstrap::default()
+            let d = quick()
                 .compare(&reference, &shifted, Meaningful::default())
                 .unwrap();
             prop_assert_eq!(d.verdict, Verdict::Meaningful);

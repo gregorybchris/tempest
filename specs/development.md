@@ -12,7 +12,7 @@ The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development b
 
 ## Iterating
 
-- **Test the crate you're changing.** Use `cargo nextest run -p <crate>` while iterating. Run the whole workspace once, before committing.
+- **Run unit tests while iterating, integration tests once.** `cargo nextest run -p <crate>` runs the unit tests of the crate you're changing; run them after every change. Run integration tests (`--profile full`) once before committing a change to behavior. See Tests.
 - **Don't wait on CI.** Commit, push and keep working. Check the result once at the end of a task, rather than polling a run until it finishes.
 - **Keep local fuzzing short.** 10–20 seconds per target is enough to catch regressions while iterating. CI and occasional dedicated runs go longer.
 - **Iterate on small simulations.** Use few seeds and small scenarios while developing. Run the golden baselines once per milestone, or when a change could affect speed.
@@ -22,6 +22,16 @@ The simulator (`tempest-sim`, D-214) stores results in DuckDB. Its development b
 - **Don't run `cargo clean` mid-task.** It forces a full rebuild, which takes minutes. Prune stale artifacts instead (see below).
 
 ## Tests
+
+Tests come in three tiers (D-241), set up in `.config/nextest.toml`:
+
+| Tier | What | Command | When |
+|---|---|---|---|
+| Unit | Tests inside each crate's source | `cargo nextest run` | After every change; must take seconds |
+| Full | Unit and integration tests | `cargo nextest run --profile full` | Before committing a change to behavior; CI |
+| Slow | `#[ignore]` tests | `--run-ignored only` with a filter | CI, or when changing what they cover |
+
+A unit test that takes more than a fraction of a second belongs in a higher tier, or should do less work: unoptimized builds are slow, so property tests and simulations keep their sizes small.
 
 Each crate's integration tests are one test binary, `tests/integration/main.rs`, with a module per topic (D-235). Cargo links every file directly in `tests/` into its own executable, which costs link time and disk; this links once. Shared helpers are a sibling `common` module.
 

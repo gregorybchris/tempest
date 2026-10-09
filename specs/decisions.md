@@ -3862,3 +3862,18 @@ This revises D-175, D-182 and D-189.
 - The web UI's folder row has an open button, labelled "Show in Finder" on macOS, "Show in Explorer" on Windows and "Open folder" elsewhere by the browser's platform (a browser that can use the button is on the engine's machine), and a "Copy path" button that works in any mode. In remote mode the open button is disabled with a tooltip that says why. The key is `o`, as in the TUI.
 
 **Rationale:** The engine is the only process that can open a window on its own machine, and the local-only rule keeps a remote client from opening windows on someone else's screen.
+
+## D-241: Tests run in tiers, and the default is unit tests
+
+**Date:** 2026-10-08 · **Status:** Decided
+
+**Context:** Coding agents spent about a fifth of their time running tests, mostly integration tests after small changes. Unit tests took 15 s, almost all of it in five simulator property tests running 10,000-resample bootstraps unoptimized. Integration tests took about 100 s.
+
+**Options:** run everything every time; separate tiers by convention only; make the fast tier the default (chosen).
+
+**Decision:** Plain `cargo nextest run` runs only unit tests (library and binary targets). The `full` profile adds integration tests and is what CI and pre-commit runs use. Ignored tests stay the slow tier. The simulator's statistics tests use a 500-resample bootstrap, which tests the same properties.
+
+**Consequences:**
+
+- The workspace's unit tests run in about 4 s.
+- `cargo nextest run` no longer runs integration tests; specs/development.md says when to add `--profile full`.

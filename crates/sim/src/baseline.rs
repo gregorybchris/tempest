@@ -563,7 +563,7 @@ mod tests {
 
     fn paired() -> Method {
         Method::Paired(Bootstrap {
-            resamples: 2_000,
+            resamples: 500,
             ..Bootstrap::default()
         })
     }

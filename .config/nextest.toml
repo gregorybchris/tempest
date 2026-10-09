@@ -1,0 +1,8 @@
+# Test tiers (specs/development.md). The default runs only unit tests, the ones inside each
+# crate's source, so it stays fast enough to run after every change.
+[profile.default]
+default-filter = "kind(lib) | kind(bin) | kind(proc-macro)"
+
+# Unit and integration tests: before committing, and in CI.
+[profile.full]
+default-filter = "all()"

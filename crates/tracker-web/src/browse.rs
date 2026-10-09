@@ -36,7 +36,7 @@ pub fn BrowsePage() -> impl IntoView {
         move |typed: String| debounce(move || edit(&|q| q.q = typed.clone())),
     );
     let sort = synced(Memo::new(move |_| query.with(|q| q.sort)), move |chosen| {
-        edit(&|q| q.sort = chosen);
+        edit(&|q| q.sort = chosen)
     });
     let (page, loading) =
         fetch::<ListingPage>(move || format!("listings?{}", query.get().to_query()));
@@ -300,7 +300,7 @@ fn ActiveFilters(query: Memo<ListingQuery>) -> impl IntoView {
                         label=format!("#{tag}")
                         on_remove=move || {
                             let gone = gone.clone();
-                            edit(Box::new(move |q| q.tags.retain(|t| *t != gone)));
+                            edit(Box::new(move |q| q.tags.retain(|t| *t != gone)))
                         }
                     />
                 }

@@ -30,7 +30,7 @@ async fn chunk_map_updates_1536_cells_within_a_frame() {
     let cells = RwSignal::new(vec![missing; CELLS]);
     let host: web_sys::HtmlElement = document().create_element("div").unwrap().unchecked_into();
     document().body().unwrap().append_child(&host).unwrap();
-    let _mounted = mount_to(
+    let _mounted = leptos::mount::mount_to(
         host.clone(),
         move || view! { <ChunkMap cells running=true /> },
     );

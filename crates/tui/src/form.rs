@@ -154,7 +154,7 @@ impl Form {
                     let count = options.len().max(1);
                     match key.code {
                         KeyCode::Left | KeyCode::Char('h') => {
-                            *chosen = (*chosen + count - 1) % count;
+                            *chosen = (*chosen + count - 1) % count
                         }
                         KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                             *chosen = (*chosen + 1) % count;

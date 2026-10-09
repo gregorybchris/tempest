@@ -331,7 +331,7 @@ pub fn LineChart(
                                 if !h.remove(&key) {
                                     h.insert(key.clone());
                                 }
-                            });
+                            })
                         };
                         view! {
                             <button class="chart__toggle" type="button" style=color.style() aria-pressed=shown on:click=toggle>

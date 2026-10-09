@@ -36,9 +36,7 @@ peers:
 }
 
 fn completion(result: &RunResult) -> Option<Duration> {
-    result.peers[1]
-        .completed
-        .map(tempest_core::Time::since_epoch)
+    result.peers[1].completed.map(|t| t.since_epoch())
 }
 
 fn upgrades(result: &RunResult) -> usize {

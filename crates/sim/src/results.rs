@@ -226,9 +226,7 @@ impl Database {
 
     /// The connection, for queries.
     pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
-        self.conn
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The DuckDB connection, for tests that check the tables with SQL. Only the `testing`
@@ -347,11 +345,7 @@ impl Recorder<'_> {
 
     /// Ends recording: the experiment's ID, or the first error.
     pub fn finish(self) -> Result<i64, Error> {
-        match self
-            .error
-            .into_inner()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-        {
+        match self.error.into_inner().unwrap_or_else(|e| e.into_inner()) {
             Some(error) => Err(error.into()),
             None => Ok(self.experiment),
         }
@@ -359,10 +353,7 @@ impl Recorder<'_> {
 
     /// Runs `write` with the connection unless an earlier write failed, and keeps its error.
     fn write(&self, write: impl FnOnce(&Connection) -> duckdb::Result<()>) {
-        let mut error = self
-            .error
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut error = self.error.lock().unwrap_or_else(|e| e.into_inner());
         if error.is_none()
             && let Err(e) = write(&self.db.conn())
         {

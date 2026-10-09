@@ -554,7 +554,6 @@ mod tests {
 
     use proptest::prelude::*;
     use rand::SeedableRng;
-    use tempest_core::Rng;
 
     use super::*;
 
@@ -724,7 +723,7 @@ mod tests {
         lossy.loss = Fraction::new(0.999).unwrap();
         let a = net.add_node(lossy);
         let b = net.add_node(link(1e6, 1e6));
-        let mut rng = Rng::seed_from_u64(3);
+        let mut rng = tempest_core::Rng::seed_from_u64(3);
         let detour = Duration::from_millis(40);
         let delay = net.delay_via(a, b, detour, &mut rng);
         let latency = net.latency(a, b) + detour;
@@ -764,7 +763,7 @@ mod tests {
         let b = net.add_node(far);
         assert_eq!(net.latency(a, b), Duration::from_millis(80));
         assert_eq!(net.rtt(b, a), Duration::from_millis(160));
-        let mut rng = Rng::seed_from_u64(1);
+        let mut rng = tempest_core::Rng::seed_from_u64(1);
         assert_eq!(net.delay(a, b, &mut rng), Duration::from_millis(80));
         assert_eq!(net.send_time(a, b, 1000), Duration::from_millis(1));
         assert_eq!(net.send_time(b, a, 1000), Duration::from_millis(1));
@@ -778,7 +777,7 @@ mod tests {
         let a = net.add_node(lossy);
         let b = net.add_node(link(1e6, 1e6));
         assert_eq!(net.loss(a, b), 0.5);
-        let mut rng = Rng::seed_from_u64(7);
+        let mut rng = tempest_core::Rng::seed_from_u64(7);
         let base = net.latency(a, b);
         let timeout = net.rtt(a, b) + MAX_ACK_DELAY;
         let samples = 20_000;

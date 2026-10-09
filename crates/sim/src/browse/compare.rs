@@ -317,7 +317,7 @@ mod tests {
             timeline(&[20.0], 1),
             timeline(&[30.0], 1),
         ];
-        let points = band(&runs, 40.0, Bootstrap::default(), Timeline::completed);
+        let points = band(&runs, 40.0, Bootstrap::default(), |r, t| r.completed(t));
         assert_eq!(points.len(), BAND_POINTS + 1);
         let at = |t: f64| points.iter().find(|p| p.t == t).copied().unwrap();
         assert_eq!((at(0.0).low, at(0.0).median, at(0.0).high), (0.0, 0.0, 0.0));

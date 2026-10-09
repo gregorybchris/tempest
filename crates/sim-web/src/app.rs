@@ -182,7 +182,7 @@ fn keep_basket(ctx: Ctx) {
         }
     });
     Effect::new(move |_| {
-        let text: Vec<String> = ctx.basket.get().iter().map(ToString::to_string).collect();
+        let text: Vec<String> = ctx.basket.get().iter().map(|v| v.to_string()).collect();
         if let Some(storage) = storage() {
             let _ = storage.set_item(BASKET_KEY, &text.join(","));
         }

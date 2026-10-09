@@ -273,7 +273,7 @@ impl Browser {
 
     /// Waits until the results' titles are `expected`, in any order.
     fn wait_for_titles(&self, expected: &[&str]) {
-        let mut expected: Vec<String> = expected.iter().map(ToString::to_string).collect();
+        let mut expected: Vec<String> = expected.iter().map(|t| t.to_string()).collect();
         expected.sort();
         let deadline = Instant::now() + LIMIT;
         loop {

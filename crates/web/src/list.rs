@@ -212,7 +212,7 @@ fn Toolbar() -> impl IntoView {
         .collect();
     let shown = move || {
         let (shown, total) = (order.ids.with(Vec::len), total());
-        match ui.finding.with(tempest_api::finding::Finding::filtering) {
+        match ui.finding.with(|f| f.filtering()) {
             true => format!("{shown} of {total}"),
             false => format!("{total} transfers"),
         }
@@ -397,7 +397,7 @@ fn Header(column: Column) -> impl IntoView {
                 f.sort.key = key;
                 f.sort.reversed = false;
             }
-        });
+        })
     };
     view! {
         <th class=class aria-sort=direction>

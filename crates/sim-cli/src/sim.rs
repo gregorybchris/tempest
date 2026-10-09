@@ -108,10 +108,7 @@ impl Observer for Progress<'_> {
         if let Some(recorder) = self.recorder {
             recorder.finished(result);
         }
-        let mut finished = self
-            .finished
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut finished = self.finished.lock().unwrap_or_else(|e| e.into_inner());
         *finished += 1;
         eprintln!(
             "[{finished}/{}] {} seed {}: {}/{} completed, {:.1}s simulated, {} events",
@@ -137,7 +134,7 @@ fn run(args: RunArgs) -> Result<()> {
     };
     let jobs = jobs(args.jobs);
     let variants = scenario.variants();
-    let names: Vec<String> = variants.iter().map(tempest_sim::Variant::name).collect();
+    let names: Vec<String> = variants.iter().map(|v| v.name()).collect();
     let reference = match &args.reference {
         Some(wanted) => find_variant(&names, wanted)?,
         None => 0,

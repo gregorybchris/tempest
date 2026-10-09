@@ -33,8 +33,8 @@ pub fn ExperimentsPage() -> impl IntoView {
             ctx.replace(Route::Experiments(ExperimentQuery {
                 search: search.clone(),
                 ..query.get_untracked()
-            }));
-        });
+            }))
+        })
     });
     let sort = synced(
         Memo::new(move |_| {
@@ -49,7 +49,7 @@ pub fn ExperimentsPage() -> impl IntoView {
                 sort: sort.key,
                 descending: sort.descending,
                 ..query.get_untracked()
-            }));
+            }))
         },
     );
     let experiments = load::<Vec<ExperimentInfo>>(move || {
@@ -252,7 +252,7 @@ pub fn Pick(item: VariantRef) -> impl IntoView {
                     // A comparison takes at most so many.
                     None if b.len() < MAX_COMPARED => b.push(item),
                     None => {}
-                });
+                })
             }
         >
             {move || if picked() { "✓ picked" } else { "+ pick" }}

@@ -243,7 +243,7 @@ pub fn settings_sections(app: &App, view: &SettingsInfo) -> Vec<Section> {
         settings
             .save_folder
             .as_ref()
-            .map_or_else(|| text::DEFAULT_FOLDER.to_owned(), Clone::clone),
+            .map_or_else(|| text::DEFAULT_FOLDER.to_owned(), |folder| folder.clone()),
         Edit::Value(ValueKind::Folder),
     )];
     match &app.categories {

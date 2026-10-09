@@ -209,7 +209,7 @@ fn a_tag_shows_its_transfers() {
     assert_eq!(app.current_row().unwrap().value, "1 transfer");
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.area, Area::Transfers);
-    assert_eq!(tests::visible_names(&app), ["alpha"]);
+    assert_eq!(super::tests::visible_names(&app), ["alpha"]);
 }
 
 #[test]
@@ -480,8 +480,8 @@ fn help_scrolls_only_as_far_as_it_overflows() {
     );
 }
 
-fn transfer(seed: u8, name: &str, position: u32) -> TransferInfo {
-    TransferInfo::example(seed, name, position)
+fn transfer(seed: u8, name: &str, position: u32) -> tempest_api::TransferInfo {
+    tempest_api::TransferInfo::example(seed, name, position)
 }
 
 #[test]

@@ -105,7 +105,7 @@ impl RateLimit {
         // A panic can't leave the bucket half-changed, so a poisoned lock is still good.
         self.0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Bytes per second, or `None` for no limit.

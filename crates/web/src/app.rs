@@ -142,7 +142,7 @@ fn SignOut() -> impl IntoView {
                         spawn_local(async move {
                             let _ = signin::sign_out().await;
                             signin::check(auth);
-                        });
+                        })
                     }
                 >
                     "Sign out"
@@ -374,11 +374,7 @@ fn escape(ui: Ui, typing: bool, e: &web_sys::KeyboardEvent) -> bool {
             ui.back();
             true
         }
-        Scope::List
-            if ui
-                .finding
-                .with_untracked(tempest_api::finding::Finding::filtering) =>
-        {
+        Scope::List if ui.finding.with_untracked(|f| f.filtering()) => {
             ui.finding.update(|f| {
                 f.text.clear();
                 f.status = None;
@@ -522,7 +518,7 @@ fn focus(element: Option<web_sys::HtmlElement>) {
 #[component]
 fn Meters() -> impl IntoView {
     let store = expect_context::<Store>();
-    let rates = move || store.model.with(tempest_api::model::Model::total_rates);
+    let rates = move || store.model.with(|m| m.total_rates());
     let history = move |upload: bool| {
         Signal::derive(move || {
             store.sampled.track();

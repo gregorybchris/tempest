@@ -61,7 +61,7 @@ pub fn RunTable(
         query.update(|q| {
             f(q);
             q.offset = 0;
-        });
+        })
     };
     // The toolbar's fields edit the query, and follow it when it changes otherwise.
     let search = synced(
@@ -75,14 +75,14 @@ pub fn RunTable(
             edit(&|q| {
                 q.experiment = chosen;
                 q.variant = None;
-            });
+            })
         },
     );
     let outcome = synced(
         Memo::new(move |_| query.with(|q| q.outcome.key().to_owned())),
         move |key: String| {
             let chosen = Outcome::named(&key).unwrap_or_default();
-            edit(&|q| q.outcome = chosen);
+            edit(&|q| q.outcome = chosen)
         },
     );
     let sort = synced(
@@ -96,7 +96,7 @@ pub fn RunTable(
             edit(&|q| {
                 q.sort = s.key;
                 q.descending = s.descending;
-            });
+            })
         },
     );
 

@@ -335,10 +335,7 @@ impl Engine {
             addrs: tempest_net::public_addresses(&addresses),
             ..AnnounceConfig::new(
                 endpoint.peer_id(),
-                endpoint
-                    .local_addrs()
-                    .first()
-                    .map_or(0, std::net::SocketAddr::port),
+                endpoint.local_addrs().first().map_or(0, |a| a.port()),
             )
         };
         let tracker = TrackerClient::new(TRACKER_TIMEOUT).map_err(|e| EngineError::Io {
@@ -555,11 +552,11 @@ impl Engine {
         if let Some(inspector) = &inside.running {
             let map = inspector.chunk_map(cells).await.unwrap_or_default();
             // The session may know the manifest a moment before the engine task does.
-            let mapped = map.iter().map(tempest_core::ChunkCell::chunks).sum();
+            let mapped = map.iter().map(|cell| cell.chunks()).sum();
             return Ok(ChunkMapInfo {
                 chunks: chunks.max(mapped),
                 running: true,
-                cells: map.into_iter().map(inspect::cell).collect(),
+                cells: map.into_iter().map(crate::inspect::cell).collect(),
             });
         }
         let stored = inside.stored.unwrap_or_default();

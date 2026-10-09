@@ -18,7 +18,7 @@ use demo::{Demo, Transfer};
 
 fn main() {
     console_error_panic_hook::set_once();
-    mount_to_body(App);
+    leptos::mount::mount_to_body(App);
 }
 
 /// The areas in the navigation; the gallery shows them all on one page.

@@ -156,9 +156,13 @@ impl OpenFiles {
 
     /// Records a failed sync of file `index`, the first one being final, and returns the error.
     fn fail(&self, cache: &mut Cache, index: usize, source: io::Error) -> StorageError {
-        let failure = cache.failure.get_or_insert_with(|| SyncFailure {
-            path: self.files[index].path.clone(),
-            source: Arc::new(source),
+        let failure = cache.failure.get_or_insert_with(|| {
+            let path = self.files[index].path.clone();
+            tracing::error!("syncing {} failed, so storage stops: {source}", path.display());
+            SyncFailure {
+                path,
+                source: Arc::new(source),
+            }
         });
         failure.error()
     }

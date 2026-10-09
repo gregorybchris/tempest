@@ -63,6 +63,8 @@ const TRACKER_TIMEOUT: Duration = Duration::from_secs(30);
 const ANNOUNCE_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long shutting down waits for Goodbyes to reach other peers.
 const GOODBYE_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long shutting down waits for transfers to stop, saving where they got to.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Why the engine could not do something.
 #[derive(Debug, thiserror::Error)]
@@ -231,7 +233,7 @@ enum Command {
     ),
     Move(BundleId, QueueMove, Reply<Vec<TransferInfo>>),
     Publish(BundleId, String, Reply<TransferInfo>),
-    Unpublish(BundleId, String, Reply<TransferInfo>),
+    Unpublish(BundleId, String, Reply<Unpublished>),
     Categories(oneshot::Sender<BTreeMap<String, PathBuf>>),
     SetCategoryFolder(String, PathBuf, Reply<()>),
     RemoveCategory(String, Reply<()>),
@@ -250,6 +252,13 @@ struct Inside {
     running: Option<Inspector>,
     /// The chunks stored, while it isn't running and its manifest is known.
     stored: Option<RangeList>,
+}
+
+/// A transfer no longer published on a tracker, and what resolves once its announces there no
+/// longer ask for the listing.
+struct Unpublished {
+    info: TransferInfo,
+    settled: Vec<oneshot::Receiver<()>>,
 }
 
 /// A share whose manifest has been built.
@@ -452,10 +461,10 @@ impl Engine {
         Ok(listing)
     }
 
-    /// Unpublishes a transfer from the tracker at `tracker`: signs in with this peer's key,
-    /// removes the listing, signs out, and from then on announces the
-    /// transfer there without `listing`, or not at all if only publishing put it there. A
-    /// listing the tracker doesn't have counts as removed.
+    /// Unpublishes a transfer from the tracker at `tracker`: from then on announces the
+    /// transfer there without `listing`, or not at all if only publishing put it there; then,
+    /// once no announce asking for the listing can still arrive, signs in with this peer's key,
+    /// removes the listing and signs out. A listing the tracker doesn't have counts as removed.
     pub async fn unpublish(
         &self,
         id: BundleId,
@@ -464,7 +473,13 @@ impl Engine {
         if !crate::config::is_http_url(tracker) {
             return Err(EngineError::InvalidTracker(tracker.to_owned()));
         }
-        self.get(id).await.ok_or(EngineError::NotFound(id))?;
+        let owned = tracker.to_owned();
+        let Unpublished { info, settled } = self
+            .call(|reply| Command::Unpublish(id, owned, reply))
+            .await?;
+        // Otherwise an announce on its way could ask for the listing again after it is gone.
+        let settling = futures_util::future::join_all(settled);
+        let _ = tokio::time::timeout(TRACKER_TIMEOUT + ANNOUNCE_STOP_TIMEOUT, settling).await;
         let failed = |error| EngineError::Tracker {
             tracker: tracker.to_owned(),
             error,
@@ -477,12 +492,9 @@ impl Engine {
         let unpublished = client.unpublish_listing(tracker, &session.token, &id).await;
         let _ = client.sign_out(tracker, &session.token).await;
         match unpublished {
-            Ok(()) | Err(TrackerError::Refused { status: 404, .. }) => {}
-            Err(error) => return Err(failed(error)),
+            Ok(()) | Err(TrackerError::Refused { status: 404, .. }) => Ok(info),
+            Err(error) => Err(failed(error)),
         }
-        let tracker = tracker.to_owned();
-        self.call(|reply| Command::Unpublish(id, tracker, reply))
-            .await
     }
 
     /// Signs this peer's key in to the tracker at `tracker` for whoever asked for the
@@ -634,7 +646,8 @@ impl Engine {
     }
 
     /// Checks a transfer's data on disk again from scratch, as "checking", records the chunks
-    /// found, and resumes it if it was running. Missing or damaged chunks are downloaded again.
+    /// found, and resumes it if it was running. A download fetches missing or damaged chunks
+    /// again. A share's files are only read: one that changed fails the transfer.
     pub async fn recheck(&self, id: BundleId) -> Result<TransferInfo, EngineError> {
         self.call(|reply| Command::Recheck(id, reply)).await
     }
@@ -769,8 +782,9 @@ impl Engine {
             .ok_or(EngineError::Stopped)
     }
 
-    /// Stops every transfer, records where each one got to, and shuts the node down. Running
-    /// transfers start again when the engine next opens.
+    /// Stops every transfer, records where each one got to, and shuts the node down, giving up
+    /// on transfers still stopping after a while. Running transfers start again when the engine
+    /// next opens.
     pub async fn shutdown(&self) {
         let _ = self.ask(Command::Shutdown).await;
     }
@@ -867,10 +881,11 @@ enum Internal {
         generation: u64,
         result: Result<Summary, DriverError>,
     },
-    /// A transfer's files were moved, or put back after failing to move.
+    /// A transfer's files were moved, or put back after failing to move. On success, the
+    /// originals of the items copied rather than renamed, to delete once the move is recorded.
     Moved {
         id: BundleId,
         generation: u64,
-        result: std::io::Result<()>,
+        result: std::io::Result<Vec<PathBuf>>,
     },
 }

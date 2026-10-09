@@ -5,7 +5,7 @@ use tempest_net::{AnnounceConfig, Announcer, BundleHandle, TrackerClient};
 use tempest_protocol::BundleId;
 use tempest_protocol::tracker::ListingRequest;
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use super::{ANNOUNCE_STOP_TIMEOUT, Internal};
 
@@ -19,8 +19,13 @@ async fn stopped(stop: &mut watch::Receiver<bool>) {
 pub(super) enum ListingChange {
     /// Announce there with `listing` from now on.
     Publish(String),
-    /// Announce there without it, or stop announcing there unless `keep`.
-    Unpublish { tracker: String, keep: bool },
+    /// Announce there without it, or stop announcing there unless `keep`. `settled` is told
+    /// once no announce with the listing can still reach the tracker.
+    Unpublish {
+        tracker: String,
+        keep: bool,
+        settled: oneshot::Sender<()>,
+    },
 }
 
 /// Owns a running bundle: forwards its decision events, takes checkpoints when asked, has
@@ -57,7 +62,9 @@ impl Supervisor {
                 Some(()) = checkpoint.recv() => self.checkpoint().await,
                 Some(change) = listing.recv() => match change {
                     ListingChange::Publish(tracker) => self.publish(tracker),
-                    ListingChange::Unpublish { tracker, keep } => self.unpublish(&tracker, keep),
+                    ListingChange::Unpublish { tracker, keep, settled } => {
+                        self.unpublish(&tracker, keep, settled);
+                    }
                 },
                 event = self.handle.events.recv(), if events_open => match event {
                     Ok(event) => self.forward(event).await,
@@ -124,16 +131,23 @@ impl Supervisor {
         }
     }
 
-    /// Announces to `tracker` without `listing`, or stops announcing there unless `keep`.
-    fn unpublish(&mut self, tracker: &str, keep: bool) {
+    /// Announces to `tracker` without `listing`, or stops announcing there unless `keep`, then
+    /// tells `settled`.
+    fn unpublish(&mut self, tracker: &str, keep: bool, settled: oneshot::Sender<()>) {
         let Some(index) = self.announcers.iter().position(|a| a.tracker() == tracker) else {
+            let _ = settled.send(());
             return;
         };
-        if keep {
-            self.announcers[index].set_listing(None);
-        } else {
-            tokio::spawn(self.announcers.remove(index).stop());
-        }
+        // Even `stopped` would carry the listing otherwise.
+        self.announcers[index].set_listing(None);
+        let done: std::pin::Pin<Box<dyn Future<Output = ()> + Send>> = match keep {
+            true => Box::pin(self.announcers[index].listing_settled()),
+            false => Box::pin(self.announcers.remove(index).stop()),
+        };
+        tokio::spawn(async move {
+            done.await;
+            let _ = settled.send(());
+        });
     }
 
     async fn checkpoint(&self) {

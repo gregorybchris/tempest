@@ -36,7 +36,7 @@ The `tempest` binary's engine also serves the client web UI at `/` and its files
 | `POST /v1/transfers/{id}/start` | | The transfer, started through the queue |
 | `POST /v1/transfers/{id}/force-start` | | The transfer, started regardless of the queue |
 | `POST /v1/transfers/{id}/stop` | | The transfer |
-| `POST /v1/transfers/{id}/recheck` | | The transfer, whose data is hashed again from scratch ("checking"); it then resumes, fetching what failed |
+| `POST /v1/transfers/{id}/recheck` | | The transfer, whose data is hashed again from scratch ("checking"); a download then resumes, fetching what failed, and a share whose files changed fails (D-240) |
 | `POST /v1/transfers/{id}/reveal` | | `{"path": "..."}`, what the engine showed in its machine's file manager (D-237): the file, for a bundle of one, and otherwise the folder. Only with local access; remote access answers 403 `local_only`. 409 `no_files` before anything is saved or if the folder is gone |
 | `POST /v1/transfers/{id}/move` | `{"save_folder": "..."}`, absolute | The transfer, whose files move there ("moving"); a failed move leaves them in place and shows the error |
 | `PUT /v1/transfers/{id}/name` | `{"name": "..."}`, or `null` for the bundle's own | The transfer |

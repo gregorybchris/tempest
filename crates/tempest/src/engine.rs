@@ -49,6 +49,15 @@ impl EngineArgs {
         if data_dir.is_some() {
             config.data_dir = data_dir;
         }
+        tracing::info!(
+            "config loaded from {}{}",
+            path.display(),
+            if path.exists() {
+                ""
+            } else {
+                " (no such file; defaults)"
+            }
+        );
         Ok(config)
     }
 }

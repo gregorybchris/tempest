@@ -34,6 +34,7 @@ pub fn parse_setting(text: &str) -> Result<(String, Value), String> {
 pub fn daemon(args: DaemonArgs) -> Result<()> {
     let mut config = args.engine.load()?;
     for (key, value) in args.set {
+        tracing::info!("--set {key} overrides the config for this run");
         config
             .set(&key, value)
             .with_context(|| format!("--set {key}"))?;

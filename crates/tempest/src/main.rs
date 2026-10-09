@@ -62,7 +62,9 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     // The terminal UI draws on the terminal, which log lines would garble.
     if !matches!(cli.command, Command::Tui(_)) {
-        init_logging();
+        // An engine that runs for a long time reports its lifecycle; commands report problems.
+        let engine_runs = matches!(cli.command, Command::Daemon(_) | Command::Web(_));
+        init_logging(engine_runs);
     }
     let result = match cli.command {
         Command::Share(args) => share::share(args),
@@ -95,11 +97,16 @@ fn main() -> ExitCode {
     }
 }
 
-/// Prints log events to stderr: warnings and errors, or what `RUST_LOG` asks for (D-243).
-fn init_logging() {
+/// Prints log events to stderr: what `RUST_LOG` asks for, else information and above for a
+/// command that runs an engine, and warnings and errors for the others (D-243).
+fn init_logging(engine_runs: bool) {
     use std::io::IsTerminal;
+    let default = match engine_runs {
+        true => "info,quinn_udp=error",
+        false => "warn,quinn_udp=error",
+    };
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,quinn_udp=error"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)

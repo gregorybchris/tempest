@@ -156,13 +156,13 @@ pub fn start_tracker(extra: &[&OsStr]) -> (Running, String) {
             .spawn()
             .unwrap(),
     );
-    let line = lines(tracker.0.stderr.take().unwrap())
-        .recv_timeout(Duration::from_secs(60))
-        .expect("the tracker printed nothing");
-    let url = line
-        .strip_prefix("tracker listening on ")
-        .and_then(|rest| rest.split(';').next())
-        .unwrap_or_else(|| panic!("unexpected line: {line}"))
-        .to_owned();
+    let received = lines(tracker.0.stderr.take().unwrap());
+    // Log events come first.
+    let url = std::iter::from_fn(|| received.recv_timeout(Duration::from_secs(60)).ok())
+        .find_map(|line| {
+            let rest = line.strip_prefix("tracker listening on ")?;
+            Some(rest.split(';').next()?.to_owned())
+        })
+        .expect("the tracker never said where it listens");
     (tracker, url)
 }

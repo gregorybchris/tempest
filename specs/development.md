@@ -28,8 +28,8 @@ Tests come in three tiers (D-241), set up in `.config/nextest.toml`:
 | Tier | What | Command | When |
 |---|---|---|---|
 | Unit | Tests inside each crate's source | `cargo nextest run` | After every change; must take seconds |
-| Full | Unit and integration tests | `cargo nextest run --profile full` | Before committing a change to behavior; CI |
-| Slow | `#[ignore]` tests | `--run-ignored only` with a filter | CI, or when changing what they cover |
+| Full | Unit and integration tests; doctests, which nextest skips, need `cargo test --workspace --doc` | `cargo nextest run --profile full` | Before committing a change to behavior; CI |
+| Slow | `#[ignore]` tests, mostly the simulator's validation and large-swarm tests | `--run-ignored only` with a filter; CI runs `cargo test --release -p tempest-sim -- --ignored` | CI, or when changing what they cover |
 
 A unit test that takes more than a fraction of a second belongs in a higher tier, or should do less work: unoptimized builds are slow, so property tests and simulations keep their sizes small.
 
@@ -70,7 +70,7 @@ The `target/` directory is a build cache, and cargo never deletes stale artifact
 
 ## Releasing locally
 
-CI builds releases when a version tag is pushed (D-211). Releases contain only `tempest`; the servers and the simulator are built from source (D-233, D-236). The same archives can also be built on one Mac with dist (D-232):
+CI builds releases when a version tag is pushed (D-211). Releases contain only `tempest`, the one crate that opts in with `package.metadata.dist`; the servers and the simulator are built from source (D-233, D-236). The same archives can also be built on one Mac with dist (D-232):
 
 - **Tools:** trunk and the `wasm32-unknown-unknown` target for the web UIs; rustup targets for each platform; `zig` and `cargo-zigbuild` for Linux; `llvm` and `cargo-xwin` for Windows. Dist picks the cross compiler itself.
 - **Web UI first.** Build the client web UI with `trunk build --release --cargo-profile web`, as `.github/build-setup.yml` does. Binaries embed whatever `dist/` folders exist.

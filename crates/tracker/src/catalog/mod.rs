@@ -4,15 +4,15 @@
 //! [`Catalog`] holds the rules. It saves its state in a [`Store`], mirrors listed bundles in a
 //! [`SearchIndex`] and keeps sign-in challenges in memory, since they last minutes. Callers pass
 //! the time, in seconds since the Unix epoch, so the rules can be tested without a clock.
-//! [`rank`] orders search results, and [`routes`] serves the catalog over HTTP.
+//! `rank` orders search results, and `routes` serves the catalog over HTTP.
 //!
 //! Operators run a catalog by choice; a tracker serves only the peer-list service without one.
 //! What a catalog lists is its operator's responsibility (D-031).
 
-pub mod rank;
+mod rank;
 pub(crate) mod routes;
-pub mod search;
-pub mod store;
+mod search;
+mod store;
 
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;

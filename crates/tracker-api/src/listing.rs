@@ -167,7 +167,7 @@ pub struct Facets {
 }
 
 /// The most tags [`Facets`] counts.
-pub const MAX_TAG_FACETS: usize = 30;
+pub const MAX_TAG_FACETS: usize = 20;
 
 /// A category's or tag's number of matches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

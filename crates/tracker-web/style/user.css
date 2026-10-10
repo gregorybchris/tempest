@@ -63,10 +63,6 @@
   user-select: all;
 }
 
-.user__id .note {
-  margin: 0;
-}
-
 .user__stats {
   gap: var(--gap-2) 40px;
   padding: var(--gap-3) var(--gap-4);

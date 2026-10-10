@@ -297,7 +297,6 @@ fn KeyLine(key: PeerId) -> impl IntoView {
                 "copy"
             </button>
         </div>
-        <p class="note dim">"A name can look like another. A key can't."</p>
     }
 }
 

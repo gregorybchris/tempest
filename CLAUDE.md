@@ -27,8 +27,9 @@ Agents can't read every file every time, so anything that must be kept in sync b
 
 ## Prose
 
-Applies to docs, specs, comments and messages.
+Applies to docs, specs, comments, messages and the text in UIs.
 
 - Be succinct and get to the point.
 - No filler sentences.
 - No mannered prose.
+- UI text is labels, values, instructions and errors. Don't add taglines, slogans or asides that explain or justify the design. Each string must tell the user something they need.

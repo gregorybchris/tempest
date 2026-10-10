@@ -63,15 +63,7 @@ pub struct GetArgs {
 }
 
 pub fn get(args: GetArgs) -> Result<()> {
-    let link: Link = args.link.parse().map_err(|error| match error {
-        ParseLinkError::NotALink => anyhow!(
-            "{:?} is not a link; a link starts with tempest:? and `tempest share` prints one",
-            args.link
-        ),
-        error => {
-            anyhow!("the link is damaged or cut short ({error}); quote it, since it contains &")
-        }
-    })?;
+    let link = parse_link(&args.link)?;
     let record = link
         .peer
         .filter(|_| !link.addrs.is_empty() || link.relay.is_some())
@@ -102,6 +94,18 @@ pub fn get(args: GetArgs) -> Result<()> {
         );
     }
     runtime.block_on(download(args, link.bundle, record, trackers))
+}
+
+/// The link `text` holds, or why it isn't one.
+pub fn parse_link(text: &str) -> Result<Link> {
+    text.parse().map_err(|error| match error {
+        ParseLinkError::NotALink => anyhow!(
+            "{text:?} is not a link; a link starts with tempest:? and `tempest share` prints one"
+        ),
+        error => {
+            anyhow!("the link is damaged or cut short ({error}); quote it, since it contains &")
+        }
+    })
 }
 
 async fn download(

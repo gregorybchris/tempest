@@ -4301,3 +4301,24 @@ This revises D-175, D-182 and D-189.
 - **The glyph is only on this page,** not beside names in lists, and there is no name history.
 
 **Rationale:** Anyone can pick a name, but no one else has the key. Showing it in a form that can be read, compared and copied, next to what the account has actually published, is the check that works against a lookalike. The page stays small because the tracker has little else to say about an account that isn't private.
+
+
+## D-263: `tempest:` links open the client
+
+**Date:** 2026-10-10 · **Status:** Decided
+
+**Context:** The tracker's website showed a link to copy. Clicking it should start the download in the user's client, without setup that new users would skip.
+
+**Decision:**
+
+- **`tempest open LINK`** is what the operating system runs for a `tempest:` link. It starts a daemon if none runs, then opens the client web UI at `/#/add?link=…` (the link percent-encoded). The page reads the address, clears it, and asks "Download this bundle?" with the link's name (unverified), bundle ID, trackers and save folder. Download adds the transfer through the queue; Cancel adds nothing. A damaged link shows an error and no Download button.
+- **Registration is automatic.** Every command registers the running binary once, and again if the binary moves, with a note on stderr. Failures are logged and ignored. Builds inside a Cargo `target` folder don't register themselves, so development builds don't take the links over.
+- **`tempest register` and `tempest unregister`** do it on request. `unregister` also leaves a marker in the default data directory that stops commands from registering again, and `register` removes it.
+- **Per system:** Linux writes a desktop entry for `x-scheme-handler/tempest` and sets it as the default with `xdg-mime`. Windows sets the `HKCU\Software\Classes\tempest` keys with `reg`. macOS builds a small AppleScript application, `~/Applications/Tempest Links.app`, which receives the link as an Apple Event and runs `tempest open`, and registers it with Launch Services.
+- **The tracker's website** shows an "open in Tempest" button beside copy link and copy command.
+
+**Options:** **Registering:** a `register` command only; automatically (chosen, because it makes onboarding easier at the price of taking the scheme without being asked, which `unregister` undoes). **Handling a link:** download at once; ask first (chosen, since any web page can send a `tempest:` link). **Where the question is asked:** a terminal prompt; the web UI (chosen, as it works when the OS starts the handler without a terminal).
+
+**Rationale:** A link a user clicks should reach their client in one step. The question guards against pages that trigger downloads, and the web UI is the one interface that can show it from a handler with no terminal.
+
+**Not built:** Windows launches `tempest.exe` as a console program, so a console window shows briefly. Handing a link to an already open web UI page: each link opens a new page.

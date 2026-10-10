@@ -98,6 +98,7 @@ fn Shell() -> impl IntoView {
     look(config, ui);
     tell(store, ui, controls);
     close_with_transfer(store, ui);
+    offered(ui);
 
     let area = move || match ui.area.get() {
         Area::Transfers => view! { <Transfers /> }.into_any(),
@@ -129,6 +130,29 @@ fn Shell() -> impl IntoView {
         // After the dialogs, so it opens over the one that asked for it.
         <PickerHost />
     }
+}
+
+/// The prefix of the address's `#` that `tempest open` uses to hand the page a link (D-263).
+const OFFER: &str = "#/add?link=";
+
+/// The link that `hash` offers, decoded, if it is one.
+fn offered_link(hash: &str) -> Option<String> {
+    let encoded = hash.strip_prefix(OFFER)?;
+    js_sys::decode_uri_component(encoded).ok()?.as_string()
+}
+
+/// Opens the download confirmation for the link the address offers, then clears the address so
+/// a reload doesn't ask again.
+fn offered(ui: Ui) {
+    let window = window();
+    let Some(link) = window.location().hash().ok().and_then(|h| offered_link(&h)) else {
+        return;
+    };
+    if let Ok(history) = window.history() {
+        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("#"));
+    }
+    ui.offer.set(Some(link));
+    ui.dialog.set(Some(Dialog::Download));
 }
 
 /// Offers to sign out, when the engine asked for a sign-in.

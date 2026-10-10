@@ -179,12 +179,13 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                 </div>
                 <aside class="listing__side">
                     <Panel title="Get it">
-                        <p class="note dim">"Copy the link into Tempest, or run the command:"</p>
+                        <p class="note dim">"Open the link in Tempest, or copy it or the command:"</p>
                         <div class="copyable">
                             <code class="copyable__text">{command.clone()}</code>
                         </div>
                         <div class="listing__get">
-                            <button class="btn btn--primary" type="button" on:click={
+                            <a class="btn btn--primary" href=link.clone()>"open in Tempest"</a>
+                            <button class="btn" type="button" on:click={
                                 let link = link.clone();
                                 move |_| ctx.copy(link.clone(), "link")
                             }>"copy link"</button>

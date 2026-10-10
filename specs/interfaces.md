@@ -159,6 +159,10 @@ The TUI is minimal but powerful, giving quick access to every essential feature.
 
 The engine serves it, embedded in the `tempest` binary (D-201), and `tempest web` opens it. It shares the TUI's logic through the `api` crate (D-200): the event-following model, finding, column priorities, explanations and saved views. Its keys come from one table, as the TUI's do, and match them where both have the command; what differs, and how the page follows the engine, is in D-202. A field that takes a path on the engine's machine has a Browse button beside it, which opens a picker over the engine's own folders, with keys of its own (D-258).
 
+### Opening links
+
+Clicking a `tempest:` link, such as "open in Tempest" on a tracker's website, opens the client web UI with a "Download this bundle?" question, which shows the link's name, bundle ID and trackers. Nothing downloads until it is answered (D-263).
+
 ## Tracker website
 
 A tracker that takes listings (`tempest-tracker --catalog`) serves it, with a header that names the tracker and its host, embedded in the `tempest-tracker` binary like the other web UIs (D-201, D-236). It searches as you type, narrows by category and tag facets, sorts by relevance, newest, availability, votes or trending (D-209), and shows each listing's content, swarm health, votes and comments. Signing in shows a code for the user's client to sign (D-128); signed in, people vote, comment, report a listing to the operator (D-225), name their account and edit their own listings. Each name links to an account page with its key, a glyph made from it, its listings and its comments (D-262). Its views, keys and browser test are in D-210; running a public one is covered in [tracker.md](tracker.md).

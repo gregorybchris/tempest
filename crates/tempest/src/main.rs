@@ -4,9 +4,11 @@ mod daemon;
 mod engine;
 mod get;
 mod handoff;
+mod open;
 mod peer;
 mod progress;
 mod publish;
+mod scheme;
 mod share;
 mod transfers;
 mod tui;
@@ -40,6 +42,14 @@ enum Command {
     Stop(transfers::StopArgs),
     /// Remove transfers, keeping their files unless asked not to.
     Remove(transfers::RemoveArgs),
+    /// Ask whether to download a link's bundle, in the web UI. The operating system runs this
+    /// for a `tempest:` link; it starts a daemon if none runs.
+    Open(open::OpenArgs),
+    /// Make `tempest:` links open Tempest. Every command does this once, unless `unregister`
+    /// turned it off.
+    Register,
+    /// Stop `tempest:` links from opening Tempest, and keep commands from registering again.
+    Unregister,
     /// Open the terminal UI, on the daemon if one is running, or else on an engine of its own
     /// that stops when it quits, unless asked to hand its transfers to a daemon.
     Tui(tui::TuiArgs),
@@ -60,6 +70,9 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if !matches!(cli.command, Command::Register | Command::Unregister) {
+        scheme::ensure();
+    }
     // The terminal UI draws on the terminal, which log lines would garble.
     if !matches!(cli.command, Command::Tui(_)) {
         // An engine that runs for a long time reports its lifecycle; commands report problems.
@@ -73,6 +86,9 @@ fn main() -> ExitCode {
         Command::Start(args) => transfers::start(args),
         Command::Stop(args) => transfers::stop(args),
         Command::Remove(args) => transfers::remove(args),
+        Command::Open(args) => open::open(args),
+        Command::Register => scheme::register(),
+        Command::Unregister => scheme::unregister(),
         Command::Tui(args) => tui::tui(args),
         Command::Web(args) => web::web(args),
         Command::Daemon(args) => daemon::daemon(args),

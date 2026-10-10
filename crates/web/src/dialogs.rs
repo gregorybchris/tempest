@@ -11,7 +11,7 @@ use tempest_api::prefs;
 use tempest_api::settings::parse_tags;
 use tempest_api::ui::SavedView;
 use tempest_api::{Kind, TransferInfo};
-use tempest_protocol::BundleId;
+use tempest_protocol::{BundleId, Link};
 use tempest_ui_kit::components::{
     Button, ButtonKind, Checkbox, Chip, Dialog as Modal, Radio, SelectField, Tone,
 };
@@ -33,6 +33,7 @@ pub fn Dialogs() -> impl IntoView {
     let ui = expect_context::<Ui>();
     move || match ui.dialog.get()? {
         Dialog::Add => Some(view! { <AddLink /> }.into_any()),
+        Dialog::Download => Some(view! { <Download /> }.into_any()),
         Dialog::Remove(id) => Some(view! { <Remove id /> }.into_any()),
         Dialog::Rename(id) => Some(view! { <Rename id /> }.into_any()),
         Dialog::Tags(id) => Some(view! { <Tags id /> }.into_any()),
@@ -172,6 +173,78 @@ fn AddLink() -> impl IntoView {
                 <button type="submit" hidden=true></button>
             </form>
             <Checkbox checked=stopped on_change=move |on| stopped.set(on)>"Add it stopped"</Checkbox>
+        </Modal>
+    }
+}
+
+/// What to ask before downloading the offered link: where it comes from and what it names.
+#[component]
+fn Download() -> impl IntoView {
+    let ui = expect_context::<Ui>();
+    let controls = expect_context::<Controls>();
+    let config = expect_context::<Config>();
+    let text = ui.offer.get_untracked().unwrap_or_default();
+    let cancel = move || {
+        ui.offer.set(None);
+        close();
+    };
+    let stored = StoredValue::new(text);
+    let download = move || {
+        ui.offer.set(None);
+        close();
+        let text = stored.get_value();
+        leptos::task::spawn_local(async move {
+            match api::add_link(text, None, false).await {
+                Ok(added) => {
+                    controls.say(Tone::Down, format!("Added {}", added.name));
+                    ui.cursor.set(Some(added.id));
+                }
+                Err(error) => controls.say(Tone::Bad, error.to_string()),
+            }
+        });
+    };
+    let folder = move || {
+        config
+            .info
+            .with(|i| i.as_ref().and_then(|i| i.settings.save_folder.clone()))
+            .unwrap_or_else(|| "the default folder".to_owned())
+    };
+    let body = move || match stored.get_value().parse::<Link>().ok() {
+        Some(link) => {
+            let name = link
+                .name
+                .clone()
+                .unwrap_or_else(|| "Unnamed bundle".to_owned());
+            let trackers = link.trackers.join(", ");
+            view! {
+                <dl class="facts">
+                    <dt>"Name"</dt>
+                    <dd>{name}<span class="facts__path">" (from the link, unverified)"</span></dd>
+                    <dt>"Bundle"</dt>
+                    <dd class="facts__path">{link.bundle.to_string()}</dd>
+                    {(!trackers.is_empty()).then(|| view! { <dt>"Tracker"</dt><dd>{trackers}</dd> })}
+                    <dt>"Save to"</dt>
+                    <dd>{folder}</dd>
+                </dl>
+                <span class="field__help">"The download starts through the queue."</span>
+            }
+            .into_any()
+        }
+        None => view! { <span class="field__error">"The link is damaged or cut short."</span> }
+            .into_any(),
+    };
+    let valid = stored.with_value(|t| t.parse::<Link>().is_ok());
+    view! {
+        <Modal
+            open=true
+            on_close=cancel
+            title="Download this bundle?"
+            actions=move || view! {
+                <Button kind=ButtonKind::Ghost on_click=cancel>"Cancel"</Button>
+                {valid.then(|| view! { <Button kind=ButtonKind::Primary on_click=download>"Download"</Button> })}
+            }
+        >
+            <div class="form-stack">{body}</div>
         </Modal>
     }
 }

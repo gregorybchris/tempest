@@ -89,6 +89,8 @@ pub enum Deeper {
 pub enum Dialog {
     /// Add a download from a link.
     Add,
+    /// Confirm a download from the link in `Ui::offer`, opened from outside the page (D-263).
+    Download,
     /// Remove a transfer.
     Remove(BundleId),
     /// Rename a transfer.
@@ -141,6 +143,8 @@ pub struct Ui {
     pub deeper: RwSignal<Option<Deeper>>,
     /// The dialog open, if any.
     pub dialog: RwSignal<Option<Dialog>>,
+    /// The link a download is offered for, while `Dialog::Download` asks about it.
+    pub offer: RwSignal<Option<String>>,
     /// The list's filters and order.
     pub finding: RwSignal<Finding>,
     /// The palette.
@@ -173,6 +177,7 @@ impl Ui {
             tab: RwSignal::new(Tab::Summary),
             deeper: RwSignal::new(None),
             dialog: RwSignal::new(None),
+            offer: RwSignal::new(None),
             finding: RwSignal::new(Finding::default()),
             theme: RwSignal::new(Theme::default()),
             scanlines: RwSignal::new(false),

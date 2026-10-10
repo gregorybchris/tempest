@@ -31,9 +31,9 @@
   padding: 10px;
   border: 1px solid var(--line);
   background: var(--bg);
-  color: hsl(var(--glyph-hue) 85% 62%);
+  color: var(--down);
   fill: currentColor;
-  filter: drop-shadow(0 0 var(--glow-size) color-mix(in srgb, currentColor 55%, transparent));
+  filter: drop-shadow(0 0 var(--glow-size) var(--glow));
 }
 
 .user__id {

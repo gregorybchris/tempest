@@ -4296,7 +4296,7 @@ This revises D-175, D-182 and D-189.
 **Decision:**
 
 - **Names link to `#/users/{key}`** everywhere the website shows one: on results, on a listing and on comments. The route uses the key, which is stable when a name changes or is cleared.
-- **The page shows** the name (or the key's start), when the account joined, the whole key in groups of eight characters with a copy button, and a glyph made from the key (an 8 by 8 mirrored pattern with a hue from the key, the same for the same key everywhere). Below are figures over its listings that show (listings, downloads, votes, comments, and how many have a complete peer now), its listings newest first with "show more", the categories and tags it uses (each a link to browse them), and its latest ten comments with the listing each is on. A banned key shows only that it is banned.
+- **The page shows** the name (or the key's start), when the account joined, the whole key in groups of eight characters with a copy button, and a glyph made from the key (an 8 by 8 mirrored pattern in the theme's accent color, the same for the same key everywhere). Below are figures over its listings that show (listings, downloads, votes, comments, and how many have a complete peer now), its listings newest first with "show more", the categories and tags it uses (each a link to browse them), and its latest ten comments with the listing each is on. A banned key shows only that it is banned.
 - **API:** `GET /tempest/v1/accounts/{key}`, `/accounts/{key}/listings` and `/accounts/{key}/comments`, without a session. They count and list only what shows: listed, not hidden, not by a banned key. Votes the account cast are not shown.
 - **The glyph is only on this page,** not beside names in lists, and there is no name history.
 

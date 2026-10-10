@@ -321,11 +321,6 @@ fn glyph_cells(key: &[u8; 32]) -> [[bool; 8]; 8] {
     cells
 }
 
-/// The glyph's hue, in degrees, from the next two bytes of the key.
-fn glyph_hue(key: &[u8; 32]) -> u16 {
-    u16::from_be_bytes([key[4], key[5]]) % 360
-}
-
 /// An SVG path that fills the glyph's cells, in a box 8 wide and 8 high.
 fn glyph_path(key: &[u8; 32]) -> String {
     let mut path = String::new();
@@ -345,11 +340,9 @@ fn glyph_path(key: &[u8; 32]) -> String {
 fn Glyph(key: PeerId) -> impl IntoView {
     let bytes = *key.as_bytes();
     let path = glyph_path(&bytes);
-    let style = format!("--glyph-hue: {}", glyph_hue(&bytes));
     view! {
         <svg
             class="glyph"
-            style=style
             viewBox="0 0 8 8"
             shape-rendering="crispEdges"
             role="img"
@@ -376,7 +369,6 @@ mod tests {
         other[0] ^= 1;
         assert_ne!(glyph_cells(&key), glyph_cells(&other));
         assert_eq!(glyph_cells(&key), glyph_cells(&key));
-        assert!(glyph_hue(&key) < 360);
     }
 
     #[test]

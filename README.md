@@ -8,9 +8,8 @@ Tempest is a peer-to-peer file sharing protocol and client, written in Rust. It 
 
 It aims to be easy to understand first, configurable and measurable second, fast third, and pleasant to use throughout.
 
-## Disclaimer
-
-Tempest is a general-purpose, peer-to-peer file sharing tool. It does not host, index or moderate content, and the authors cannot see or control what peers share. Don't use it to infringe copyright or other rights. Only share and download content you have the right to. Sharing a bundle exposes your IP address to its swarm. The software is provided as is, without warranty, and the authors are not liable for any damages arising from its use or from content shared with it.
+> [!WARNING]
+> Tempest is a general-purpose, peer-to-peer file sharing tool. It does not host, index or moderate content, and the authors cannot see or control what peers share. Don't use it to infringe copyright or other rights. Only share and download content you have the right to. Sharing a bundle exposes your IP address to its swarm. The software is provided as is, without warranty, and the authors are not liable for any damages arising from its use or from content shared with it.
 
 ## How it works
 

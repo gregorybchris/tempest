@@ -120,6 +120,11 @@ struct CatalogArgs {
     #[arg(long, default_value_t = FetcherConfig::default().pending_lifetime.as_secs() / 3600,
         value_name = "HOURS", requires = "catalog")]
     pending_hours: u64,
+    /// Fetch manifests from peers at loopback, private and link-local addresses too. A tracker
+    /// on the internet shouldn't, because announced addresses could aim it at internal
+    /// services. For trying a tracker out on one machine or network.
+    #[arg(long, requires = "catalog")]
+    allow_local_peers: bool,
     /// Change a per-IP rate limit, as `action=BURST/SECONDS` (BURST at once, then one per
     /// SECONDS) or `action=off`. Actions: challenge, sign-in, browse, publish, edit, vote,
     /// comment, report, download. Repeat for more. See specs/tracker.md for the defaults.
@@ -288,6 +293,7 @@ impl CatalogArgs {
                 ..defaults.limits
             },
             pending_lifetime: Duration::from_secs(self.pending_hours.saturating_mul(3600)),
+            allow_local_peers: self.allow_local_peers,
             ..defaults
         }
     }

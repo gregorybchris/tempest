@@ -26,7 +26,11 @@ fn tempest() -> Command {
 /// Starts `tempest-tracker` with listings (a catalog file) in `dir` and returns it with its URL.
 fn start_tracker(dir: &Path) -> (Running, String) {
     let catalog = dir.join("catalog.db");
-    common::start_tracker(&["--catalog".as_ref(), catalog.as_os_str()])
+    common::start_tracker(&[
+        "--catalog".as_ref(),
+        catalog.as_os_str(),
+        "--allow-local-peers".as_ref(),
+    ])
 }
 
 /// `GET` of `path` on the tracker at `url`: the status and the JSON body.

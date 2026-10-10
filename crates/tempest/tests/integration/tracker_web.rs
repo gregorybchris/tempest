@@ -89,7 +89,11 @@ fn http(address: &str, method: &str, path: &str, body: Option<&Value>) -> (u16, 
 /// Starts `tempest-tracker` with listings in `dir`, and returns it with its address.
 fn start_tracker(dir: &Path) -> (Running, String) {
     let catalog = dir.join("catalog.db");
-    let (tracker, url) = common::start_tracker(&["--catalog".as_ref(), catalog.as_os_str()]);
+    let (tracker, url) = common::start_tracker(&[
+        "--catalog".as_ref(),
+        catalog.as_os_str(),
+        "--allow-local-peers".as_ref(),
+    ]);
     let address = url.strip_prefix("http://").expect("an http URL").to_owned();
     (tracker, address)
 }

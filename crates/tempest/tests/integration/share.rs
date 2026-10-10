@@ -27,6 +27,35 @@ fn write_file(path: &Path, contents: &[u8]) {
         .unwrap();
 }
 
+/// The bundle ID of the manifest test vector from `protocol/content.md`, with this build's
+/// version as its creator.
+fn vector_bundle() -> String {
+    use tempest_protocol::hash::leaf_hash;
+    use tempest_protocol::{Entry, FileInfo, Manifest};
+
+    let file = |data: &[u8]| FileInfo {
+        size: data.len() as u64,
+        root: leaf_hash(data),
+        executable: false,
+        modified: TIME as i64,
+    };
+    Manifest::new(
+        "example",
+        "",
+        TIME as i64,
+        format!("tempest {}", env!("CARGO_PKG_VERSION")),
+        vec![
+            Entry::directory("empty-dir"),
+            Entry::symlink("docs/link", "../a.txt"),
+            Entry::file("docs/empty.txt", file(b"")),
+            Entry::file("a.txt", file(b"abc")),
+        ],
+    )
+    .unwrap()
+    .bundle_id()
+    .to_string()
+}
+
 /// Rebuilds the manifest test vector from `protocol/content.md` on disk and checks that sharing
 /// it gives the vector's bundle ID.
 #[cfg(unix)]
@@ -47,7 +76,11 @@ fn dry_run_reproduces_the_manifest_vector() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(output.status.success(), "{stdout}");
 
-    let bundle = "207855f013f5a4066c9987ee3fa4b0ae63c8eeee02035634587286457cf5b85a";
+    // The manifest names its creator, `tempest <version>`, so the expected bundle ID is of the
+    // vector's manifest with this version. `protocol/content.md`'s vector, with 0.1.0, is
+    // checked by the protocol crate.
+    let bundle = vector_bundle();
+    let bundle = bundle.as_str();
     assert!(
         stdout.contains(&format!("bundle    {bundle}\n")),
         "{stdout}"

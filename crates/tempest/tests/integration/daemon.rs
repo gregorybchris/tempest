@@ -322,7 +322,7 @@ fn the_cli_publishes_and_unpublishes_through_the_daemon() {
     let root = tempfile::tempdir().unwrap();
     let catalog = root.path().join("catalog.db");
     let catalog = catalog.to_str().unwrap();
-    let tracker = TrackerProcess::start_with(&["--catalog", catalog]);
+    let tracker = TrackerProcess::start_with(&["--catalog", catalog, "--allow-local-peers"]);
     let source = root.path().join("notes");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("a.txt"), contents(2000, 3)).unwrap();

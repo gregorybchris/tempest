@@ -76,7 +76,6 @@ fn Account(profile: Profile) -> impl IntoView {
                         {move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}
                         {move || own().then(|| view! {
                             " "<Badge tone=Tone::Down label="you" />
-                            " "<a href=Route::Me.hash()>"change your name"</a>
                         })}
                         {banned.then(|| view! { " "<Badge tone=Tone::Bad label="banned" /> })}
                     </p>

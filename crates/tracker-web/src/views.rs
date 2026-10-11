@@ -66,13 +66,14 @@ pub fn Problem(error: RequestError) -> impl IntoView {
     let ctx = use_ctx();
     let title = match &error {
         e if request::needs_sign_in(e) => "Sign in first",
-        e if request::not_found(e) => "Not here",
+        e if request::not_found(e) => "Not found",
         RequestError::Unreachable => "Can't reach the tracker",
         _ => "Something went wrong",
     };
     let text = match &error {
         e if request::not_found(e) => {
-            "No listing is here: it may have been unpublished, or not be listed yet.".to_owned()
+            "This page doesn't exist, or you can't see it. A bundle may be unpublished or pending."
+                .to_owned()
         }
         e => e.to_string(),
     };
@@ -93,7 +94,7 @@ pub fn PersonLink(
     person: Person,
 ) -> impl IntoView {
     let href = Route::User(person.key).hash();
-    view! { <a class="person" href=href title="See who this is">{present::person(&person)}</a> }
+    view! { <a class="person" href=href title="View account">{present::person(&person)}</a> }
 }
 
 /// Links back up to where a view sits.
@@ -150,7 +151,7 @@ pub fn Copyable(
                 aria-label=format!("Copy the {what}")
                 on:click=move |_| ctx.copy(text.get_untracked(), what)
             >
-                "copy"
+                "Copy"
             </button>
         </div>
     }

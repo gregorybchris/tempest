@@ -35,7 +35,7 @@ pub(super) fn draw_palette(
         ..area
     };
     let [top] = Layout::vertical([Constraint::Length(height)]).areas(top);
-    let inner = popup(frame, theme, top, (width, height), "Commands");
+    let inner = popup(frame, theme, top, (width, height), "Command palette");
     let [input_row, rule_row, list] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -48,14 +48,7 @@ pub(super) fn draw_palette(
         Paragraph::new(Span::styled(":", Style::new().fg(theme.hot))),
         prompt,
     );
-    draw_input(
-        frame,
-        theme,
-        input_area,
-        query,
-        "type to find a command",
-        true,
-    );
+    draw_input(frame, theme, input_area, query, "Search commands…", true);
     frame.render_widget(
         Paragraph::new("─".repeat(usize::from(rule_row.width))).style(Style::new().fg(theme.line)),
         rule_row,
@@ -64,7 +57,7 @@ pub(super) fn draw_palette(
     if matches.is_empty() {
         frame.render_widget(
             Paragraph::new(Line::styled(
-                " No command matches.",
+                " No matching commands.",
                 Style::new().fg(theme.dim),
             )),
             list,

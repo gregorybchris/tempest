@@ -32,7 +32,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
     .areas(area);
     if !restart.is_empty() {
         let text = format!(
-            " Changes to {} apply when the engine restarts.",
+            " Restart the daemon to apply changes to: {}.",
             restart.join(", ")
         );
         frame.render_widget(
@@ -195,9 +195,9 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) {
         .any(|row| row.key.is_some_and(|key| view.changed.contains_key(key)));
     let help = row.map(|row| row.help).unwrap_or_default();
     let legend = if changed {
-        " • Changed here, over the config file. x gives it the file's value again."
+        " • Overrides the config file. x restores the file's value."
     } else if any_changed {
-        " • marks settings changed here, over the config file."
+        " • marks settings that override the config file."
     } else {
         ""
     };

@@ -207,7 +207,7 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
         value_row(info, field, ValueKind::Limit, units::limit_input(limit))
             .value(units::limit(limit))
     };
-    let none = |value: Option<String>| value.unwrap_or_else(|| "none".to_owned());
+    let no_limit = |value: Option<String>| value.unwrap_or_else(|| "no limit".to_owned());
     let mut sections = vec![
         Section::new(
             text::SPEED,
@@ -235,7 +235,12 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
                     text::ALT_SCHEDULE,
                     Control::Schedule(alternative.schedule.clone()),
                 )
-                .value(none(alternative.schedule.as_ref().map(Schedule::describe))),
+                .value(
+                    alternative
+                        .schedule
+                        .as_ref()
+                        .map_or_else(|| "no schedule".to_owned(), Schedule::describe),
+                ),
             ],
         )
         .note_if(info.alternative_limits_active, text::ALTERNATIVE_ACTIVE),
@@ -267,21 +272,21 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
                     ValueKind::Ratio,
                     sharing.ratio.map(|r| r.to_string()).unwrap_or_default(),
                 )
-                .value(none(sharing.ratio.map(|r| r.to_string()))),
+                .value(no_limit(sharing.ratio.map(|r| r.to_string()))),
                 value_row(
                     info,
                     text::TIME,
                     ValueKind::Duration,
                     sharing.time.clone().unwrap_or_default(),
                 )
-                .value(none(sharing.time.clone())),
+                .value(no_limit(sharing.time.clone())),
                 value_row(
                     info,
                     text::IDLE_TIMEOUT,
                     ValueKind::Duration,
                     sharing.idle_timeout.clone().unwrap_or_default(),
                 )
-                .value(none(sharing.idle_timeout.clone())),
+                .value(no_limit(sharing.idle_timeout.clone())),
                 setting(
                     info,
                     text::ACTION,
@@ -341,7 +346,7 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
                 Control::Tag(tag.clone()),
             )
             .value(tempest_api::words::count(*n, "transfer"))
-            .help("Shows its transfers.")
+            .help("Show transfers with this tag.")
         })
         .collect();
     sections.push(Section::new(text::TAGS, tags).note_if(extras.tags.is_empty(), text::NO_TAGS));
@@ -354,23 +359,23 @@ pub fn settings_sections(info: &SettingsInfo, extras: &Extras) -> Vec<Section> {
         vec![
             Row::new("theme", "Theme", Control::Theme)
                 .value(ui.theme.clone())
-                .help("The palette, shared with the TUI. T changes it anywhere."),
+                .help("The color scheme. T switches to the next one."),
             Row::new("scanlines", "Scanlines", Control::Scanlines)
                 .value(on(ui.scanlines))
-                .help("Faint lines over the page, like a CRT."),
+                .help("Adds faint horizontal lines, like an old monitor."),
             Row::new("clean", "Clean", Control::Clean)
                 .value(on(ui.clean))
-                .help("No glow, scanlines or animation."),
+                .help("Turns off glow, scanlines and animation."),
             Row::new("columns", "Columns", Control::Columns)
                 .value(match columns.is_empty() {
                     true => text::NO_COLUMNS.to_owned(),
                     false => columns.join(", "),
                 })
                 .help(
-                    "The transfers list's optional columns, shared with the TUI. | from the list.",
+                    "Optional columns of the transfers list. Choose them with | in the list.",
                 ),
             Row::new("notifications", "Notifications", Control::Notifications).help(
-                "A browser notification when a transfer completes or fails. This browser only.",
+                "Show a notification when a transfer completes or fails. Applies to this browser only.",
             ),
         ],
     ));
@@ -420,7 +425,7 @@ fn peer_finding_sections(info: &SettingsInfo) -> Vec<Section> {
                 "Tracker",
                 Control::Tracker(url.clone()),
             )
-            .help("Every transfer announces to it.")
+            .help("Transfers announce themselves here so peers can find them.")
         })
         .collect();
     let mut relays: Vec<Row> = Vec::new();
@@ -430,7 +435,7 @@ fn peer_finding_sections(info: &SettingsInfo) -> Vec<Section> {
             "Relay",
             Control::Relay(relay.clone()),
         )
-        .help("A relay to pick the home relay from.")
+        .help("Candidate relay. The fastest becomes your home relay.")
     }));
     vec![
         Section {
@@ -535,22 +540,19 @@ mod tests {
             panic!("{download:?}");
         };
         assert_eq!(text, "2500K");
-        assert_eq!(row(&sections, keys::UPLOAD).value, "none");
+        assert_eq!(row(&sections, keys::UPLOAD).value, "no limit");
         assert_eq!(row(&sections, keys::UPLOAD).reset, None);
         assert_eq!(
             row(&sections, keys::ALT_SCHEDULE).value,
             "Mon–Fri 09:00–17:00"
         );
         assert_eq!(row(&sections, keys::MAX_UPLOADS).value, "no limit");
-        assert_eq!(row(&sections, keys::ACTION).value, "stop it");
+        assert_eq!(row(&sections, keys::ACTION).value, "stop sharing");
         assert_eq!(row(&sections, "category:films").value, "/srv/films");
         assert_eq!(row(&sections, "tag:live").value, "2 transfers");
         assert_eq!(row(&sections, "columns").value, "Size, Tags");
         assert_eq!(row(&sections, "scanlines").value, "on");
-        assert_eq!(
-            sections[1].note.as_deref(),
-            Some("They apply now, in place of the speed limits.")
-        );
+        assert_eq!(sections[1].note.as_deref(), Some(text::ALTERNATIVE_ACTIVE));
     }
 
     #[test]

@@ -30,9 +30,9 @@ impl Notice {
         match self {
             Self::Completed { name } => (
                 format!("{name} is complete"),
-                "Every chunk is on disk and checked.".to_owned(),
+                "All files are downloaded and verified.".to_owned(),
             ),
-            Self::Failed { name, reason } => (format!("{name} stopped"), reason.clone()),
+            Self::Failed { name, reason } => (format!("{name} failed"), reason.clone()),
         }
     }
 }

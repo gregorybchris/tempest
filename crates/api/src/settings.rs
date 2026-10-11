@@ -189,34 +189,38 @@ impl ValueKind {
             Self::Count if none => Ok(Value::Null),
             Self::Count => match text.parse::<u32>() {
                 Ok(count) if count > 0 => Ok(json!(count)),
-                _ => Err("Type a whole number from 1, or none for no limit.".to_owned()),
+                _ => Err("Enter a whole number from 1, or none for no limit.".to_owned()),
             },
             Self::Ratio if none => Ok(Value::Null),
             Self::Ratio => match text.parse::<f64>() {
                 Ok(ratio) if ratio.is_finite() && ratio > 0.0 => Ok(json!(ratio)),
-                _ => Err("Type a ratio above 0, such as 2 or 1.5, or none.".to_owned()),
+                _ => {
+                    Err("Enter a ratio above 0, such as 2 or 1.5, or none for no limit.".to_owned())
+                }
             },
             Self::Duration if none => Ok(Value::Null),
             Self::Duration => Ok(json!(text)),
             Self::Folder if text.is_empty() => Ok(Value::Null),
             Self::Folder if absolute(text) => Ok(json!(text)),
-            Self::Folder => Err("Type an absolute path, or nothing for the default.".to_owned()),
+            Self::Folder => {
+                Err("Enter an absolute path, or leave it empty for the default.".to_owned())
+            }
         }
     }
 
     /// A line on what to type.
     pub fn help(self) -> &'static str {
         match self {
-            Self::Limit => "A speed such as 500K or 2.5M, or none.",
-            Self::Count => "A number of transfers, or none for no limit.",
-            Self::Ratio => "Bytes sent per byte received, such as 2, or none.",
-            Self::Duration => "A time such as 30m, 12h or 7d, or none.",
-            Self::Folder => "An absolute path on the engine's machine.",
+            Self::Limit => "A speed per second, such as 500K or 2.5M. none for no limit.",
+            Self::Count => "How many transfers, such as 3. none for no limit.",
+            Self::Ratio => "Times the downloaded size to upload, such as 2. none for no limit.",
+            Self::Duration => "A time such as 30m, 12h or 7d. none for no limit.",
+            Self::Folder => "An absolute path on the daemon's machine.",
         }
     }
 }
 
-/// Whether `path` is absolute on the engine's machine, which may not be the client's: a Unix
+/// Whether `path` is absolute on the daemon's machine, which may not be the client's: a Unix
 /// path, or a Windows one with a drive or a UNC prefix.
 pub fn absolute(path: &str) -> bool {
     let bytes = path.as_bytes();
@@ -248,7 +252,7 @@ pub fn relay_problem(relay: &str) -> Option<&'static str> {
         .trim()
         .parse::<RelayIdentity>()
         .is_err()
-        .then_some("A relay is its key and address: <64 hex characters>@host[:port].")
+        .then_some("A relay's key and address: <64 hex characters>@host[:port].")
 }
 
 /// Tags as typed: separated by commas, with or without `#`.

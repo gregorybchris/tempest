@@ -185,7 +185,7 @@ fn name_taken(message: &str) -> Refusal {
 }
 
 fn banned() -> Refusal {
-    forbidden("this key is banned from the catalog")
+    forbidden("this key is banned from this tracker")
 }
 
 fn invalid(error: text::TextError) -> Refusal {
@@ -198,7 +198,7 @@ impl From<StoreError> for Refusal {
         tracing::error!("catalog store error: {error}");
         let refusal = Refusal::new(
             ErrorCode::Unavailable,
-            "the catalog could not complete the request",
+            "the tracker could not complete the request",
         );
         Refusal {
             status: 500,
@@ -292,7 +292,7 @@ impl Catalog {
     pub fn set_hidden(&mut self, bundle: &BundleId, hidden: bool) -> Result<(), Refusal> {
         if !self.store.set_hidden(bundle, hidden)? {
             tracing::warn!("cannot set {bundle} hidden={hidden}: no such listing");
-            return Err(not_found("listing"));
+            return Err(not_found("bundle"));
         }
         tracing::info!(
             "{bundle} is now {}",
@@ -385,7 +385,10 @@ impl Catalog {
         };
         let code = normalize_code(&request.code);
         let Some(pending) = self.challenges.get(&code) else {
-            return Err(failed("unknown code", "the code is unknown or expired"));
+            return Err(failed(
+                "unknown code",
+                "the sign-in code is unknown or expired",
+            ));
         };
         if pending.expires <= now || pending.session.is_some() {
             return Err(failed(
@@ -398,7 +401,7 @@ impl Catalog {
             return Err(failed(
                 "bad signature",
                 &format!(
-                    "the signature doesn't verify for this key, code and the tracker address {authority}"
+                    "the signature doesn't match this key, code and tracker address {authority}; sign in again with a new code"
                 ),
             ));
         }
@@ -456,7 +459,8 @@ impl Catalog {
                     "missing"
                 }
             );
-            let message = "this catalog needs an invite to join; the one given is unknown or used";
+            let message =
+                "this tracker needs a valid invite; the one given is unknown or already used";
             return Err(refusal(403, codes::INVITE_REQUIRED, message));
         }
         self.account(key)
@@ -470,7 +474,7 @@ impl Catalog {
         });
         if !matches {
             tracing::debug!("sign-in poll failed: unknown or expired code, or wrong poll secret");
-            let message = "the code is unknown or expired, or the poll secret is wrong";
+            let message = "the sign-in code is unknown or expired";
             return Err(refusal(401, codes::SIGN_IN_FAILED, message));
         }
         let session = match self.challenges.get(&code).and_then(|p| p.session.as_ref()) {
@@ -568,7 +572,7 @@ impl Catalog {
         if !saved {
             tracing::info!("name refused: {name:?} is taken or too like a name that is");
             return Err(name_taken(
-                "that name is taken, or too much like a name that is",
+                "that name is taken or too similar to an existing name",
             ));
         }
         Ok(())
@@ -651,7 +655,7 @@ impl Catalog {
         if let Some(Some(category)) = &edit.category
             && !self.config.categories.iter().any(|c| &c.slug == category)
         {
-            let message = format!("this catalog has no category {category:?}");
+            let message = format!("this tracker has no category {category:?}");
             return Err(Refusal::new(ErrorCode::InvalidRequest, message));
         }
 
@@ -662,7 +666,7 @@ impl Catalog {
             }
             Some((owner, _)) if owner != *key => {
                 tracing::info!("edit of {bundle} refused: {key} is not its publisher {owner}");
-                return Err(forbidden("another key listed this bundle"));
+                return Err(forbidden("this bundle belongs to another key"));
             }
             Some((_, ListingStatus::Unpublished)) => {
                 self.store.relist(bundle, now)?;
@@ -684,10 +688,10 @@ impl Catalog {
     /// Takes `key`'s listing of `bundle` down.
     pub fn unpublish(&mut self, now: u64, bundle: &BundleId, key: &PeerId) -> Result<(), Refusal> {
         match self.store.listing_owner(bundle)? {
-            None => Err(not_found("listing")),
+            None => Err(not_found("bundle")),
             Some((owner, _)) if owner != *key => {
                 tracing::info!("unpublish of {bundle} refused: {key} is not its publisher {owner}");
-                Err(forbidden("only the listing's publisher can unpublish it"))
+                Err(forbidden("only the bundle's publisher can unpublish it"))
             }
             Some(_) => {
                 self.store
@@ -745,7 +749,7 @@ impl Catalog {
             {
                 Ok(listing)
             }
-            _ => Err(not_found("listing")),
+            _ => Err(not_found("bundle")),
         }
     }
 
@@ -757,7 +761,7 @@ impl Catalog {
         }
         match self.store.listing_owner(bundle)? {
             Some((_, ListingStatus::Listed)) if !self.store.is_blocked(bundle)? => Ok(()),
-            _ => Err(not_found("listing")),
+            _ => Err(not_found("bundle")),
         }
     }
 

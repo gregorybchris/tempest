@@ -77,7 +77,8 @@ pub async fn run(client: ApiClient, origin: Origin) -> io::Result<Exit> {
     app.local = is_local(client.url());
     if let Some(request) = app.load_settings() {
         let loaded = tokio::time::timeout(SETTINGS_WAIT, carry_out(&client, &request)).await;
-        let result = loaded.unwrap_or_else(|_| Err("the engine took too long".to_owned()));
+        let result =
+            loaded.unwrap_or_else(|_| Err("The daemon did not respond in time.".to_owned()));
         // What the first answer calls for, such as recording that the first-run note was shown.
         if let Some(next) = app.finished(&request, result) {
             tokio::spawn(send(client.clone(), next, sender.clone()));
@@ -335,7 +336,7 @@ async fn follow(client: ApiClient, sender: mpsc::UnboundedSender<Message>) {
                                 return;
                             }
                         }
-                        Ok(None) => break "The engine closed its event stream.".to_owned(),
+                        Ok(None) => break "Lost the connection to the daemon.".to_owned(),
                         Err(error) => break error.to_string(),
                     }
                 }

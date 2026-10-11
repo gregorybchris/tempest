@@ -86,7 +86,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
         true => "untitled".to_owned(),
         false => l.title.clone(),
     };
-    let mut steps = vec![("listings".to_owned(), "#/".to_owned())];
+    let mut steps = vec![("Bundles".to_owned(), "#/".to_owned())];
     if let Some(slug) = &l.category {
         let q = ListingQuery {
             category: Some(slug.clone()),
@@ -98,12 +98,12 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
         ListingStatus::Listed => None,
         ListingStatus::Pending => Some((
             "pending",
-            "Only you see this. It shows once the tracker has fetched its manifest from a peer \
-             that shares it, so keep sharing it.",
+            "Only you can see this. It becomes public once the tracker has fetched its manifest from a peer. \
+             Keep Tempest running and sharing it.",
         )),
         ListingStatus::Unpublished => Some((
             "unpublished",
-            "Only you see this. Edit it to list it again.",
+            "Only you can see this. Edit it to publish it again.",
         )),
     };
     let paragraphs = present::paragraphs(&l.description)
@@ -138,7 +138,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
     let edit_button = move || {
         mine.get().then(|| {
             view! {
-                <a class="btn btn--small" href=Route::Edit(bundle).hash() title="Edit (e)">"edit"</a>
+                <a class="btn btn--small" href=Route::Edit(bundle).hash() title="Edit (e)">"Edit"</a>
             }
         })
     };
@@ -151,7 +151,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                     {edit_button}
                 </div>
                 <p class="listing__byline dim">
-                    "listed by "<span class="listing__publisher"><PersonLink person=l.publisher.clone() /></span>
+                    "published by "<span class="listing__publisher"><PersonLink person=l.publisher.clone() /></span>
                     " · "{move || present::ago(now.get(), created)}
                     {(updated > created).then(|| view! { " · updated "{move || present::ago(now.get(), updated)} })}
                 </p>
@@ -168,34 +168,34 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                     {(!l.tags.is_empty()).then(|| view! { <div class="listing__tags">{tags}</div> })}
                     <Panel title="Content">
                         {content.is_none().then(|| view! {
-                            <p class="note dim">"Not known until the tracker fetches its manifest."</p>
+                            <p class="note dim">"Name, size and file count appear once the tracker has fetched the manifest."</p>
                         })}
                         <dl class="meta">
                             {content}
-                            <div><dt>"bundle"</dt><dd class="mono">{bundle.to_string()}</dd></div>
+                            <div><dt>"bundle ID"</dt><dd class="mono">{bundle.to_string()}</dd></div>
                         </dl>
                     </Panel>
                     <Comments bundle listing comment_box />
                 </div>
                 <aside class="listing__side">
-                    <Panel title="Get it">
-                        <p class="note dim">"Open the link in Tempest, or copy it or the command:"</p>
+                    <Panel title="Download">
+                        <p class="note dim">"Open in Tempest, or copy the link or the command to run:"</p>
                         <div class="copyable">
                             <code class="copyable__text">{command.clone()}</code>
                         </div>
                         <div class="listing__get">
-                            <a class="btn btn--primary" href=link.clone()>"open in Tempest"</a>
+                            <a class="btn btn--primary" href=link.clone()>"Open in Tempest"</a>
                             <button class="btn" type="button" on:click={
                                 let link = link.clone();
                                 move |_| ctx.copy(link.clone(), "link")
-                            }>"copy link"</button>
+                            }>"Copy link"</button>
                             <button class="btn" type="button" on:click={
                                 let command = command.clone();
                                 move |_| ctx.copy(command.clone(), "command")
-                            }>"copy command"</button>
+                            }>"Copy command"</button>
                         </div>
                     </Panel>
-                    <Panel title="Swarm">
+                    <Panel title="Availability">
                         {move || {
                             let s = swarm();
                             let (words, tone) = present::health(&s);
@@ -242,7 +242,7 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
     }
 }
 
-/// A link that opens a form to report the listing to the operator.
+/// A link that opens a form to report the bundle to the operator.
 #[component]
 fn ReportLink(bundle: BundleId) -> impl IntoView {
     let ctx = use_ctx();
@@ -258,7 +258,7 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
     });
     let start = move || {
         if ctx.me.with_untracked(|m| m.account().is_none()) {
-            toasts.push(Tone::Warn, "Sign in to report a listing.");
+            toasts.push(Tone::Warn, "Sign in to report a bundle.");
             ctx.sign_in();
             return;
         }
@@ -285,7 +285,7 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
                     let _ = open.try_set(false);
                     let _ = reason.try_set(String::new());
                     let _ = problem.try_set(None);
-                    toasts.push(Tone::Neutral, "Reported. The operator will see it.");
+                    toasts.push(Tone::Neutral, "Report sent to the operator.");
                 }
                 Err(error) => {
                     let _ = problem.try_set(Some(error.to_string()));
@@ -295,12 +295,12 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
     };
     view! {
         <p class="listing__report">
-            <button class="linkish" type="button" on:click=move |_| start()>"Report this listing"</button>
+            <button class="linkish" type="button" on:click=move |_| start()>"Report this bundle"</button>
         </p>
         <Dialog
             open
             on_close=move || open.set(false)
-            title="Report this listing"
+            title="Report this bundle"
             actions=ViewFn::from(move || view! {
                 <Button kind=ButtonKind::Ghost on_click=move || open.set(false)>"Cancel"</Button>
                 <Button
@@ -311,7 +311,7 @@ fn ReportLink(bundle: BundleId) -> impl IntoView {
             })
         >
             <p class="note dim">
-                "Tell the operator what is wrong with it. They decide what to do; nothing happens automatically."
+                "Describe the problem. The tracker operator reviews reports; nothing is removed automatically."
             </p>
             <TextArea label="Reason" value=reason max=MAX_REPORT rows=4 error=problem />
         </Dialog>
@@ -403,7 +403,7 @@ fn Comments(
                                     <span class="dim">{move || present::ago(ctx.now.get(), created)}</span>
                                     {own.then(|| view! {
                                         <button class="btn btn--ghost btn--small comment__delete" type="button" on:click=move |_| remove(id)>
-                                            "delete"
+                                            "Delete"
                                         </button>
                                     })}
                                 </div>

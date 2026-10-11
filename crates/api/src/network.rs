@@ -10,7 +10,7 @@ pub struct Feature {
     pub key: &'static str,
     /// Its name.
     pub label: &'static str,
-    /// One sentence on what it does and what it reveals.
+    /// What it does and what it reveals.
     pub says: &'static str,
 }
 
@@ -19,35 +19,34 @@ pub const FEATURES: [Feature; 3] = [
     Feature {
         key: keys::PORT_MAPPING,
         label: "Port mapping",
-        says: "Asks your router to open this peer's port so others can connect directly; \
-               the router learns which port you use.",
+        says: "Asks your router to open a port so peers can connect to you directly. The router \
+               sees which port you use.",
     },
     Feature {
         key: keys::RELAYS_FROM_TRACKERS,
         label: "Relays from trackers",
-        says: "Takes a relay a tracker recommends, which lends you an address behind a \
-               router; that relay sees who talks to whom.",
+        says: "Uses relays that trackers recommend, so peers can reach you behind a router. \
+               The relay sees which peers talk to each other.",
     },
     Feature {
         key: keys::LAN,
         label: "LAN discovery",
-        says: "Finds peers on your local network and lets them find you; people on it see \
-               which bundles you ask about.",
+        says: "Finds peers on your local network and lets them find you. Others on the \
+               network see which bundles you request.",
     },
 ];
 
 /// What the first run says before the features.
-pub const INTRO: &str = "The following features are enabled by default so transfers work \
-                         from behind home routers. You can turn each one off in Settings.";
+pub const INTRO: &str = "These are on by default so transfers work behind home routers. Turn each off \
+                         in Settings.";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn every_feature_says_one_sentence() {
+    fn every_feature_ends_with_a_period() {
         for feature in FEATURES {
-            assert_eq!(feature.says.matches(". ").count(), 0, "{}", feature.label);
             assert!(feature.says.ends_with('.'), "{}", feature.label);
         }
     }

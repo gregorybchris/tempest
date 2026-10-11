@@ -53,26 +53,26 @@ pub fn peers(transfer: &TransferInfo) -> String {
     format!("{}/{}", transfer.connections, transfer.peers)
 }
 
-/// What a connection is doing, in a few words: `sends to us, we send`, `opening`, `idle`.
+/// What a connection is doing, in a few words: `sending to us, we're sending`, `connecting`, `no activity`.
 pub fn peer_state(peer: &PeerInfo) -> String {
     if !peer.open {
-        return "opening".to_owned();
+        return "connecting".to_owned();
     }
     let mut parts = Vec::new();
     if peer.snubbed {
         parts.push("snubbed");
     } else if peer.serving_us {
-        parts.push("sends to us");
+        parts.push("sending to us");
     } else if peer.we_want {
-        parts.push("we want");
+        parts.push("we're requesting");
     }
     if peer.we_serve {
-        parts.push("we send");
+        parts.push("we're sending");
     } else if peer.they_want {
-        parts.push("it wants");
+        parts.push("requesting from us");
     }
     match parts.is_empty() {
-        true => "idle".to_owned(),
+        true => "no activity".to_owned(),
         false => parts.join(", "),
     }
 }
@@ -169,20 +169,20 @@ mod tests {
             uploaded: 0,
             rtt_ms: None,
         };
-        assert_eq!(peer_state(&peer), "sends to us, we send");
+        assert_eq!(peer_state(&peer), "sending to us, we're sending");
         let quiet = PeerInfo {
             serving_us: false,
             we_want: false,
             we_serve: false,
             ..peer.clone()
         };
-        assert_eq!(peer_state(&quiet), "idle");
+        assert_eq!(peer_state(&quiet), "no activity");
         assert_eq!(
             peer_state(&PeerInfo {
                 open: false,
                 ..peer
             }),
-            "opening"
+            "connecting"
         );
     }
 

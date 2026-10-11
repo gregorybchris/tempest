@@ -36,14 +36,14 @@ pub fn tui(args: TuiArgs) -> Result<()> {
         // takes one path either way and the CLI can reach the engine while the TUI runs.
         let engine = match Engine::open(config.clone()).await {
             Err(EngineError::Busy(dir)) => return Err(crate::engine::busy(&dir)),
-            opened => opened.context("cannot start the engine")?,
+            opened => opened.context("couldn't start the daemon's engine")?,
         };
         let api = engine.settings().await?.settings.api;
         let server = match ApiServer::bind(&api, &data_dir).await {
             Ok(server) => server,
             Err(error) => {
                 engine.shutdown().await;
-                return Err(error).context("cannot serve the engine's API");
+                return Err(error).context("couldn't serve the daemon's API");
             }
         };
         let (stop, stopped) = oneshot::channel::<()>();
@@ -59,7 +59,7 @@ pub fn tui(args: TuiArgs) -> Result<()> {
             Ok(Some(client)) => tempest_tui::run(client, Origin::Embedded)
                 .await
                 .map_err(anyhow::Error::from),
-            Ok(None) => Err(anyhow!("the engine's API didn't record where it is")),
+            Ok(None) => Err(anyhow!("the daemon didn't record where it listens")),
             Err(error) => Err(error.into()),
         };
         let handing = match &result {
@@ -75,7 +75,7 @@ pub fn tui(args: TuiArgs) -> Result<()> {
             }
             _ => 0,
         };
-        eprintln!("stopping the engine");
+        eprintln!("stopping Tempest");
         let _ = stop.send(());
         serving.await.context("the API server failed")??;
         result?;

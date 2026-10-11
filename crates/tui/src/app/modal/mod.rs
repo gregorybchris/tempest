@@ -347,11 +347,7 @@ impl App {
             Modal::Pick { .. } => &[("j/k", "choose"), ("enter", "pick"), ("esc", "cancel")],
             Modal::Confirm { .. } => &[("enter", "yes"), ("esc", "no")],
             Modal::Network => &[("esc", "close")],
-            Modal::Quit { .. } => &[
-                ("d", "hand to a daemon"),
-                ("s", "stop them"),
-                ("esc", "stay"),
-            ],
+            Modal::Quit { .. } => &[("d", "move to daemon"), ("s", "stop them"), ("esc", "stay")],
             Modal::Columns { .. } => &[
                 ("j/k", "choose"),
                 ("space", "show/hide"),

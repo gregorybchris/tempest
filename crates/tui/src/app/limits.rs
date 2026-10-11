@@ -19,13 +19,17 @@ const UPLOAD: (&str, &str) = ("limits.upload", "Upload");
 const RATIO: (&str, &str) = ("sharing.ratio", "Ratio");
 const TIME: (&str, &str) = ("sharing.time", "Time");
 const IDLE: (&str, &str) = ("sharing.idle_timeout", "Idle timeout");
-const ACTION: (&str, &str) = ("sharing.action", "At the limit");
+const ACTION: (&str, &str) = ("sharing.action", "When reached");
 
-/// The choices for what happens at a sharing limit, the engine's first.
-const ACTIONS: [&str; 3] = ["as the engine says", "stop it", "remove it"];
+/// The choices for what happens at a sharing limit, the Settings value first.
+const ACTIONS: [&str; 3] = [
+    "use Settings",
+    "stop sharing",
+    "remove from list, keep files",
+];
 
 /// A setting's value as a form field starts with it: empty when the transfer has none of its
-/// own, `none` for an explicit no-limit.
+/// own, `none` for an explicit no limit.
 fn shown(settings: &BTreeMap<String, Value>, key: &str) -> String {
     match settings.get(key) {
         None => String::new(),
@@ -42,30 +46,42 @@ impl App {
     /// Opens the limits form for `transfer`.
     pub(super) fn open_limits(&mut self, transfer: &TransferInfo) {
         let own = &transfer.settings;
-        let engine = self
+        let global = self
             .settings
             .as_ref()
             .map(|view| serde_json::to_value(&view.settings.sharing).expect("settings serialize"));
         // A share has no limits unless it sets its own (D-224).
         let share = transfer.kind == Kind::Share;
-        let engine_says = |key: &str| match engine.as_ref().map(|e| &e[key]) {
-            _ if share => "no limit of its own".to_owned(),
-            Some(Value::Null) => "the engine's: none".to_owned(),
-            Some(Value::String(text)) => format!("the engine's: {text}"),
-            Some(value) if !value.is_null() => format!("the engine's: {value}"),
-            _ => "the engine's".to_owned(),
+        let settings_says = |key: &str| match global.as_ref().map(|e| &e[key]) {
+            _ if share => "no limit".to_owned(),
+            Some(Value::Null) => "Settings: no limit".to_owned(),
+            Some(Value::String(text)) => format!("Settings: {text}"),
+            Some(value) if !value.is_null() => format!("Settings: {value}"),
+            _ => "Settings".to_owned(),
         };
+        let speed = |limit: Option<u64>| match (share, limit) {
+            (true, _) => "no limit".to_owned(),
+            (false, Some(rate)) => format!("Settings: {}", format::limit(Some(rate))),
+            (false, None) => "Settings: no limit".to_owned(),
+        };
+        let (settings_download, settings_upload) = self.settings.as_ref().map_or_else(
+            || ("Settings".to_owned(), "Settings".to_owned()),
+            |view| {
+                let limits = &view.settings.limits;
+                (speed(limits.download), speed(limits.upload))
+            },
+        );
         let action = match own.get(ACTION.0).and_then(Value::as_str) {
             Some("stop") => 1,
             Some("remove") => 2,
             _ => 0,
         };
         let form = Form::new(vec![
-            Field::text(DOWNLOAD.1, &shown(own, DOWNLOAD.0), "no limit of its own"),
-            Field::text(UPLOAD.1, &shown(own, UPLOAD.0), "no limit of its own"),
-            Field::text(RATIO.1, &shown(own, RATIO.0), engine_says("ratio")),
-            Field::text(TIME.1, &shown(own, TIME.0), engine_says("time")),
-            Field::text(IDLE.1, &shown(own, IDLE.0), engine_says("idle_timeout")),
+            Field::text(DOWNLOAD.1, &shown(own, DOWNLOAD.0), settings_download),
+            Field::text(UPLOAD.1, &shown(own, UPLOAD.0), settings_upload),
+            Field::text(RATIO.1, &shown(own, RATIO.0), settings_says("ratio")),
+            Field::text(TIME.1, &shown(own, TIME.0), settings_says("time")),
+            Field::text(IDLE.1, &shown(own, IDLE.0), settings_says("idle_timeout")),
             Field::choice(ACTION.1, ACTIONS.map(str::to_owned).to_vec(), action),
         ]);
         let target = Target {
@@ -91,7 +107,7 @@ impl App {
                 settings.insert(key.to_owned(), json!(limit));
             }
         }
-        // Empty leaves the engine's setting; `none` overrides it with no limit.
+        // Empty leaves the Settings value; `none` overrides it with no limit.
         for ((key, label), kind) in [
             (RATIO, ValueKind::Ratio),
             (TIME, ValueKind::Duration),

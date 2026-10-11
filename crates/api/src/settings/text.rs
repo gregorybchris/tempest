@@ -36,31 +36,31 @@ pub const SPEED: Section = section("speed", "Speed limits", None);
 pub const ALTERNATIVE: Section = section(
     "alternative",
     "Alternative limits",
-    Some("They replace the speed limits while on, or while scheduled."),
+    Some("While switched on or scheduled, these replace the speed limits."),
 );
 /// The alternative limits' note while they apply.
-pub const ALTERNATIVE_ACTIVE: &str = "They apply now, in place of the speed limits.";
+pub const ALTERNATIVE_ACTIVE: &str = "Active now, in place of the speed limits.";
 /// How many transfers run at once.
 pub const QUEUE: Section = section("queue", "Queue", None);
 /// When a complete transfer stops sharing.
 pub const SHARING: Section = section(
     "sharing",
     "Sharing limits",
-    Some("When a complete transfer stops sharing. L sets a transfer's own."),
+    Some("When a complete transfer stops sharing. A transfer can have its own limits."),
 );
 /// The network defaults, each a switch with a sentence on what it shares (D-227).
 pub const NETWORK: Section = section(
     "network",
     "Network",
-    Some("On by default so direct sends work behind home routers."),
+    Some("On by default so peers can reach you behind a home router. Each can be turned off."),
 );
 /// The trackers every transfer announces to.
 pub const TRACKERS: Section = section(
     "trackers",
     "Trackers",
     Some(
-        "Every transfer announces to these so peers can find it, as well as to the trackers \
-         its link names. A tracker can also list what you publish to it.",
+        "Transfers announce themselves to these trackers, plus the ones named in their link, \
+         so peers can find them.",
     ),
 );
 /// The relays to pick a home relay from.
@@ -68,8 +68,8 @@ pub const RELAYS: Section = section(
     "relays",
     "Relays",
     Some(
-        "The fastest becomes the home relay, which lends this peer an address when others \
-         can't reach it directly.",
+        "The fastest becomes your home relay. Peers that can't reach you directly connect \
+         through it.",
     ),
 );
 /// The default folder and the categories, each with its folder.
@@ -97,19 +97,19 @@ pub const SECTIONS: [Section; 10] = [
 pub const DOWNLOAD: Field = Field {
     key: keys::DOWNLOAD,
     label: "Download",
-    help: "The most every transfer together receives per second.",
+    help: "Maximum combined download speed of all transfers, in bytes per second.",
 };
 /// The upload limit.
 pub const UPLOAD: Field = Field {
     key: keys::UPLOAD,
     label: "Upload",
-    help: "The most every transfer together sends per second.",
+    help: "Maximum combined upload speed of all transfers, in bytes per second.",
 };
 /// Whether the alternative limits are switched on.
 pub const ALT_ENABLED: Field = Field {
     key: keys::ALT_ENABLED,
     label: "Switched on",
-    help: "On, they apply whatever the schedule says.",
+    help: "On: the alternative limits always apply, whatever the schedule says.",
 };
 /// The alternative download limit.
 pub const ALT_DOWNLOAD: Field = Field {
@@ -127,59 +127,62 @@ pub const ALT_UPLOAD: Field = Field {
 pub const ALT_SCHEDULE: Field = Field {
     key: keys::ALT_SCHEDULE,
     label: "Schedule",
-    help: "When they apply on their own, in the engine's local time.",
+    help: "When the alternative limits switch on automatically, in the daemon's local time.",
 };
 /// How many downloads run at once.
 pub const MAX_DOWNLOADS: Field = Field {
     key: keys::MAX_DOWNLOADS,
     label: "Active downloads",
-    help: "How many downloads run at once; the rest wait as queued.",
+    help: "How many downloads run at once. The rest wait in the queue.",
 };
 /// How many complete transfers share at once.
 pub const MAX_UPLOADS: Field = Field {
     key: keys::MAX_UPLOADS,
     label: "Active uploads",
-    help: "How many complete transfers share at once; the rest wait as queued.",
+    help: "How many complete transfers share at once. The rest wait in the queue.",
 };
 /// The sharing ratio limit.
 pub const RATIO: Field = Field {
     key: keys::RATIO,
     label: "Ratio",
-    help: "Stop sharing once this many bytes are sent per byte received.",
+    help: "Stop sharing after uploading this many times the size downloaded (2 is twice).",
 };
 /// The sharing time limit.
 pub const TIME: Field = Field {
     key: keys::TIME,
     label: "Time",
-    help: "Stop sharing after this long complete.",
+    help: "Stop sharing this long after the download completes.",
 };
 /// The sharing idle timeout.
 pub const IDLE_TIMEOUT: Field = Field {
     key: keys::IDLE_TIMEOUT,
     label: "Idle timeout",
-    help: "Stop sharing a finished download once no peer has wanted anything for this long.",
+    help: "Stop sharing when no peer has requested data for this long.",
 };
 /// What happens at a sharing limit; [`ACTIONS`] names its values.
 pub const ACTION: Field = Field {
     key: keys::ACTION,
-    label: "At the limit",
+    label: "When a limit is reached",
     help: "What happens to a complete transfer that reaches a limit.",
 };
 /// The default download folder; [`DEFAULT_FOLDER`] is its value when unset.
 pub const SAVE_FOLDER: Field = Field {
     key: keys::SAVE_FOLDER,
     label: "Default folder",
-    help: "Where downloads go unless their category or the add says otherwise.",
+    help: "Where downloads are saved, unless their category or the Add dialog sets another folder.",
 };
 
 /// What the sharing action's values do, in its order.
-pub const ACTIONS: [(&str, &str); 2] = [("stop", "stop it"), ("remove", "remove it, keep files")];
+pub const ACTIONS: [(&str, &str); 2] = [
+    ("stop", "stop sharing"),
+    ("remove", "remove from list, keep files"),
+];
 /// Where downloads go when no default folder is set.
-pub const DEFAULT_FOLDER: &str = "Downloads, in the home folder";
+pub const DEFAULT_FOLDER: &str = "Downloads folder in the home folder";
 /// What a category row means.
-pub const CATEGORY: &str = "Downloads added in this category go to its folder.";
+pub const CATEGORY: &str = "New downloads in this category are saved to its folder.";
 /// What the Tags section says while no transfer has a tag.
-pub const NO_TAGS: &str = "No tags yet. Press t on a transfer to tag it.";
+pub const NO_TAGS: &str = "No tags yet. Tag a transfer from its detail.";
 /// The Columns row's value when no optional column shows.
 pub const NO_COLUMNS: &str = "only name, progress and status";
 
@@ -217,7 +220,7 @@ mod tests {
         for field in fields {
             assert!(field.help.ends_with('.'), "{}", field.key);
         }
-        assert_eq!(action("remove"), "remove it, keep files");
+        assert_eq!(action("remove"), "remove from list, keep files");
         assert_eq!(action("later"), "later");
     }
 }

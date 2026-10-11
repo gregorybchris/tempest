@@ -1,4 +1,4 @@
-//! The Share area (D-139, D-196): a form for a file or folder on the engine's machine, the
+//! The Share area (D-139, D-196): a form for a file or folder on the daemon's machine, the
 //! bundle being built, then its `tempest:` link to copy; and every share, with its link.
 
 use std::time::Duration;
@@ -155,9 +155,9 @@ fn NewShare() -> impl IntoView {
     );
     let help = match remote {
         true => {
-            "On the engine's machine, not this device. It is shared from where it is; nothing is copied."
+            "Absolute path on the daemon's machine, not this device. Files are shared in place, not copied."
         }
-        false => "On the engine's machine. It is shared from where it is; nothing is copied.",
+        false => "Absolute path on the daemon's machine. Files are shared in place, not copied.",
     };
     let text_field = move |label: &'static str,
                            value: RwSignal<String>,
@@ -173,7 +173,7 @@ fn NewShare() -> impl IntoView {
     };
 
     view! {
-        <Panel title="share a file or folder">
+        <Panel title="Share a file or folder">
             <form class="share-form" on:submit=move |e| { e.prevent_default(); share(); }>
                 <div class="field share-form__path">
                     <label class="field__label" for="share-path">"Path"</label>
@@ -183,7 +183,7 @@ fn NewShare() -> impl IntoView {
                             node_ref=path_ref
                             class="input input--large"
                             type="text"
-                            placeholder="/absolute/path/to/a/file/or/folder"
+                            placeholder="/path/to/file-or-folder"
                             spellcheck="false"
                             autocomplete="off"
                             disabled=busy
@@ -195,9 +195,9 @@ fn NewShare() -> impl IntoView {
                     </div>
                     <span class="field__help">{help}</span>
                 </div>
-                {text_field("Name", name, "the file or folder's name", "")}
-                {text_field("Tags", tags, "comma-separated", "")}
-                {text_field("Comment", comment, "optional description", "share-form__wide")}
+                {text_field("Name", name, "Defaults to the file or folder name", "")}
+                {text_field("Tags", tags, "music, live", "")}
+                {text_field("Comment", comment, "Optional description", "share-form__wide")}
                 <div class="share-form__actions">
                     {move || problem.get().map(|p| view! { <span class="field__error" role="alert">{p}</span> })}
                     <div class="toolbar__spacer"></div>
@@ -211,7 +211,7 @@ fn NewShare() -> impl IntoView {
                         <div class="building__bar"><span></span></div>
                         <p>
                             "Building the bundle of " <span class="building__path">{path}</span>
-                            ": reading and hashing every chunk. "
+                            ": reading every file and computing checksums. "
                             <span class="dim">{format!("{seconds} s")}</span>
                         </p>
                     </div>
@@ -239,7 +239,7 @@ fn Ready(shared: TransferInfo) -> impl IntoView {
                 <code class="linkbox__link">{shared.link.clone()}</code>
                 <Button kind=ButtonKind::Primary small=true on_click=move || controls.copy(link.clone())>"Copy link"</Button>
             </div>
-            <p class="dim note">"Anyone with the link can download it from this peer while it shares."</p>
+            <p class="dim note">"Anyone with this link can download it while the daemon is online and sharing."</p>
             <Button small=true kind=ButtonKind::Ghost on_click=move || ui.show(id)>"Show in Transfers →"</Button>
         </div>
     }
@@ -252,9 +252,9 @@ fn Shares() -> impl IntoView {
     let ids = Memo::new(move |_| share_ids(store));
     let cursor = Selector::new(move || ui.share.get());
     view! {
-        <Panel title=Signal::derive(move || format!("shares ({})", ids.with(Vec::len)))>
+        <Panel title=Signal::derive(move || format!("Shares ({})", ids.with(Vec::len)))>
             {move || ids.with(Vec::is_empty).then(|| view! {
-                <Empty title="Nothing shared yet" text="Type a path above, or browse, to share a file or folder." />
+                <Empty title="No shares yet" text="Enter a path above or use Browse." />
             })}
                 <div class="table-scroll" hidden=move || ids.with(Vec::is_empty)>
                     <table class="table shares" aria-label="Shares">
@@ -263,8 +263,8 @@ fn Shares() -> impl IntoView {
                                 <th>"Name"</th>
                                 <th class="num col-hide-narrow">"Size"</th>
                                 <th>"Status"</th>
-                                <th class="num col-hide-narrow">"↑"</th>
-                                <th class="num col-hide-narrow">"Sent"</th>
+                                <th class="num col-hide-narrow" title="Upload rate">"↑"</th>
+                                <th class="num col-hide-narrow">"Uploaded"</th>
                                 <th class="num col-hide-narrow">"Peers"</th>
                                 <th>"Link"</th>
                             </tr>
@@ -308,8 +308,8 @@ fn ShareRow(id: BundleId, cursor: Selector<Option<BundleId>>) -> impl IntoView {
             <td class="num col-hide-narrow">{text(|t| format::bytes(t.uploaded))}</td>
             <td class="num col-hide-narrow">{text(present::peers)}</td>
             <td class="shares__link">
-                <Button small=true title="Copy its link (y)" on_click=move || controls.copy(row.with_untracked(|t| t.link.clone()))>
-                    "copy"
+                <Button small=true title="Copy the link (y)" on_click=move || controls.copy(row.with_untracked(|t| t.link.clone()))>
+                    "Copy link"
                 </Button>
             </td>
         </tr>

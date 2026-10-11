@@ -219,7 +219,7 @@ fn Toolbar() -> impl IntoView {
     };
     view! {
         <div class="toolbar">
-            <SearchBox value=query placeholder="filter: name or #tag" node_ref=fields.search />
+            <SearchBox value=query placeholder="Filter by name or #tag" node_ref=fields.search />
             <Select
                 label="Status"
                 node_ref=fields.status
@@ -285,7 +285,7 @@ fn List() -> impl IntoView {
     let empty = move || {
         if !store.loaded.get() {
             return Some(
-                view! { <Empty title="Connecting" text="Asking the engine for its transfers…" /> }
+                view! { <Empty title="Connecting" text="Asking the daemon for its transfers…" /> }
                     .into_any(),
             );
         }
@@ -294,15 +294,15 @@ fn List() -> impl IntoView {
         }
         Some(match store.model.with(|m| m.transfers().is_empty()) {
             true => view! {
-                <Empty title="No transfers yet" text="Paste a tempest: link to download a bundle.">
+                <Empty title="No transfers yet" text="Add a tempest: link to download a bundle, or share a file from the Share tab.">
                     <Button kind=ButtonKind::Primary on_click=move || ui.dialog.set(Some(Dialog::Add))>"+ Add a link"</Button>
                 </Empty>
             }
             .into_any(),
             false => view! {
-                <Empty title="Nothing matches" text="No transfer passes the filters.">
+                <Empty title="No matches" text="No transfers match the filters.">
                     <Button kind=ButtonKind::Ghost on_click=move || ui.finding.update(|f| { f.text.clear(); f.status = None; })>
-                        "clear filters"
+                        "Clear filters"
                     </Button>
                 </Empty>
             }

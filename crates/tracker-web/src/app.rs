@@ -134,7 +134,7 @@ impl Ctx {
                 true => toasts.push(Tone::Neutral, format!("Copied the {what}")),
                 false => toasts.push(
                     Tone::Bad,
-                    "The browser wouldn't copy it. Select it and copy it yourself.",
+                    "Copy failed. Select the text and copy it manually.",
                 ),
             }
         });
@@ -249,10 +249,10 @@ fn Shell() -> impl IntoView {
                     <span class="appbar__kind">"Tracker"</span>
                     <span class="appbar__host">{host}</span>
                 </span>
-                <nav class="appbar__links" aria-label="Areas">
+                <nav class="appbar__links" aria-label="Main">
                     <a href="#/" aria-current=move || browsing().then_some("page")>"Browse"</a>
                     <Show when=move || ctx.me.with(|m| m.account().is_some())>
-                        <a href="#/me" aria-current=move || (page.get() == Page::Me).then_some("page")>"My listings"</a>
+                        <a href="#/me" aria-current=move || (page.get() == Page::Me).then_some("page")>"My bundles"</a>
                     </Show>
                 </nav>
                 <div class="appbar__spacer"></div>

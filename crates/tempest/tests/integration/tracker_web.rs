@@ -399,7 +399,7 @@ fn search_filter_and_sign_in_in_a_browser() {
     browser.click(&browser.find_xpath("//a[contains(@class,'tagfacet')][contains(.,'csv')]"));
     browser.wait_for_titles(&["Rainfall 2025"]);
     assert_eq!(browser.hash(), "#/?category=datasets&tag=csv");
-    browser.click(&browser.find_xpath("//button[contains(.,'clear filters')]"));
+    browser.click(&browser.find_xpath("//button[contains(.,'Clear filters')]"));
     browser.wait_for_titles(&["Rainfall 2025", "Snowfall archive", "Tiny model weights"]);
 
     // The keyboard: `j` moves to the first result and `enter` opens it.

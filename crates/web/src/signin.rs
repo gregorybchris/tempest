@@ -156,14 +156,14 @@ pub fn SignIn(auth: RwSignal<Auth>) -> impl IntoView {
                 <Wordmark />
                 <h1 class="signin__title">"Sign in"</h1>
                 <p class="signin__text">
-                    "This engine takes remote connections. Enter its access token to use it from this browser."
+                    "This daemon requires an access token for remote connections. Enter it to continue."
                 </p>
                 <TextField
                     label="Access token"
                     value=token
                     secret=true
                     error=error
-                    help="The engine keeps the token in its data directory."
+                    help="Find the token in the daemon's data folder."
                 />
                 <Button kind=ButtonKind::Primary disabled=busy on_click=move || submit()>
                     {move || if busy.get() { "Signing in…" } else { "Sign in" }}

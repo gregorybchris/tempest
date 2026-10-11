@@ -24,12 +24,12 @@ pub const ACTION: &str = "sharing.action";
 
 /// The choices for what happens at a sharing limit: the engine's, then the transfer's own.
 pub const ACTIONS: [(&str, &str); 3] = [
-    ("", "as the engine says"),
-    ("stop", "stop it"),
-    ("remove", "remove it, keep files"),
+    ("", "use Settings"),
+    ("stop", "stop sharing"),
+    ("remove", "remove from list, keep files"),
 ];
 
-/// A transfer's limits as its form shows them. Empty means the engine's setting; `none`, no
+/// A transfer's limits as its form shows them. Empty means the Settings value; `none`, no
 /// limit of its own.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LimitsForm {
@@ -101,7 +101,7 @@ impl LimitsForm {
                 continue;
             }
             let value = kind.parse(text).map_err(|e| format!("{label}: {e}"))?;
-            // A speed limit of `none` is no limit of its own, as with the engine's.
+            // A speed limit of `none` is no limit of its own, as with the daemon's.
             if !(kind == ValueKind::Limit && value.is_null()) {
                 settings.insert(key.to_owned(), value);
             }
@@ -131,10 +131,10 @@ impl ShareForm {
     pub fn request(&self) -> Result<AddRequest, String> {
         let path = self.path.trim();
         if path.is_empty() {
-            return Err("Type the path of a file or folder to share.".to_owned());
+            return Err("Enter the path of a file or folder to share.".to_owned());
         }
         if !absolute(path) {
-            return Err("The path must be absolute, on the engine's machine.".to_owned());
+            return Err("Enter an absolute path on the daemon's machine.".to_owned());
         }
         let text = |s: &str| Some(s.trim().to_owned()).filter(|s| !s.is_empty());
         Ok(AddRequest {
@@ -151,21 +151,21 @@ impl ShareForm {
 pub fn folder_problem(folder: &str) -> Option<&'static str> {
     let folder = folder.trim();
     if folder.is_empty() {
-        return Some("Type the folder to move the files into.");
+        return Some("Enter the folder to move the files into.");
     }
-    (!absolute(folder)).then_some("The folder must be an absolute path on the engine's machine.")
+    (!absolute(folder)).then_some("Enter an absolute path on the daemon's machine.")
 }
 
-/// Why `folder` can't take a new download, if it can't. Empty leaves it to the engine.
+/// Why `folder` can't take a new download, if it can't. Empty leaves it to the daemon.
 pub fn save_folder_problem(folder: &str) -> Option<&'static str> {
     let folder = folder.trim();
     (!folder.is_empty() && !absolute(folder))
-        .then_some("The folder must be an absolute path on the engine's machine.")
+        .then_some("Enter an absolute path on the daemon's machine.")
 }
 
 /// Why `name` can't name a view or category, if it can't.
 pub fn name_problem(name: &str) -> Option<&'static str> {
-    name.trim().is_empty().then_some("Give it a name.")
+    name.trim().is_empty().then_some("Enter a name.")
 }
 
 #[cfg(test)]

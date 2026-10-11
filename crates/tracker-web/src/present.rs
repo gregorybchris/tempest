@@ -43,11 +43,11 @@ pub fn category_name(categories: &[Category], slug: &str) -> String {
 /// How a sort is named in the picker.
 pub fn sort_label(sort: Sort) -> &'static str {
     match sort {
-        Sort::Relevance => "best match",
-        Sort::Newest => "newest",
-        Sort::Availability => "availability",
-        Sort::Votes => "votes",
-        Sort::Trending => "trending",
+        Sort::Relevance => "Best match",
+        Sort::Newest => "Newest",
+        Sort::Availability => "Most available",
+        Sort::Votes => "Top voted",
+        Sort::Trending => "Trending",
     }
 }
 
@@ -156,7 +156,7 @@ pub fn highlight(text: &str, q: &str) -> Vec<(String, bool)> {
 /// `first–last of total` for a page of `shown` results from `offset`.
 pub fn range(offset: u64, shown: usize, total: u64) -> String {
     if shown == 0 {
-        return plural(total, "listing");
+        return plural(total, "bundle");
     }
     let first = offset + 1;
     let last = offset + shown as u64;
@@ -164,7 +164,7 @@ pub fn range(offset: u64, shown: usize, total: u64) -> String {
         "{}–{} of {}",
         format::count(first),
         format::count(last),
-        plural(total, "listing")
+        plural(total, "bundle")
     )
 }
 
@@ -355,8 +355,8 @@ mod tests {
             pages(20, 10, 100),
             [Page(0), Page(1), Page(2), Page(3), Gap, Page(9)]
         );
-        assert_eq!(range(25, 25, 60), "26–50 of 60 listings");
-        assert_eq!(range(0, 0, 0), "0 listings");
+        assert_eq!(range(25, 25, 60), "26–50 of 60 bundles");
+        assert_eq!(range(0, 0, 0), "0 bundles");
     }
 
     #[test]

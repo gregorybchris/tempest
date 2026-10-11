@@ -113,8 +113,8 @@ pub fn BrowsePage() -> impl IntoView {
                         node_ref=ctx.search
                         class="bigsearch__input"
                         type="search"
-                        placeholder="search bundles…"
-                        aria-label="Search listings"
+                        placeholder="Search bundles…"
+                        aria-label="Search bundles"
                         spellcheck="false"
                         autocomplete="off"
                         prop:value=move || text.get()
@@ -194,7 +194,7 @@ fn Facets(query: Memo<ListingQuery>, page: crate::views::Fetched<ListingPage>) -
             view! {
                 <li>
                     <a class="facet" href=all aria-current=chosen.is_none().then_some("true")>
-                        <span class="facet__name">"Everything"</span>
+                        <span class="facet__name">"All categories"</span>
                     </a>
                 </li>
             }
@@ -256,7 +256,7 @@ fn Facets(query: Memo<ListingQuery>, page: crate::views::Fetched<ListingPage>) -
             <summary class="facets__toggle">
                 "Filters"
                 <Show when=filtered>
-                    <span class="facets__on">" · on"</span>
+                    <span class="facets__on">" · active"</span>
                 </Show>
             </summary>
             <div class="facets__body">
@@ -287,7 +287,7 @@ fn ActiveFilters(query: Memo<ListingQuery>) -> impl IntoView {
             return ().into_any();
         }
         let category = q.category.clone().map(|slug| {
-            let label = format!("in {}", ctx.category_name(&slug));
+            let label = format!("Category: {}", ctx.category_name(&slug));
             view! { <Chip label on_remove=move || edit(Box::new(|q| q.category = None)) /> }
         });
         let tags = q
@@ -318,7 +318,7 @@ fn ActiveFilters(query: Memo<ListingQuery>) -> impl IntoView {
                         q.tags.clear();
                     }))
                 >
-                    "clear filters"
+                    "Clear filters"
                 </button>
             </div>
         }
@@ -338,12 +338,12 @@ fn Results(
     if found.listings.is_empty() {
         let text = match (q.q.is_empty(), q.category.is_some() || !q.tags.is_empty()) {
             (true, false) => {
-                "Nothing is listed here yet. Sharers list their bundles with tempest share --publish."
+                "No bundles yet. Publish one with tempest share --publish <tracker> <path>."
             }
-            (_, true) => "Nothing matches with these filters. Try clearing some.",
-            (false, false) => "Nothing matches. Check the spelling, or try fewer or other words.",
+            (_, true) => "No bundles match these filters. Clear a filter to widen the search.",
+            (false, false) => "No bundles match. Check the spelling or try fewer words.",
         };
-        return view! { <Empty title="No listings" text=text.to_owned() /> }.into_any();
+        return view! { <Empty title="No bundles" text=text.to_owned() /> }.into_any();
     }
     let selected = Selector::new(move || cursor.get());
     let words = q.q.clone();
@@ -383,9 +383,9 @@ fn Results(
         let last = found.total.div_ceil(limit.max(1)).saturating_sub(1);
         view! {
             <nav class="pager" aria-label="Pages">
-                <Button small=true title="Previous page ([)" disabled=Signal::stored(current == 0) on_click=move || turn(-1)>"←"</Button>
+                <Button small=true title="Previous page ([)" disabled=Signal::stored(current == 0) on_click=move || turn(-1)><span aria-hidden="true">"←"</span><span class="sr-only">"Previous page"</span></Button>
                 {numbers}
-                <Button small=true title="Next page (])" disabled=Signal::stored(current >= last) on_click=move || turn(1)>"→"</Button>
+                <Button small=true title="Next page (])" disabled=Signal::stored(current >= last) on_click=move || turn(1)><span aria-hidden="true">"→"</span><span class="sr-only">"Next page"</span></Button>
             </nav>
         }
     });
@@ -480,7 +480,7 @@ pub fn ResultCard(
                     <dt>"health"</dt>
                     <dd><HealthBars swarm /></dd>
                 </div>
-                <div title="Peers with the whole bundle">
+                <div title="Peers with a complete copy">
                     <dt>"sharing"</dt>
                     <dd class="num tone--up">{format::count(swarm.complete)}</dd>
                 </div>
@@ -488,7 +488,7 @@ pub fn ResultCard(
                     <dt>"downloading"</dt>
                     <dd class="num tone--down">{format::count(swarm.incomplete)}</dd>
                 </div>
-                <div title="Votes up less votes down">
+                <div title="Upvotes minus downvotes">
                     <dt>"votes"</dt>
                     <dd class="num">{present::score(listing.votes)}</dd>
                 </div>

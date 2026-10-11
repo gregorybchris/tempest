@@ -60,7 +60,9 @@ impl<S: Server> fmt::Display for RequestError<S> {
         match self {
             Self::Unreachable => f.write_str(S::UNREACHABLE),
             Self::Refused(_, error) => f.write_str(&sentence(S::message(error))),
-            Self::Unexpected(why) => write!(f, "{} answered oddly: {why}", S::NAME),
+            Self::Unexpected(why) => {
+                write!(f, "{} returned an unexpected response: {why}", S::NAME)
+            }
         }
     }
 }
@@ -230,7 +232,7 @@ mod tests {
         assert!(matches!(odd, Err(RequestError::Unexpected(_))));
         assert_eq!(
             odd.unwrap_err().to_string(),
-            "The server answered oddly: status 502"
+            "The server returned an unexpected response: status 502"
         );
         let wrong: Answer<u8> = decode(200, "\"x\"");
         assert!(matches!(wrong, Err(RequestError::Unexpected(_))));

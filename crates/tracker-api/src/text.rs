@@ -46,7 +46,7 @@ pub fn clean_name(name: &str) -> Result<String, TextError> {
     let name = line(name, "the name", MAX_NAME)?;
     if let Some(c) = name.chars().find(|c| is_invisible(*c)) {
         return Err(TextError(format!(
-            "the name has the invisible character {c:?}, which could hide who is who"
+            "the name has the invisible character {c:?}, which could be used to impersonate someone"
         )));
     }
     match name.is_empty() {
@@ -168,13 +168,13 @@ pub fn normalize_tag(tag: &str) -> Result<String, TextError> {
             }
         } else {
             return Err(TextError(format!(
-                "the tag {tag:?} has {c:?}: use letters, digits and -"
+                "the tag {tag:?} has {c:?}: tags use letters, digits and hyphens"
             )));
         }
     }
     let normal = normal.trim_end_matches('-').to_owned();
     if normal.is_empty() {
-        return Err(TextError("a tag is empty".into()));
+        return Err(TextError("a tag is empty: remove the extra comma".into()));
     }
     if normal.chars().count() > MAX_TAG {
         return Err(TextError(format!(
@@ -194,7 +194,7 @@ pub fn normalize_tags(tags: &[String]) -> Result<Vec<String>, TextError> {
         }
     }
     match normal.len() > MAX_TAGS {
-        true => Err(TextError(format!("a listing has at most {MAX_TAGS} tags"))),
+        true => Err(TextError(format!("use at most {MAX_TAGS} tags"))),
         false => Ok(normal),
     }
 }
@@ -214,7 +214,9 @@ fn paragraphs(text: &str, what: &str, max: usize) -> Result<String, TextError> {
         .chars()
         .any(|c| c.is_control() && c != '\n' && c != '\t')
     {
-        return Err(TextError(format!("{what} has control characters")));
+        return Err(TextError(format!(
+            "{what} has unsupported control characters"
+        )));
     }
     within(text.to_owned(), what, max)
 }

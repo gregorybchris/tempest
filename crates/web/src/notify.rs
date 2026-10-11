@@ -70,11 +70,11 @@ pub fn switch(on: bool, switch: RwSignal<bool>, controls: Controls) {
         match granted {
             true => controls.say(
                 Tone::Neutral,
-                "Notifications on: you'll hear when a transfer completes or fails.",
+                "Notifications on. You will be told when a transfer completes or fails.",
             ),
             false => controls.say(
                 Tone::Bad,
-                "The browser blocked notifications. Allow them in the site's settings.",
+                "Notifications are blocked. Allow them for this site in the browser's settings.",
             ),
         }
     });

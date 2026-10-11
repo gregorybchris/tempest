@@ -68,7 +68,8 @@ pub fn link_problem(link: &str) -> Option<&'static str> {
     if link.is_empty() {
         return Some("Paste a tempest: link.");
     }
-    (!link.starts_with("tempest:")).then_some("Links start with tempest:")
+    (!link.starts_with("tempest:"))
+        .then_some("That isn't a tempest: link. It must start with tempest:")
 }
 
 #[component]
@@ -94,7 +95,7 @@ fn AddLink() -> impl IntoView {
             .then(|| folder.with(|f| edits::save_folder_problem(f)))
             .flatten()
     };
-    // The folder a download goes to without one: the engine's save folder.
+    // The folder a download goes to without one: the daemon's save folder.
     let default_folder = move || {
         config
             .info
@@ -149,7 +150,7 @@ fn AddLink() -> impl IntoView {
                         on:input=move |e| link.set(event_target_value(&e))
                     />
                     {move || problem().map(|p| view! { <span class="field__error">{p}</span> })}
-                    <span class="field__help">"The download starts through the queue."</span>
+                    <span class="field__help">"It starts when the queue has a free slot."</span>
                 </label>
                 <div class="field">
                     <label class="field__label" for="add-folder">"Save to"</label>
@@ -168,11 +169,11 @@ fn AddLink() -> impl IntoView {
                         <Browse purpose=Purpose::Download value=folder on_choose=move |path| folder.set(path) />
                     </div>
                     {move || folder_problem().map(|p| view! { <span class="field__error">{p}</span> })}
-                    <span class="field__help">"A folder on the engine's machine; empty for the default."</span>
+                    <span class="field__help">"Folder on the daemon's machine. Leave empty to use the default."</span>
                 </div>
                 <button type="submit" hidden=true></button>
             </form>
-            <Checkbox checked=stopped on_change=move |on| stopped.set(on)>"Add it stopped"</Checkbox>
+            <Checkbox checked=stopped on_change=move |on| stopped.set(on)>"Add without starting"</Checkbox>
         </Modal>
     }
 }
@@ -209,7 +210,8 @@ fn Download() -> impl IntoView {
             .with(|i| i.as_ref().and_then(|i| i.settings.save_folder.clone()))
             .unwrap_or_else(|| "the default folder".to_owned())
     };
-    let body = move || match stored.get_value().parse::<Link>().ok() {
+    let body = move || {
+        match stored.get_value().parse::<Link>().ok() {
         Some(link) => {
             let name = link
                 .name
@@ -219,19 +221,20 @@ fn Download() -> impl IntoView {
             view! {
                 <dl class="facts">
                     <dt>"Name"</dt>
-                    <dd>{name}<span class="facts__path">" (from the link, unverified)"</span></dd>
-                    <dt>"Bundle"</dt>
+                    <dd>{name}<span class="facts__path">" (from the link, not checked)"</span></dd>
+                    <dt>"Bundle ID"</dt>
                     <dd class="facts__path">{link.bundle.to_string()}</dd>
                     {(!trackers.is_empty()).then(|| view! { <dt>"Tracker"</dt><dd>{trackers}</dd> })}
                     <dt>"Save to"</dt>
                     <dd>{folder}</dd>
                 </dl>
-                <span class="field__help">"The download starts through the queue."</span>
+                <span class="field__help">"It starts when the queue has a free slot."</span>
             }
             .into_any()
         }
-        None => view! { <span class="field__error">"The link is damaged or cut short."</span> }
+        None => view! { <span class="field__error">"This link is incomplete or invalid. Copy it again."</span> }
             .into_any(),
+    }
     };
     let valid = stored.with_value(|t| t.parse::<Link>().is_ok());
     view! {
@@ -268,7 +271,7 @@ fn Remove(id: BundleId) -> impl IntoView {
         let done = match (delete_files, share) {
             (true, true) => format!("Removed {name} and deleted its original files"),
             (true, false) => format!("Removed {name} and deleted its files"),
-            (false, _) => format!("Removed {name}; its files stay"),
+            (false, _) => format!("Removed {name}. Files kept."),
         };
         controls.run(api::remove(id, delete_files), done);
     };
@@ -281,19 +284,19 @@ fn Remove(id: BundleId) -> impl IntoView {
                 <Button kind=ButtonKind::Ghost on_click=close>"Cancel"</Button>
                 <Button on_click=move || remove(false)>"Remove, keep files"</Button>
                 <Button kind=ButtonKind::Danger on_click=move || remove(true)>
-                    {if share { "Delete originals" } else { "Delete files too" }}
+                    {if share { "Remove and delete originals" } else { "Remove and delete files" }}
                 </Button>
             }
         >
             {match share {
                 true => view! {
                     <p>
-                        "It stops and leaves the list. Its files are your originals, not copies, "
-                        "so deleting them can't be undone."
+                        "Stops sharing and removes it from the list. The files are your originals; "
+                        "deleting them can't be undone."
                     </p>
                 }.into_any(),
                 false => view! {
-                    <p>"It stops and leaves the list. Its files stay on disk unless you delete them too."</p>
+                    <p>"Stops the transfer and removes it from the list. Downloaded files stay on disk unless you delete them."</p>
                 }.into_any(),
             }}
         </Modal>
@@ -308,11 +311,12 @@ fn Rename(id: BundleId) -> impl IntoView {
     let input = NodeRef::<Input>::new();
     focus_on_load(input);
     let save = move || {
+        let old = transfer(id).map(|t| t.name).unwrap_or_default();
         let text = name.get_untracked().trim().to_owned();
         close();
         let (value, done) = match text.is_empty() {
-            true => (None, "Gave it the bundle's own name".to_owned()),
-            false => (Some(text.clone()), format!("Renamed to {text}")),
+            true => (None, format!("Restored the original name of {old}")),
+            false => (Some(text.clone()), format!("Renamed {old} to {text}")),
         };
         controls.run(api::rename(id, value), done);
     };
@@ -338,7 +342,7 @@ fn Rename(id: BundleId) -> impl IntoView {
                         prop:value=move || name.get()
                         on:input=move |e| name.set(event_target_value(&e))
                     />
-                    <span class="field__help">"Only this list shows it. Leave it empty for the bundle's own name."</span>
+                    <span class="field__help">"Changes the name shown here, not the files. Leave empty to restore the original name."</span>
                 </label>
             </form>
         </Modal>
@@ -398,12 +402,13 @@ fn Tags(id: BundleId) -> impl IntoView {
         .unwrap_or_default();
     let text = RwSignal::new(current.join(", "));
     let save = move || {
+        let tagged = self::transfer(id).map(|t| t.name).unwrap_or_default();
         let tags = parse_tags(&text.get_untracked());
         close();
         let done = match tags.is_empty() {
-            true => "Removed its tags".to_owned(),
+            true => format!("Removed tags from {tagged}"),
             false => format!(
-                "Tagged it {}",
+                "Tagged {tagged}: {}",
                 tags.iter()
                     .map(|t| format!("#{t}"))
                     .collect::<Vec<_>>()
@@ -429,7 +434,7 @@ fn Tags(id: BundleId) -> impl IntoView {
             }
         >
             <form on:submit=move |e| { e.prevent_default(); save(); }>
-                <Field label="Tags" value=text placeholder="music, live" help="Separated by commas. #tag in the filter shows them." focus=true />
+                <Field label="Tags" value=text placeholder="music, live" help="Separate tags with commas. Filter by #tag in the list." focus=true />
             </form>
             <div class="chips">{preview}</div>
         </Modal>
@@ -447,11 +452,12 @@ fn SetCategory(id: BundleId) -> impl IntoView {
         .unwrap_or_default();
     let chosen = RwSignal::new(transfer.and_then(|t| t.category).unwrap_or_default());
     let save = move || {
+        let categorized = self::transfer(id).map(|t| t.name).unwrap_or_default();
         let category = Some(chosen.get_untracked()).filter(|c| !c.is_empty());
         close();
         let done = match &category {
-            Some(category) => format!("It's in {category} now"),
-            None => "It has no category now".to_owned(),
+            Some(category) => format!("Category of {categorized}: {category}"),
+            None => format!("Removed the category of {categorized}"),
         };
         controls.run(api::set_category(id, category), done);
     };
@@ -475,7 +481,7 @@ fn SetCategory(id: BundleId) -> impl IntoView {
         >
             <div class="choices" role="radiogroup" aria-label="Category">
                 <Radio name="category" checked=Signal::derive(move || chosen.with(String::is_empty)) on_select=move || chosen.set(String::new())>
-                    "none"
+                    "None"
                 </Radio>
                 {move || options().into_iter().map(|option| {
                     let (o, value) = (option.clone(), option.clone());
@@ -486,7 +492,7 @@ fn SetCategory(id: BundleId) -> impl IntoView {
                     }
                 }).collect_view()}
             </div>
-            <p class="dim note">"Categories and their folders are in Settings. A new download in a category goes to its folder."</p>
+            <p class="dim note">"New downloads in a category are saved to its folder. Edit categories in Settings."</p>
         </Modal>
     }
 }
@@ -508,6 +514,7 @@ fn Move(id: BundleId) -> impl IntoView {
     let input = NodeRef::<Input>::new();
     focus_on_load(input);
     let save = move || {
+        let moved = self::transfer(id).map(|t| t.name).unwrap_or_default();
         let text = folder.get_untracked().trim().to_owned();
         if let Some(why) = edits::folder_problem(&text) {
             problem.set(Some(why.to_owned()));
@@ -516,7 +523,7 @@ fn Move(id: BundleId) -> impl IntoView {
         close();
         controls.run(
             api::move_to(id, text.clone()),
-            format!("Moving its files to {text}"),
+            format!("Moving {moved} to {text}"),
         );
     };
     view! {
@@ -546,7 +553,7 @@ fn Move(id: BundleId) -> impl IntoView {
                         />
                         <Browse purpose=Purpose::Move value=folder on_choose=move |path| { folder.set(path); problem.set(None); } />
                     </div>
-                    <span class="field__help">"An absolute path on the engine's machine. The transfer pauses while its files move."</span>
+                    <span class="field__help">"Absolute path on the daemon's machine. The transfer pauses while its files move."</span>
                 </div>
             </form>
             {problem_line(problem)}
@@ -574,17 +581,23 @@ fn Limits(id: BundleId) -> impl IntoView {
     let share = transfer.kind == Kind::Share;
     let action = RwSignal::new(form.action);
     let problem = RwSignal::new(None::<String>);
-    // What the engine's settings say, for the placeholders.
-    let engine = config.info.get_untracked().map(|i| i.settings.sharing);
-    let engine_says = |value: Option<String>| match (share, value) {
-        (true, _) => "no limit of its own".to_owned(),
-        (false, Some(value)) => format!("the engine's: {value}"),
-        (false, None) => "the engine's: none".to_owned(),
+    // What the Settings say, for the placeholders.
+    let settings = config.info.get_untracked().map(|i| i.settings.sharing);
+    let settings_says = |value: Option<String>| match (share, value) {
+        (true, _) => "no limit".to_owned(),
+        (false, Some(value)) => format!("Settings: {value}"),
+        (false, None) => "Settings: no limit".to_owned(),
     };
-    let engine_ratio = engine_says(engine.as_ref().and_then(|s| s.ratio).map(|r| r.to_string()));
-    let engine_time = engine_says(engine.as_ref().and_then(|s| s.time.clone()));
-    let engine_idle = engine_says(engine.as_ref().and_then(|s| s.idle_timeout.clone()));
+    let settings_ratio = settings_says(
+        settings
+            .as_ref()
+            .and_then(|s| s.ratio)
+            .map(|r| r.to_string()),
+    );
+    let settings_time = settings_says(settings.as_ref().and_then(|s| s.time.clone()));
+    let settings_idle = settings_says(settings.as_ref().and_then(|s| s.idle_timeout.clone()));
     let save = move || {
+        let name = self::transfer(id).map(|t| t.name).unwrap_or_default();
         let form = LimitsForm {
             download: fields[0].get_untracked(),
             upload: fields[1].get_untracked(),
@@ -599,7 +612,7 @@ fn Limits(id: BundleId) -> impl IntoView {
                 close();
                 controls.run(
                     api::set_transfer_settings(id, settings),
-                    "Saved its limits".to_owned(),
+                    format!("Saved limits for {name}"),
                 );
             }
             Err(error) => problem.set(Some(error)),
@@ -630,22 +643,22 @@ fn Limits(id: BundleId) -> impl IntoView {
         >
             <form class="form-grid" on:submit=move |e| { e.prevent_default(); save(); }>
                 <h3 class="form-grid__title">"Speed"</h3>
-                {input(0, "Download", "no limit of its own".to_owned())}
-                {input(1, "Upload", "no limit of its own".to_owned())}
+                {input(0, "Download", "no limit".to_owned())}
+                {input(1, "Upload", "no limit".to_owned())}
                 <h3 class="form-grid__title">"Sharing"</h3>
-                {input(2, "Ratio", engine_ratio.clone())}
-                {input(3, "Time", engine_time.clone())}
-                {input(4, "Idle timeout", engine_idle.clone())}
+                {input(2, "Ratio", settings_ratio.clone())}
+                {input(3, "Time", settings_time.clone())}
+                {input(4, "Idle timeout", settings_idle.clone())}
                 <div class="form-grid__wide">
                     <SelectField
-                        label="At the limit"
+                        label="When a limit is reached"
                         options=edits::ACTIONS.map(|(value, name)| (value.to_owned(), name.to_owned())).to_vec()
                         value=action
                     />
                 </div>
                 <button type="submit" hidden=true></button>
             </form>
-            <p class="dim note">"Speeds such as 500K or 2.5M, within the engine's limits; times such as 12h. Empty keeps the engine's setting (a share has none); none means no limit of its own."</p>
+            <p class="dim note">"Speeds: 500K, 2.5M (bytes per second). Times: 30m, 12h, 7d. Leave a field empty to use the Settings value (shares have none). Type none for no limit."</p>
             {problem_line(problem)}
         </Modal>
     }
@@ -678,7 +691,7 @@ fn Columns() -> impl IntoView {
                 <Button kind=ButtonKind::Primary on_click=save>"Save"</Button>
             }
         >
-            <p class="dim note">"Name, progress and status always show. Narrow windows drop columns, least important first. The TUI shows the same ones."</p>
+            <p class="dim note">"Name, progress and status always show. Narrow windows hide the others, least important first."</p>
             <div class="choices choices--columns">
                 {Column::OPTIONAL.map(|column| {
                     let on = Signal::derive(move || chosen.with(|c| c.contains(&column)));
@@ -755,7 +768,7 @@ fn Views() -> impl IntoView {
                         <Button small=true kind=ButtonKind::Ghost title="Delete this view" on_click=move || {
                             let views: Vec<SavedView> = ui.views.with_untracked(|v| v.iter().filter(|v| v.name != remove).cloned().collect());
                             save_views(views, format!("Deleted the view {remove}"));
-                        }>"delete"</Button>
+                        }>"Delete"</Button>
                     </li>
                 }
             })
@@ -764,14 +777,14 @@ fn Views() -> impl IntoView {
     view! {
         <Modal open=true on_close=close title="Saved views">
             {move || ui.views.with(Vec::is_empty).then(|| view! {
-                <p class="dim">"No views yet. A view is a filter, a status and an order, saved under a name and shared with the TUI."</p>
+                <p class="dim">"No saved views. A view stores the current filter, status and sort order under a name."</p>
             })}
             <ul class="views">{rows}</ul>
             <form class="views__save" on:submit=move |e| { e.prevent_default(); save(); }>
-                <Field label="Save the list as it is" value=name placeholder="a name, such as music" focus=true />
+                <Field label="Save current filters as a view" value=name placeholder="Name, such as music" focus=true />
                 <Button kind=ButtonKind::Primary on_click=save>"Save view"</Button>
             </form>
-            <p class="dim note">{move || format!("Now: {}", current())}</p>
+            <p class="dim note">{move || format!("Current: {}", current())}</p>
             {problem_line(problem)}
             <Button small=true kind=ButtonKind::Ghost on_click=move || { ui.finding.set(Finding::default()); close(); }>
                 "Show everything"
@@ -818,9 +831,9 @@ fn Network() -> impl IntoView {
         <Modal
             open=true
             on_close=close
-            title="Before you start"
+            title="Network features are on"
             actions=move || view! {
-                <Button kind=ButtonKind::Primary on_click=close>"Got it"</Button>
+                <Button kind=ButtonKind::Primary on_click=close>"Close"</Button>
             }
         >
             <p>{network::INTRO}</p>
@@ -842,7 +855,7 @@ mod tests {
         assert_eq!(link_problem("  "), Some("Paste a tempest: link."));
         assert_eq!(
             link_problem("magnet:?xt"),
-            Some("Links start with tempest:")
+            Some("That isn't a tempest: link. It must start with tempest:")
         );
         assert_eq!(link_problem(" tempest:abc "), None);
     }

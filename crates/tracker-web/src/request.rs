@@ -66,7 +66,7 @@ mod tests {
         let refused = request::decode::<Tracker, ()>(401, unauthorized).unwrap_err();
         assert_eq!(refused.to_string(), "Sign in first.");
         assert!(needs_sign_in(&refused) && !not_found(&refused));
-        let missing = r#"{"error":"not_found","message":"no such listing"}"#;
+        let missing = r#"{"error":"not_found","message":"no such bundle"}"#;
         assert!(not_found(
             &request::decode::<Tracker, ()>(404, missing).unwrap_err()
         ));

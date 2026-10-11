@@ -111,7 +111,7 @@ pub fn ThemeButton(
             class="theme-button"
             type="button"
             title="Next theme (T)"
-            aria-label=move || format!("Theme: {}. Switch to the next.", theme.get().name())
+            aria-label=move || format!("Theme: {}. Switch to the next theme.", theme.get().name())
             on:click=move |_| theme.update(|t| *t = t.next())
         >
             "◐"

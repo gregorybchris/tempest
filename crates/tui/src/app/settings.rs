@@ -226,7 +226,7 @@ impl App {
         None
     }
 
-    /// `x`: removes the row's entry, or gives its setting the config file's value again.
+    /// `x`: removes the row's entry, or restores its setting to the config file's value.
     pub(super) fn remove_row(&mut self) -> Option<Request> {
         let row = self.current_row()?;
         let view = self.settings.clone()?;
@@ -264,7 +264,7 @@ impl App {
                     about: row.label.to_lowercase(),
                 }),
                 Some(_) => {
-                    let text = format!("{} already has the config file's value.", row.label);
+                    let text = format!("{} already matches the config file.", row.label);
                     self.notify(text, false);
                     None
                 }
@@ -332,7 +332,7 @@ impl App {
             }
             ValueTarget::CategoryFolder(name) => {
                 if !Path::new(text).is_absolute() {
-                    return Err("Type an absolute path.".to_owned());
+                    return Err("Enter an absolute path, such as /home/you/films.".to_owned());
                 }
                 Ok(Request::SetCategory {
                     name: name.clone(),
@@ -366,7 +366,7 @@ impl App {
                     return Err(format!("There is already a category named {name}."));
                 }
                 if !Path::new(&folder).is_absolute() {
-                    return Err("Its folder is an absolute path.".to_owned());
+                    return Err("Enter an absolute path, such as /home/you/films.".to_owned());
                 }
                 Ok(Request::SetCategory {
                     name,

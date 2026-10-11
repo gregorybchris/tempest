@@ -233,7 +233,7 @@ pub const BINDINGS: &[Binding] = &[
         scopes: TRANSFER,
         command: Command::OpenFolder,
         hint: "",
-        help: "Open its folder, on the engine's machine",
+        help: "Open its folder, on the daemon's machine",
     },
     Binding {
         keys: &["y"],
@@ -394,7 +394,7 @@ pub const BINDINGS: &[Binding] = &[
         scopes: &[Rows],
         command: Command::RemoveEntry,
         hint: "remove/reset",
-        help: "Remove the entry, or give the setting the config file's value again",
+        help: "Remove the entry, or restore a setting to the config file's value",
     },
     Binding {
         keys: &["1"],

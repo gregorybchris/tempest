@@ -87,7 +87,7 @@ pub fn Browse(
     };
     view! {
         <button class=class type="button" aria-haspopup="dialog" disabled=disabled
-            title="Choose from the engine's folders" on:click=open>
+            title="Choose from the daemon's folders" on:click=open>
             "Browse…"
         </button>
     }
@@ -349,7 +349,7 @@ fn PickerDialog(pick: Pick) -> impl IntoView {
         let path = paths::expand(text.trim(), home.as_deref());
         if !absolute(&path) {
             edit_error.set(Some(
-                r"Type an absolute path, such as /home or C:\Users.".to_owned(),
+                r"Enter an absolute path, such as /home or C:\Users.".to_owned(),
             ));
             return;
         }
@@ -380,9 +380,9 @@ fn PickerDialog(pick: Pick) -> impl IntoView {
                     }
                 }
                 Err(error) => edit_error.set(Some(match error.code() {
-                    Some("not_found") => "Nothing is there on the engine's machine.".to_owned(),
+                    Some("not_found") => "No such folder on the daemon's machine.".to_owned(),
                     Some("permission_denied") => {
-                        "The engine's user isn't allowed to read that folder.".to_owned()
+                        "The daemon's user isn't allowed to read that folder.".to_owned()
                     }
                     _ => error.to_string(),
                 })),
@@ -586,7 +586,7 @@ fn PickerDialog(pick: Pick) -> impl IntoView {
                             node_ref=filter_box
                             class="input"
                             type="search"
-                            placeholder="type to filter"
+                            placeholder="Filter"
                             aria-label="Filter the entries"
                             aria-controls="picker-list"
                             spellcheck="false"
@@ -602,7 +602,7 @@ fn PickerDialog(pick: Pick) -> impl IntoView {
                         aria-pressed=move || bool_attr(browser.with(Browser::hidden))
                         on:click=move |_| set_hidden(!browser.with_untracked(Browser::hidden))
                     >
-                        "hidden"
+                        "Show hidden"
                     </button>
                     <span class="picker__count dim" aria-live="polite">{move || count(&browser.read())}</span>
                 </div>
@@ -705,7 +705,7 @@ fn PathBar(
                         node_ref=path_box
                         class="input pathbar__input"
                         type="text"
-                        aria-label="Go to a path on the engine's machine"
+                        aria-label="Go to a path on the daemon's machine"
                         aria-invalid=move || bool_attr(edit_error.with(Option::is_some))
                         aria-describedby="picker-path-error"
                         spellcheck="false"
@@ -723,20 +723,20 @@ fn PathBar(
                             }
                         }
                     />
-                    <button class="btn btn--small" type="submit">"go"</button>
-                    <button class="btn btn--small btn--ghost" type="button" on:click=move |_| cancel_edit()>"cancel"</button>
+                    <button class="btn btn--small" type="submit">"Go"</button>
+                    <button class="btn btn--small btn--ghost" type="button" on:click=move |_| cancel_edit()>"Cancel"</button>
                 </form>
             }
         })
     };
     let host = if remote {
-        "The engine's machine, not this device"
+        "The daemon's machine, not this device"
     } else {
-        "The engine's machine"
+        "The daemon's machine"
     };
     view! {
         <div class="pathbar" data-editing=move || editing.with(Option::is_some).then_some("")>
-            <span class="pathbar__host" title=host>"engine:"</span>
+            <span class="pathbar__host" title=host>"daemon:"</span>
             {field}
             <ol class="pathbar__crumbs" node_ref=crumbs_box aria-label="Path"
                 hidden=move || editing.with(Option::is_some)
@@ -751,14 +751,14 @@ fn PathBar(
             <button class="btn btn--small btn--ghost pathbar__edit" type="button" title="Type a path (ctrl+L)"
                 hidden=move || editing.with(Option::is_some)
                 on:click=move |_| start_edit(None)>
-                "type path"
+                "Type path"
             </button>
         </div>
         {move || edit_error.get().map(|error| view! {
             <p class="field__error pathbar__error" id="picker-path-error" role="alert">{error}</p>
         })}
         {remote.then(|| view! {
-            <p class="picker__remote dim">"These are the engine's folders, on its machine, not this device's."</p>
+            <p class="picker__remote dim">"These are the daemon's folders, on its machine, not this device's."</p>
         })}
     }
 }
@@ -798,7 +798,7 @@ fn Places(
     };
     view! {
         <nav class="picker__places" aria-label="Places">
-            <h3 class="picker__places-title">"places"</h3>
+            <h3 class="picker__places-title">"Places"</h3>
             <ul>{items}</ul>
         </nav>
     }
@@ -829,7 +829,7 @@ fn PlaceMenu(
     });
     view! {
         <div class="picker__place-menu">
-            <Select options value label="Places" placeholder="places" on_change=move |path: String| navigate(path, None) />
+            <Select options value label="Places" placeholder="Places" on_change=move |path: String| navigate(path, None) />
         </div>
     }
 }
@@ -879,12 +879,12 @@ fn Entries(
             if let Some(failure) = b.failure() {
                 let (title, text) = match failure.code.as_str() {
                     "permission_denied" => (
-                        "No permission",
-                        "The engine's user isn't allowed to read this folder.".to_owned(),
+                        "Can't open this folder",
+                        "The daemon's user isn't allowed to read this folder.".to_owned(),
                     ),
                     "not_found" => (
-                        "Not there",
-                        "No folder by this name on the engine's machine.".to_owned(),
+                        "Folder not found",
+                        "No folder by this name on the daemon's machine.".to_owned(),
                     ),
                     _ => ("Can't read this folder", failure.message.clone()),
                 };
@@ -910,22 +910,22 @@ fn Entries(
                         <div class="picker__empty-title">{format!("Nothing matches “{filter}”")}</div>
                         <p><kbd>"esc"</kbd>" clears the filter."</p>
                         <Button small=true kind=ButtonKind::Ghost on_click=move || { set_filter(String::new()); focus_list(); }>
-                            "clear filter"
+                            "Clear filter"
                         </Button>
                     </div>
                 }.into_any()
             } else if !folder.entries.is_empty() {
                 view! {
                     <div class="picker__empty">
-                        <div class="picker__empty-title">"Only hidden entries"</div>
-                        <p><kbd>"."</kbd>" shows them."</p>
+                        <div class="picker__empty-title">"Only hidden items"</div>
+                        <p>"Press "<kbd>"."</kbd>" to show them."</p>
                     </div>
                 }.into_any()
             } else {
                 view! {
                     <div class="picker__empty">
                         <div class="picker__empty-title">"Empty folder"</div>
-                        <p>"Nothing in here yet."</p>
+                        <p>"It has no files or folders."</p>
                     </div>
                 }.into_any()
             })
@@ -946,7 +946,7 @@ fn Entries(
             .then(|| {
                 view! {
                     <p class="picker__truncated dim">
-                        {format!("Showing the first {} entries. Type a path to go straight to one.", format::count(MAX_ENTRIES as u64))}
+                        {format!("Only the first {} entries are shown. Type a path to reach others.", format::count(MAX_ENTRIES as u64))}
                     </p>
                 }
             })
@@ -957,7 +957,7 @@ fn Entries(
             <div class="picker__loading" aria-hidden="true" hidden=move || !loading.get()></div>
             <div class="picker__head" aria-hidden="true">
                 <span></span>
-                <span>"name"</span>
+                <span>"Name"</span>
                 <span class="num">"size"</span>
                 <span class="num picker__date">"modified"</span>
             </div>

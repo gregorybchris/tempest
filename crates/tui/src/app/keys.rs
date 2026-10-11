@@ -255,7 +255,7 @@ impl App {
                     return Some(Request::Open(target.id, folder));
                 }
                 let text = format!(
-                    "{} is in {} on the engine's machine.",
+                    "{} is in {} on the daemon's machine.",
                     target.name,
                     folder.display()
                 );

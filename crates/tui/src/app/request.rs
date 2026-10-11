@@ -143,7 +143,7 @@ impl Request {
             (Self::Categories | Self::Settings | Self::Look(..), _) => return None,
             (Self::ChangeSettings { about, .. }, _) => format!("Saved {}.", about.as_ref()?),
             (Self::ResetSetting { about, .. }, _) => {
-                format!("Gave {about} the config file's value again.")
+                format!("Restored {about} to the config file's value.")
             }
             (
                 Self::SetCategory {
@@ -177,7 +177,7 @@ impl Request {
                 let about = about.as_deref().unwrap_or("the settings");
                 format!("Couldn't save {about}: {error}")
             }
-            Self::ResetSetting { about, .. } => format!("Couldn't reset {about}: {error}"),
+            Self::ResetSetting { about, .. } => format!("Couldn't restore {about}: {error}"),
             Self::SetCategory { name, .. } => {
                 format!("Couldn't save the category {name}: {error}")
             }
@@ -229,7 +229,7 @@ impl Action {
                 format!("Removed {name} and deleted its files.")
             }
             Self::Rename(Some(new)) => format!("Renamed {name} to {new}."),
-            Self::Rename(None) => format!("{name} has its bundle's name again."),
+            Self::Rename(None) => format!("Restored the original name of {name}."),
             Self::Tags(tags) if tags.is_empty() => format!("Cleared {name}'s tags."),
             Self::Tags(tags) => {
                 let tags: Vec<&str> = tags.iter().map(String::as_str).collect();

@@ -24,10 +24,10 @@ pub fn MePage() -> impl IntoView {
     let ctx = use_ctx();
     move || {
         match ctx.me.get() {
-        Me::Unknown => view! { <p class="page loading dim">"loading…"</p> }.into_any(),
+        Me::Unknown => view! { <p class="page loading dim">"Loading…"</p> }.into_any(),
         Me::SignedOut => view! {
             <section class="page">
-                <Empty title="Not signed in" text="Sign in to see your account and the listings you published.".to_owned()>
+                <Empty title="Not signed in" text="Sign in to see your account and the bundles you published.".to_owned()>
                     <Button kind=ButtonKind::Primary on_click=move || ctx.sign_in()>"Sign in"</Button>
                 </Empty>
             </section>
@@ -94,22 +94,22 @@ fn AccountView(account: Account) -> impl IntoView {
                 <p class="dim">{move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}</p>
             </header>
             <div class="me__grid">
-                <Panel title="Name">
+                <Panel title="Display name">
                     <form class="me__name" on:submit=move |e| {
                         e.prevent_default();
                         save();
                     }>
                         <TextField
-                            label="Shown on your listings and comments"
+                            label="Name"
                             value=name
-                            placeholder="no name: your key shows"
+                            placeholder="Leave empty to show your key"
                             error=problem
                         />
                         <button class="btn btn--primary" type="submit" disabled=move || saving.get()>"Save"</button>
                     </form>
                 </Panel>
                 <Panel title="Key">
-                    <p class="note dim">"Your account is this Tempest key. Signing in from another computer needs the same key."</p>
+                    <p class="note dim">"Your account is identified by this key. To sign in from another computer, use the same key there."</p>
                     <Copyable text=key what="key" />
                     <div class="me__actions">
                         <Button kind=ButtonKind::Danger small=true on_click=move || sign_out()>"Sign out"</Button>
@@ -128,7 +128,7 @@ fn MyListings() -> impl IntoView {
     let list = shown(fetched, move |page: ListingPage| {
         if page.listings.is_empty() {
             return view! {
-                <Empty title="Nothing published yet" text="Publish a share with: tempest share --publish <this tracker> <path>. It shows here at once, and to everyone once the tracker has its manifest.".to_owned() />
+                <Empty title="Nothing published yet" text="Publish with tempest share --publish <tracker> <path>. It appears here right away, and for everyone once the tracker has fetched its manifest from a peer.".to_owned() />
             }
             .into_any();
         }
@@ -146,7 +146,7 @@ fn MyListings() -> impl IntoView {
                             <th class="num">"Votes"</th>
                             <th class="num">"Downloads"</th>
                             <th class="num">"Comments"</th>
-                            <th></th>
+                            <th><span class="sr-only">"Actions"</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -159,8 +159,8 @@ fn MyListings() -> impl IntoView {
         .into_any()
     });
     let count = move || match fetched.get() {
-        Some(Ok(page)) => plural(page.total, "listing"),
-        _ => "Your listings".to_owned(),
+        Some(Ok(page)) => plural(page.total, "bundle"),
+        _ => "Your bundles".to_owned(),
     };
     view! {
         <section>
@@ -175,16 +175,16 @@ fn MyRow(listing: Listing) -> impl IntoView {
     let ctx = use_ctx();
     let bundle = listing.bundle;
     let (label, tone) = match listing.status {
-        ListingStatus::Listed => ("listed", Tone::Up),
+        ListingStatus::Listed => ("published", Tone::Up),
         ListingStatus::Pending => ("pending", Tone::Warn),
         ListingStatus::Unpublished => ("unpublished", Tone::Dim),
     };
     let why = match listing.status {
-        ListingStatus::Listed => "Shown to everyone",
+        ListingStatus::Listed => "Visible to everyone",
         ListingStatus::Pending => {
-            "Waiting for the tracker to fetch its manifest from a peer sharing it"
+            "Hidden until the tracker fetches its manifest from a peer that has the files"
         }
-        ListingStatus::Unpublished => "Only you see it; edit it to list it again",
+        ListingStatus::Unpublished => "Hidden from others. Edit it to publish it again",
     };
     let title = match listing.title.is_empty() {
         true => "untitled".to_owned(),
@@ -199,7 +199,7 @@ fn MyRow(listing: Listing) -> impl IntoView {
             <td class="num">{format::count(listing.downloads)}</td>
             <td class="num">{format::count(listing.comments)}</td>
             <td class="num">
-                <a class="btn btn--small" href=Route::Edit(bundle).hash() on:click=|e| e.stop_propagation()>"edit"</a>
+                <a class="btn btn--small" href=Route::Edit(bundle).hash() on:click=|e| e.stop_propagation()>"Edit"</a>
             </td>
         </tr>
     }

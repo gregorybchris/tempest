@@ -32,11 +32,11 @@ pub fn UserPage(key: PeerId) -> impl IntoView {
     let (fetched, _) = fetch::<Profile>(move || format!("accounts/{key}"));
     move || {
         match fetched.get() {
-        None => view! { <p class="page loading dim">"loading…"</p> }.into_any(),
+        None => view! { <p class="page loading dim">"Loading…"</p> }.into_any(),
         Some(Err(error)) if request::not_found(&error) => view! {
             <section class="page">
                 <Empty title="No such account" text="This tracker has no account with that key.".to_owned()>
-                    <a class="btn" href=Route::default().hash()>"Back to the listings"</a>
+                    <a class="btn" href=Route::default().hash()>"Back to the bundles"</a>
                 </Empty>
             </section>
         }
@@ -58,7 +58,7 @@ fn Account(profile: Profile) -> impl IntoView {
     let own = move || ctx.me.with(|me| me.account().is_some_and(|a| a.key == key));
     let joined = profile.joined;
     let banned = profile.banned;
-    let steps = vec![("Listings".to_owned(), Route::default().hash())];
+    let steps = vec![("Bundles".to_owned(), Route::default().hash())];
     view! {
         <article class="page user">
             <header class="page__head">
@@ -71,7 +71,7 @@ fn Account(profile: Profile) -> impl IntoView {
                     <p class="user__sub dim">
                         {match profile.name {
                             Some(_) => "",
-                            None => "No name chosen. ",
+                            None => "No name set. ",
                         }}
                         {move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}
                         {move || own().then(|| view! {
@@ -84,7 +84,7 @@ fn Account(profile: Profile) -> impl IntoView {
             </section>
             {match banned {
                 true => view! {
-                    <p class="notice">"The operator banned this key. Its listings and comments are hidden."</p>
+                    <p class="notice">"The operator banned this key. Its bundles and comments are hidden."</p>
                 }
                 .into_any(),
                 false => view! { <Details profile /> }.into_any(),
@@ -119,11 +119,11 @@ fn Details(profile: Profile) -> impl IntoView {
     };
     view! {
         <dl class="stats user__stats">
-            <div title="Listings that show">
-                <dt>"listings"</dt>
+            <div title="Bundles visible to everyone">
+                <dt>"bundles"</dt>
                 <dd class="num">{format::count(stats.listings)}</dd>
             </div>
-            <div title="Completed downloads of its listings">
+            <div title="Completed downloads of its bundles">
                 <dt>"downloads"</dt>
                 <dd class="num">{format::count(stats.downloads)}</dd>
             </div>
@@ -131,12 +131,12 @@ fn Details(profile: Profile) -> impl IntoView {
                 <dt>"votes"</dt>
                 <dd class="num">{present::score(score)}</dd>
             </div>
-            <div title="Comments on listings that show">
+            <div title="Comments on visible bundles">
                 <dt>"comments"</dt>
                 <dd class="num">{format::count(stats.comments)}</dd>
             </div>
             {move || sharing.get().map(|(now, of)| view! {
-                <div title="Listings with at least one peer that has everything">
+                <div title="Bundles with at least one complete copy online">
                     <dt>"sharing now"</dt>
                     <dd class="num" class:tone--up=(now > 0)>{format!("{now} of {of}")}</dd>
                 </div>
@@ -144,10 +144,10 @@ fn Details(profile: Profile) -> impl IntoView {
         </dl>
         <div class="user__grid">
             <section class="user__main">
-                <h2 class="section-title">"Listings"</h2>
+                <h2 class="section-title">"Bundles"</h2>
                 {shown(listings, move |page: ListingPage| {
                     if page.listings.is_empty() {
-                        return view! { <Empty title="Nothing listed" text="Nothing from this account shows right now.".to_owned() /> }.into_any();
+                        return view! { <Empty title="No visible bundles" text="This account has no bundles visible to everyone.".to_owned() /> }.into_any();
                     }
                     let more = (page.listings.len() as u64) < page.total;
                     let selected = Selector::new(|| None::<usize>);
@@ -165,7 +165,7 @@ fn Details(profile: Profile) -> impl IntoView {
                         {more.then(|| view! {
                             <div class="user__more">
                                 <Button on_click=move || shown_count.update(|n| *n = (*n + LISTINGS_STEP).min(MAX_PAGE))>
-                                    "show more"
+                                    "Show more"
                                 </Button>
                             </div>
                         })}
@@ -220,11 +220,11 @@ fn Publishes(categories: Vec<Count>, tags: Vec<Count>) -> impl IntoView {
     view! {
         <Panel title="Publishes in">
             {has_categories.then(|| view! {
-                <h3 class="user__label">"categories"</h3>
+                <h3 class="user__label">"Categories"</h3>
                 <div class="user__chips">{categories}</div>
             })}
             {has_tags.then(|| view! {
-                <h3 class="user__label">"tags"</h3>
+                <h3 class="user__label">"Tags"</h3>
                 <div class="user__chips">{tags}</div>
             })}
         </Panel>
@@ -232,7 +232,7 @@ fn Publishes(categories: Vec<Count>, tags: Vec<Count>) -> impl IntoView {
     .into_any()
 }
 
-/// The newest comments an account wrote, each with the listing it is on.
+/// The newest comments an account wrote, each with the bundle it is on.
 #[component]
 fn Said(key: PeerId, total: u64) -> impl IntoView {
     let ctx = use_ctx();
@@ -293,7 +293,7 @@ fn KeyLine(key: PeerId) -> impl IntoView {
                 aria-label="Copy the key"
                 on:click=move |_| ctx.copy(hex.clone(), "key")
             >
-                "copy"
+                "Copy"
             </button>
         </div>
     }
@@ -346,7 +346,7 @@ fn Glyph(key: PeerId) -> impl IntoView {
             viewBox="0 0 8 8"
             shape-rendering="crispEdges"
             role="img"
-            aria-label="A picture made from this account's key"
+            aria-label="Identicon for this account's key"
         >
             <path d=path />
         </svg>

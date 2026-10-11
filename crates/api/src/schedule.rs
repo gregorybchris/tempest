@@ -87,7 +87,7 @@ impl FromStr for TimeOfDay {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Self, String> {
-        let invalid = || format!("{text:?} is not a time of day such as \"22:30\"");
+        let invalid = || format!("\"{text}\" isn't a time such as 22:30");
         let (hour, minute) = text.split_once(':').ok_or_else(invalid)?;
         let number = |part: &str| match part.len() {
             1 | 2 if part.bytes().all(|b| b.is_ascii_digit()) => part.parse().ok(),

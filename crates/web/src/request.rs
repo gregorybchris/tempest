@@ -14,8 +14,8 @@ impl Server for Engine {
     type Error = ApiError;
     // Paths name the API's version themselves.
     const PREFIX: &'static str = "";
-    const NAME: &'static str = "The engine";
-    const UNREACHABLE: &'static str = "Couldn't reach the engine. Is it still running?";
+    const NAME: &'static str = "The daemon";
+    const UNREACHABLE: &'static str = "Couldn't reach the daemon. Is it still running?";
 
     fn code(error: &ApiError) -> &str {
         &error.error

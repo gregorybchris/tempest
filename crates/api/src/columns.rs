@@ -124,7 +124,7 @@ impl Column {
             Self::Progress => "Progress",
             Self::Down => "↓ Download rate",
             Self::Up => "↑ Upload rate",
-            Self::Eta => "ETA (time left)",
+            Self::Eta => "Time left",
             Self::Status => "Status",
             Self::Peers => "Peers (connected/known)",
             Self::Ratio => "Ratio",

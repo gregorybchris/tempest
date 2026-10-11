@@ -142,12 +142,12 @@ pub fn describe(cells: &[ChunkCell], running: bool, index: usize) -> String {
     let peers = if cell.have == cell.chunks() {
         None
     } else if !running {
-        Some("not running, so sources are unknown".to_owned())
+        Some("not running, so peers are unknown".to_owned())
     } else {
         Some(match cell.availability {
             0 => "no connected peer has them".to_owned(),
-            1 => "1 peer has the rarest".to_owned(),
-            n => format!("{n} peers have the rarest"),
+            1 => "1 peer has the rarest chunk here".to_owned(),
+            n => format!("{n} peers have the rarest chunk here"),
         })
     };
     let mut text = format!("{span} · {state}");
@@ -225,13 +225,13 @@ pub fn ChunkMap(
                     <span class="key__item"><span class="cell cell--flight"></span>"downloading"</span>
                     <span class="key__item">
                         <span class="cell cell--missing" style="--a:1"></span>
-                        "missing, common"
+                        "missing, widely available"
                     </span>
                     <span class="key__item">
                         <span class="cell cell--missing" style="--a:0.2"></span>
-                        "missing, rare"
+                        "missing, few peers have it"
                     </span>
-                    <span class="key__item"><span class="cell cell--nowhere"></span>"no source"</span>
+                    <span class="key__item"><span class="cell cell--nowhere"></span>"no connected peer has it"</span>
                 </div>
                 <span class="chunkmap__readout">{readout}</span>
             </div>
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(describe(&cells, true, 0), "chunks 0–511 · stored");
         assert_eq!(
             describe(&cells, true, 1),
-            "chunks 512–1,023 · 100 stored, 12 downloading, 400 missing · 2 peers have the rarest"
+            "chunks 512–1,023 · 100 stored, 12 downloading, 400 missing · 2 peers have the rarest chunk here"
         );
         assert_eq!(
             describe(&cells, true, 2),
@@ -358,11 +358,11 @@ mod tests {
         );
         assert_eq!(
             describe(&cells, true, 3),
-            "chunk 1,536 · missing · 1 peer has the rarest"
+            "chunk 1,536 · missing · 1 peer has the rarest chunk here"
         );
         assert_eq!(
             describe(&cells, false, 2),
-            "chunks 1,024–1,535 · missing · not running, so sources are unknown"
+            "chunks 1,024–1,535 · missing · not running, so peers are unknown"
         );
         assert_eq!(describe(&cells, true, 9), "");
     }

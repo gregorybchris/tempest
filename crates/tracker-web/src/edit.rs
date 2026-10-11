@@ -1,11 +1,11 @@
-//! The publisher's form for a listing: its title, description, category and tags, and
-//! unpublishing it or listing it again.
+//! The publisher's form for a bundle: its title, description, category and tags, and
+//! unpublishing it or publishing it again.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use tempest_protocol::BundleId;
 use tempest_tracker_api::listing::{Listing, ListingStatus};
-use tempest_tracker_api::text::{MAX_DESCRIPTION, MAX_TITLE};
+use tempest_tracker_api::text::{MAX_DESCRIPTION, MAX_TAG, MAX_TAGS, MAX_TITLE};
 use tempest_ui_kit::components::*;
 
 use crate::app::{Me, use_ctx};
@@ -30,13 +30,13 @@ pub fn EditPage(bundle: BundleId) -> impl IntoView {
             (_, true) => view! { <Form listing /> }.into_any(),
             (Me::SignedIn(_), false) => view! {
                 <section class="page">
-                    <Empty title="Not yours" text="Only its publisher can edit a listing.".to_owned() />
+                    <Empty title="Can't edit this bundle" text="Only its publisher can edit a bundle.".to_owned() />
                 </section>
             }
             .into_any(),
             _ => view! {
                 <section class="page">
-                    <Empty title="Sign in first" text="Sign in with the key that published this listing to edit it.".to_owned()>
+                    <Empty title="Sign in first" text="Sign in with the key that published this bundle to edit it.".to_owned()>
                         <Button kind=ButtonKind::Primary on_click=move || ctx.sign_in()>"Sign in"</Button>
                     </Empty>
                 </section>
@@ -92,9 +92,9 @@ fn Form(listing: Listing) -> impl IntoView {
             match answer {
                 Ok(saved) => {
                     let said = match (unpublished, saved.status) {
-                        (true, _) => "Listed it again",
+                        (true, _) => "Published again",
                         (_, ListingStatus::Pending) => {
-                            "Saved; it shows once the tracker has its manifest"
+                            "Saved. It becomes public once the tracker has fetched its manifest."
                         }
                         _ => "Saved",
                     };
@@ -111,7 +111,7 @@ fn Form(listing: Listing) -> impl IntoView {
             let path = format!("listings/{bundle}");
             match request::send::<serde_json::Value>(method::DELETE, &path, None::<&()>).await {
                 Ok(_) => {
-                    toasts.push(Tone::Neutral, "Unpublished. Edit it to list it again.");
+                    toasts.push(Tone::Neutral, "Unpublished. Edit it to publish it again.");
                     ctx.go(Route::Me);
                 }
                 Err(error) => toasts.push(Tone::Bad, error.to_string()),
@@ -120,7 +120,7 @@ fn Form(listing: Listing) -> impl IntoView {
     };
 
     let categories = Signal::derive(move || {
-        let mut options = vec![(String::new(), "none".to_owned())];
+        let mut options = vec![(String::new(), "None".to_owned())];
         ctx.info.with(|info| {
             if let Some(info) = info {
                 options.extend(
@@ -151,16 +151,16 @@ fn Form(listing: Listing) -> impl IntoView {
         false => listing.title.clone(),
     };
     let steps = vec![
-        ("listings".to_owned(), "#/".to_owned()),
+        ("Bundles".to_owned(), "#/".to_owned()),
         (shown_title, Route::Listing(bundle).hash()),
     ];
     view! {
         <section class="page edit">
             <header class="page__head">
-                <Crumbs steps here="edit" />
-                <h1 class="page__title glow">"Edit the listing"</h1>
+                <Crumbs steps here="Edit" />
+                <h1 class="page__title glow">"Edit bundle"</h1>
                 {unpublished.then(|| view! {
-                    <p class="notice"><Badge tone=Tone::Warn label="unpublished".to_owned() />" Saving lists it again."</p>
+                    <p class="notice"><Badge tone=Tone::Warn label="unpublished".to_owned() />" Saving publishes it again."</p>
                 })}
             </header>
             <form class="edit__form" on:submit=move |e| {
@@ -178,7 +178,7 @@ fn Form(listing: Listing) -> impl IntoView {
                         prop:value=move || title.get()
                         on:input=move |e| title.set(event_target_value(&e))
                     />
-                    <span class="field__help">"Empty shows the content's name."</span>
+                    <span class="field__help">"Leave empty to use the content name."</span>
                     {move || error_in(Field::Title).get().map(|e| view! { <span class="field__error">{e}</span> })}
                 </label>
                 <TextArea
@@ -186,7 +186,7 @@ fn Form(listing: Listing) -> impl IntoView {
                     value=description
                     max=MAX_DESCRIPTION
                     rows=8
-                    placeholder="What it is, where it comes from, its license, how to use it."
+                    placeholder="What it is, where it came from, license, how to use it."
                     error=error_in(Field::Description)
                 />
                 <SelectField label="Category" options=categories value=category />
@@ -201,13 +201,13 @@ fn Form(listing: Listing) -> impl IntoView {
                         prop:value=move || tags.get()
                         on:input=move |e| tags.set(event_target_value(&e))
                     />
-                    <span class="field__help">"Separate tags with commas."</span>
+                    <span class="field__help">{format!("Separate tags with commas. Up to {MAX_TAGS} tags of up to {MAX_TAG} characters: letters, digits and hyphens.")}</span>
                     {move || error_in(Field::Tags).get().map(|e| view! { <span class="field__error">{e}</span> })}
                     <span class="edit__tags">{tag_preview}</span>
                 </label>
                 <div class="edit__actions">
                     <button class="btn btn--primary" type="submit" disabled=move || saving.get()>
-                        {if unpublished { "Save and list again" } else { "Save" }}
+                        {if unpublished { "Save and publish again" } else { "Save" }}
                     </button>
                     <a class="btn btn--ghost" href=Route::Listing(bundle).hash()>"Cancel"</a>
                     <span class="appbar__spacer"></span>
@@ -219,13 +219,13 @@ fn Form(listing: Listing) -> impl IntoView {
             <Dialog
                 open=confirm
                 on_close=move || confirm.set(false)
-                title="Unpublish this listing?"
+                title="Unpublish this bundle?"
                 actions=ViewFn::from(move || view! {
                     <Button kind=ButtonKind::Ghost on_click=move || confirm.set(false)>"Keep it"</Button>
                     <Button kind=ButtonKind::Danger on_click=move || unpublish()>"Unpublish"</Button>
                 })
             >
-                <p>"It stops showing on this tracker, and announces won't list it again. You can list it again by editing it."</p>
+                <p>"It is hidden from everyone else on this tracker. Edit it later to publish it again."</p>
             </Dialog>
         </section>
     }

@@ -65,8 +65,8 @@ impl ValueEdit {
         match &self.target {
             ValueTarget::Setting { kind, .. } => kind.help(),
             ValueTarget::Tracker(_) => "An http:// or https:// URL.",
-            ValueTarget::Relay(_) => "The relay's key and address: <key>@host:port.",
-            ValueTarget::CategoryFolder(_) => "Where its downloads go: an absolute path.",
+            ValueTarget::Relay(_) => "A relay's key and address: <key>@host[:port].",
+            ValueTarget::CategoryFolder(_) => "Where its downloads go, as an absolute path.",
             ValueTarget::ViewName => "Its filters and order are saved under this name.",
         }
     }
@@ -96,9 +96,13 @@ impl FormKind {
     /// A line on how to fill it in.
     pub fn help(&self) -> &'static str {
         match self {
-            Self::Limits(_) => "Speeds such as 2M. Empty: the engine's. none: no limit.",
-            Self::NewCategory => "Downloads added in it go to its folder.",
-            Self::Schedule => "Times as 22:00. Clear both times to turn it off.",
+            Self::Limits(_) => {
+                "Speeds such as 2M (bytes per second). Leave empty to use the Settings value, or type none for no limit."
+            }
+            Self::NewCategory => "Downloads added to this category save to its folder.",
+            Self::Schedule => {
+                "24-hour times, such as 22:00. Clear both times to turn the schedule off."
+            }
         }
     }
 }
@@ -127,9 +131,9 @@ impl TextKind {
     /// A line explaining what to type.
     pub fn help(self) -> &'static str {
         match self {
-            Self::Rename => "Leave it empty to use the bundle's own name.",
-            Self::Tags => "Separate tags with commas.",
-            Self::Move => "The absolute path of the folder to move them into.",
+            Self::Rename => "Leave empty to restore the bundle's original name.",
+            Self::Tags => "Separate tags with commas, such as music, live.",
+            Self::Move => "The absolute path of the folder to move the files into.",
         }
     }
 }
@@ -205,7 +209,7 @@ pub(super) fn text_key(
         TextKind::Rename => Ok(Action::Rename((!text.is_empty()).then_some(text))),
         TextKind::Tags => Ok(Action::Tags(parse_tags(&text))),
         TextKind::Move if Path::new(&text).is_absolute() => Ok(Action::Move(PathBuf::from(text))),
-        TextKind::Move => Err("Enter an absolute path.".to_owned()),
+        TextKind::Move => Err("Enter an absolute path, such as /home/you/films.".to_owned()),
     };
     match action {
         Ok(action) => {

@@ -158,7 +158,7 @@ pub fn settings_sections(app: &App, view: &SettingsInfo) -> Vec<Section> {
     let alternative = &limits.alternative;
     let sharing = serde_json::to_value(&settings.sharing).expect("settings serialize");
     let shown = |value: &Value| match value {
-        Value::Null => "none".to_owned(),
+        Value::Null => "no limit".to_owned(),
         Value::String(text) => text.clone(),
         other => other.to_string(),
     };
@@ -279,7 +279,7 @@ pub fn settings_sections(app: &App, view: &SettingsInfo) -> Vec<Section> {
                     format::count(count, "transfer"),
                     Edit::Tag(tag.to_owned()),
                 )
-                .help("enter shows its transfers.")
+                .help("Press enter to filter the list to this tag.")
             })
             .collect(),
     };
@@ -294,7 +294,7 @@ pub fn settings_sections(app: &App, view: &SettingsInfo) -> Vec<Section> {
                 prefs::THEME,
                 app.theme.name,
                 Edit::Theme,
-                "The palette. T changes it anywhere.",
+                "Color theme. T cycles it from any screen.",
             ),
             Row::setting(
                 "Columns",
@@ -305,7 +305,7 @@ pub fn settings_sections(app: &App, view: &SettingsInfo) -> Vec<Section> {
                     columns.join(" ")
                 },
                 Edit::Columns,
-                "The transfers list's optional columns. | changes them from the list.",
+                "Optional columns of the transfers list. | edits them from the list.",
             ),
         ],
     ));
@@ -336,7 +336,7 @@ fn network_section(settings: &tempest_api::settings::Settings) -> Section {
     // The TUI shows only the help of the row under the cursor.
     section.note = section
         .note
-        .map(|note| format!("{note} Move to a row to read what it shares."));
+        .map(|note| format!("{note} Select a row to see what it reveals."));
     section
 }
 
@@ -351,10 +351,10 @@ fn peer_finding_sections(view: &SettingsInfo) -> [Section; 2] {
                 .help("enter changes the URL; x removes it.")
         })
         .collect();
-    trackers.push(
-        Row::new("+ Add a tracker", "", Edit::NewTracker)
-            .help("An http:// or https:// URL. Every transfer announces to it."),
-    );
+    trackers
+        .push(Row::new("+ Add a tracker", "", Edit::NewTracker).help(
+            "An http:// or https:// URL. Transfers register with it so peers can find them.",
+        ));
     let mut relays: Vec<Row> = Vec::new();
     relays.extend(relay_identities(view).into_iter().map(|relay| {
         Row::new(relay.clone(), "", Edit::Relay(relay)).help("enter changes it; x removes it.")

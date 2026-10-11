@@ -481,12 +481,12 @@ pub fn hints(mac: bool) -> [(&'static str, &'static str); 8] {
     [
         ("↑↓", "move"),
         ("→", "open"),
-        ("←", "up"),
+        ("←", "parent folder"),
         ("enter", "open or choose"),
         (choose, "choose"),
         ("type", "filter"),
-        (".", "hidden"),
-        (path, "path"),
+        (".", "show hidden"),
+        (path, "type path"),
     ]
 }
 

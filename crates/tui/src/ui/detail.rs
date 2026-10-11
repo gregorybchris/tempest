@@ -7,7 +7,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use tempest_api::inspect::{FileInfo, PeerInfo};
-use tempest_api::{Kind, Status, TransferInfo};
+use tempest_api::{Status, TransferInfo};
 
 use super::transfers::{fix_hint, summary_color};
 use super::{fit, pad, status_color};
@@ -123,7 +123,7 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
     }
 
     let progress = match transfer.size {
-        None => "Waiting for the bundle's description.".to_owned(),
+        None => "Waiting for a peer to send the manifest.".to_owned(),
         Some(size) => format!(
             "{} of {} · {} of {} chunks",
             format::percent(transfer.progress),
@@ -162,11 +162,6 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
             .collect::<Vec<_>>()
             .join(" "),
     };
-    let kind = match transfer.kind {
-        Kind::Download => "Download",
-        Kind::Share => "Share",
-    };
-    let progress = format!("{kind}: {progress}");
     let mut lines = vec![Line::from(state)];
     lines.extend(detail);
     lines.extend([
@@ -183,7 +178,7 @@ fn draw_summary(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rec
         row("Peers", peers),
     ]);
     if let Some(content) = &transfer.content_dir {
-        lines.push(row("Files in", content.display().to_string()));
+        lines.push(row("Location", content.display().to_string()));
     }
     lines.extend([
         row("Save folder", transfer.save_folder.display().to_string()),
@@ -225,7 +220,7 @@ fn window<T>(rows: &[T], scroll: usize, height: usize) -> &[T] {
 fn draw_files(frame: &mut Frame, app: &App, transfer: &TransferInfo, area: Rect) {
     let theme = &app.theme;
     if transfer.size.is_none() {
-        let text = "The files show once the bundle's description arrives.";
+        let text = "The file list appears once a peer sends the manifest.";
         return note(frame, area, text, theme.dim);
     }
     let inside = app.inside().map(|inside| &inside.files);
@@ -298,7 +293,7 @@ fn draw_peers(frame: &mut Frame, app: &App, area: Rect) {
     if peers.is_empty() {
         let text = match running {
             true => "Not connected to any peers yet.",
-            false => "Not connected to anyone: peers show while it runs.",
+            false => "Not running. Start it to see peers.",
         };
         return note(frame, area, text, theme.dim);
     }
@@ -349,7 +344,7 @@ fn draw_peers(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![header];
     lines.extend(window(&peers, app.scroll, height).iter().map(row));
     frame.render_widget(Paragraph::new(lines), table);
-    let text = "Want and Serving: ↓ toward us, ↑ toward them.";
+    let text = "Want: ↓ we ask them, ↑ they ask us. Serving: ↓ they send us, ↑ we send them.";
     frame.render_widget(
         Paragraph::new(Line::styled(
             fit(text, usize::from(legend.width)),

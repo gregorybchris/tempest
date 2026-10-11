@@ -44,7 +44,7 @@ pub fn SignInPage() -> impl IntoView {
                 .unwrap_or_else(|| present::short_key(&account.key.to_string()));
             view! {
                 <section class="page signin">
-                    <Empty title="Signed in" text=format!("You're signed in as {name}.")>
+                    <Empty title="Already signed in" text=format!("You're signed in as {name}.")>
                         <a class="btn btn--primary" href="#/me">"Your account"</a>
                     </Empty>
                 </section>
@@ -141,7 +141,7 @@ fn SignIn() -> impl IntoView {
     };
     let body = move || {
         match step.get() {
-        Step::Asking => view! { <p class="loading dim">"getting a code…"</p> }.into_any(),
+        Step::Asking => view! { <p class="loading dim">"Getting a sign-in code…"</p> }.into_any(),
         Step::Failed(error) => view! {
             <Empty title="Can't sign in right now" text=error.to_string()>
                 <Button on_click=move || ask()>"Try again"</Button>
@@ -149,7 +149,7 @@ fn SignIn() -> impl IntoView {
         }
         .into_any(),
         Step::Expired => view! {
-            <Empty title="This code expired" text="Codes last ten minutes and work once.".to_owned()>
+            <Empty title="Code expired or already used" text="A sign-in code works once and expires.".to_owned()>
                 <Button kind=ButtonKind::Primary on_click=move || ask()>"Get a new code"</Button>
             </Empty>
         }
@@ -166,14 +166,14 @@ fn SignIn() -> impl IntoView {
                 <ol class="signin__steps">
                     <Show when=invites>
                         <li>
-                            <p>"This tracker needs an invite the first time you sign in. Enter yours, or skip this if you've signed in here before."</p>
+                            <p>"The first sign-in on this tracker needs an invite code. Leave it empty if you've signed in here before."</p>
                             <label class="field signin__invite">
-                                <span class="field__label">"Invite"</span>
+                                <span class="field__label">"Invite code"</span>
                                 <input
                                     class="input"
                                     type="text"
                                     spellcheck="false"
-                                    placeholder="XXXXX-XXXXX"
+                                    placeholder="e.g. K7QM2-X4PDV"
                                     prop:value=move || invite.get()
                                     on:input=move |e| invite.set(event_target_value(&e))
                                 />
@@ -181,15 +181,15 @@ fn SignIn() -> impl IntoView {
                         </li>
                     </Show>
                     <li>
-                        <p>"On the computer where you use Tempest, run:"</p>
+                        <p>"In a terminal on the computer where Tempest is installed, run:"</p>
                         <crate::views::Copyable text=command what="command" />
                     </li>
                     <li>
                         <p class="signin__waiting">
                             <span class="signin__pulse" aria-hidden="true"></span>
-                            "Waiting for your key's signature. This page signs in by itself."
+                            "Waiting for the command to finish. You'll be signed in here automatically."
                         </p>
-                        <p class="note dim">"The code expires in about "{left}"."</p>
+                        <p class="note dim">"Code expires in "{left}"."</p>
                     </li>
                 </ol>
             }
@@ -202,8 +202,7 @@ fn SignIn() -> impl IntoView {
             <header class="page__head">
                 <h1 class="page__title glow">"Sign in"</h1>
                 <p class="dim">
-                    "There are no passwords. You sign in with your Tempest key, the one your client \
-                     shares with: it signs this code, and the key never leaves your computer."
+                    "Sign in with your Tempest key. Your client signs the code below; the key never leaves your computer."
                 </p>
             </header>
             <div class="signin__card">{body}</div>

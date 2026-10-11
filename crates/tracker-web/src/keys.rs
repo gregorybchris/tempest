@@ -86,7 +86,7 @@ pub fn hints(route: &Route) -> Vec<Hint> {
         Route::Browse(_) => hints.extend([
             hint(vec!["j", "k"], "move"),
             hint(vec!["enter"], "open"),
-            hint(vec!["[", "]"], "pages"),
+            hint(vec!["[", "]"], "page"),
             hint(vec!["s"], "sort"),
         ]),
         Route::Listing(_) => hints.extend([

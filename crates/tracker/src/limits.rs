@@ -185,14 +185,20 @@ impl Limiter {
             return Ok(());
         };
         if rate.burst == 0 {
-            let refusal = Refusal::new(ErrorCode::RateLimited, "this action is turned off here");
+            let refusal = Refusal::new(
+                ErrorCode::RateLimited,
+                "this action is turned off on this tracker",
+            );
             return Err(refusal.retry_after(FULL_RETRY));
         }
         let key = (action, client_key(ip));
         if !self.buckets.contains_key(&key) && self.buckets.len() >= self.limits.max_clients {
             self.sweep(now);
             if self.buckets.len() >= self.limits.max_clients {
-                let refusal = Refusal::new(ErrorCode::Unavailable, "too many clients at once");
+                let refusal = Refusal::new(
+                    ErrorCode::Unavailable,
+                    "the tracker is busy; try again shortly",
+                );
                 return Err(refusal.retry_after(FULL_RETRY));
             }
         }
@@ -201,7 +207,10 @@ impl Limiter {
         let allowed_ahead = rate.every.saturating_mul(rate.burst - 1);
         let ahead = full_at - now;
         if ahead > allowed_ahead {
-            let refusal = Refusal::new(ErrorCode::RateLimited, "too many requests; slow down");
+            let refusal = Refusal::new(
+                ErrorCode::RateLimited,
+                "too many requests; wait a moment and try again",
+            );
             return Err(refusal.retry_after(ahead - allowed_ahead));
         }
         self.buckets.insert(key, later(full_at, rate.every));

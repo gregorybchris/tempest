@@ -20,7 +20,7 @@ pub struct ShareArea {
     pub form: Form,
     /// Whether the form has the keys.
     pub editing: bool,
-    /// The path whose bundle the engine is building, while it is.
+    /// The path whose bundle the daemon is building, while it is.
     pub building: Option<PathBuf>,
     /// The share the cursor is on.
     pub selected: Option<BundleId>,
@@ -51,7 +51,7 @@ const TAGS: &str = "Tags";
 /// An empty share form offering `categories`.
 fn share_form(categories: &[String]) -> Form {
     Form::new(vec![
-        Field::text(PATH, "", "/absolute/path/to/a/file/or/folder"),
+        Field::text(PATH, "", "/path/to/file-or-folder"),
         Field::text(NAME, "", "the file or folder's name"),
         Field::text(COMMENT, "", "optional description"),
         Field::choice(CATEGORY, category_options(categories), 0),
@@ -163,7 +163,7 @@ impl App {
     /// The request the share form makes, or why it can't.
     fn share_request(&self) -> Result<Request, String> {
         if self.share.building.is_some() {
-            return Err("Wait for the bundle being built.".to_owned());
+            return Err("Wait until the bundle is built.".to_owned());
         }
         let form = &self.share.form;
         let path = form.text(PATH);
@@ -171,7 +171,10 @@ impl App {
             return Err("Type the path of a file or folder to share.".to_owned());
         }
         if !Path::new(&path).is_absolute() {
-            return Err("The path must be absolute, on the engine's machine.".to_owned());
+            return Err(
+                "Enter an absolute path on the daemon's machine, such as /home/you/films."
+                    .to_owned(),
+            );
         }
         let name = form.text(NAME);
         let category = match form.chosen(CATEGORY) {

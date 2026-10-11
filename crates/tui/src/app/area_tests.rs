@@ -108,7 +108,7 @@ fn toggles_and_choices_change_at_once() {
         changes(press(&mut app, KeyCode::Char(' '))),
         change("limits.alternative.enabled", json!(true))
     );
-    go_to(&mut app, "At the limit");
+    go_to(&mut app, "When a limit is reached");
     assert_eq!(
         changes(press(&mut app, KeyCode::Enter)),
         change("sharing.action", json!("remove"))

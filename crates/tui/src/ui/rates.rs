@@ -111,7 +111,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
             .flex(Flex::Center)
             .areas(chart_area);
         let line = Line::styled(
-            "The chart fills in as rates are sampled, once a second.",
+            "Collecting samples, one per second.",
             Style::new().fg(theme.dim),
         );
         frame.render_widget(Paragraph::new(line).centered(), middle);

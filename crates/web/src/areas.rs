@@ -135,7 +135,7 @@ pub fn Settings() -> impl IntoView {
         (!groups.is_empty()).then(|| {
             view! {
                 <div class="banner tone--warn" role="status">
-                    {format!("Restart the engine to apply the changes to {}.", groups.join(", "))}
+                    {format!("Restart the daemon to apply changes to: {}.", groups.join(", "))}
                 </div>
             }
         })
@@ -145,7 +145,7 @@ pub fn Settings() -> impl IntoView {
             <Loading />
             {restart}
             <SectionsView sections />
-            <p class="dim note">"• changed here rather than in the config file; reset gives it the file's value again."</p>
+            <p class="dim note">"• Changed from the config file. Reset restores the file's value."</p>
         </div>
     }
 }
@@ -158,7 +158,7 @@ fn Loading() -> impl IntoView {
         config
             .info
             .with(Option::is_none)
-            .then(|| view! { <Empty title="Loading" text="Asking the engine for its settings…" /> })
+            .then(|| view! { <Empty title="Loading" text="Asking the daemon for its settings…" /> })
     }
 }
 
@@ -216,9 +216,9 @@ fn RowView(row: Row, cursor: Selector<Option<String>>) -> impl IntoView {
         let label = row.label.clone();
         view! {
             <button class="btn btn--ghost btn--small" type="button" data-remove=""
-                title="Give it the config file's value again (x)"
+                title="Restore the config file's value (x)"
                 on:click=move |_| config.reset(key, label.clone())>
-                "reset"
+                "Reset"
             </button>
         }
     });
@@ -227,7 +227,7 @@ fn RowView(row: Row, cursor: Selector<Option<String>>) -> impl IntoView {
         <li class="row" id=dom_id(&id) aria-selected=selected on:click=move |_| ui.row.set(Some(id.clone()))>
             <div class="row__label">
                 {row.label.clone()}
-                {row.reset.map(|_| view! { <span class="row__changed" title="Changed here">" •"</span> })}
+                {row.reset.map(|_| view! { <span class="row__changed" title="Differs from the config file">" •"</span> })}
             </div>
             <div class="row__control">
                 <ControlView row=row.clone() />
@@ -314,13 +314,13 @@ fn ControlView(row: Row) -> impl IntoView {
             let about = label.clone();
             let save = move |draft: String| {
                 let value = kind.parse(&draft)?;
-                config.change([(key, value)], format!("Saved {}", about.to_lowercase()));
+                config.change([(key, value)], format!("{about} saved"));
                 Ok(())
             };
             let placeholder = match kind {
                 ValueKind::Count => "no limit",
                 ValueKind::Folder => "the default",
-                _ => "none",
+                _ => "no limit",
             };
             let browse = (kind == ValueKind::Folder).then_some(Purpose::SaveFolder);
             view! { <InlineField text label=label.clone() placeholder title=kind.help() browse save /> }.into_any()
@@ -345,7 +345,7 @@ fn ControlView(row: Row) -> impl IntoView {
                                 data-change=next.then_some("")
                                 on:click=move |_| {
                                     if !pressed {
-                                        config.change([(key, json!(value))], format!("At the limit: {name}"));
+                                        config.change([(key, json!(value))], format!("When a limit is reached: {name}"));
                                     }
                                 }
                             >
@@ -371,7 +371,7 @@ fn ControlView(row: Row) -> impl IntoView {
         .into_any(),
         Control::Columns => view! {
             <Button small=true title="Choose columns (| in the list)" on_click=move || ui.dialog.set(Some(Dialog::Columns))>
-                <span data-change="">"choose…"</span>
+                <span data-change="">"Choose…"</span>
             </Button>
         }
         .into_any(),
@@ -380,7 +380,7 @@ fn ControlView(row: Row) -> impl IntoView {
             let save = move |draft: String| {
                 let draft = draft.trim().to_owned();
                 if !settings::absolute(&draft) {
-                    return Err("Type an absolute path on the engine's machine.".to_owned());
+                    return Err("Enter an absolute path on the daemon's machine.".to_owned());
                 }
                 config.set_category(save_name.clone(), draft);
                 Ok(())
@@ -389,7 +389,7 @@ fn ControlView(row: Row) -> impl IntoView {
                 <InlineField text=folder label=format!("{name}'s folder") placeholder="/path/to/folder" browse=Some(Purpose::Category) save />
                 <button class="btn btn--ghost btn--small" type="button" data-remove="" title="Remove the category (x)"
                     on:click=move |_| config.remove_category(remove_name.clone())>
-                    "remove"
+                    "Remove"
                 </button>
             }
             .into_any()
@@ -398,11 +398,11 @@ fn ControlView(row: Row) -> impl IntoView {
         Control::Relay(relay) => list_entry(config, keys::RELAYS, relay, settings::relay_problem).into_any(),
         Control::Tag(tag) => view! {
             <span class="row__value">{row.value.clone()}</span>
-            <Button small=true title="Show its transfers" on_click=move || {
+            <Button small=true title="Show transfers with this tag" on_click=move || {
                 ui.finding.update(|f| { f.text = format!("#{tag}"); f.status = None; });
                 ui.area.set(Area::Transfers);
             }>
-                <span data-change="">"show →"</span>
+                <span data-change="">"Show →"</span>
             </Button>
         }
         .into_any(),
@@ -441,12 +441,12 @@ fn list_entry(
     };
     view! {
         <InlineField text=entry.clone() label=entry save />
-        <button class="btn btn--ghost btn--small" type="button" data-remove="" title="Remove it (x)"
+        <button class="btn btn--ghost btn--small" type="button" data-remove="" title="Remove (x)"
             on:click=move |_| {
                 let list = rows::edited(&list_of(config, key), Some(&gone), None);
                 config.change([(key, json!(list))], format!("Removed {gone}"));
             }>
-            "remove"
+            "Remove"
         </button>
     }
 }
@@ -460,7 +460,7 @@ fn AddField(adds: Adds) -> impl IntoView {
     let problem = RwSignal::new(None::<String>);
     let input = NodeRef::<Input>::new();
     let (label, name, placeholder) = match adds {
-        Adds::Category => ("Add a category", "Category name", "name, such as films"),
+        Adds::Category => ("Add a category", "Category name", "Name, such as films"),
         Adds::Tracker => (
             "Add a tracker",
             "Tracker URL",
@@ -476,7 +476,7 @@ fn AddField(adds: Adds) -> impl IntoView {
                 if text.is_empty() {
                     Err("Give the category a name.")
                 } else if !settings::absolute(&path) {
-                    Err("Type the folder its downloads go to, as an absolute path.")
+                    Err("Enter the folder its downloads go to, as an absolute path.")
                 } else {
                     config.set_category(text, path);
                     Ok(())
@@ -518,14 +518,14 @@ fn AddField(adds: Adds) -> impl IntoView {
     };
     view! {
         <form class="add-field" aria-label=label on:submit=move |e| { e.prevent_default(); add(); }>
-            <span class="add-field__label">{format!("+ {}", label.to_lowercase())}</span>
+            <span class="add-field__label">{format!("+ {label}")}</span>
             {field(first, name, placeholder, Some(input))}
             {(adds == Adds::Category).then(|| view! {
                 <input class="input" type="text" placeholder="/folder/for/its/downloads" aria-label="Its folder" spellcheck="false" autocomplete="off"
                     prop:value=move || folder.get() on:input=move |e| folder.set(event_target_value(&e)) />
                 <Browse purpose=Purpose::Category value=folder small=true on_choose=move |path| folder.set(path) />
             })}
-            <button class="btn btn--small" type="submit">"add"</button>
+            <button class="btn btn--small" type="submit">"Add"</button>
             {move || problem.get().map(|p| view! { <span class="field__error add-field__error">{p}</span> })}
         </form>
     }
@@ -555,8 +555,8 @@ fn ScheduleEditor(schedule: Option<Schedule>) -> impl IntoView {
             Ok(schedule) => {
                 problem.set(None);
                 let done = match &schedule {
-                    Some(s) => format!("They apply {}", s.describe()),
-                    None => "They have no schedule now".to_owned(),
+                    Some(s) => format!("Applies {}", s.describe()),
+                    None => "No schedule set".to_owned(),
                 };
                 config.change([(keys::ALT_SCHEDULE, json!(schedule))], done);
             }
@@ -608,8 +608,8 @@ fn QueueList() -> impl IntoView {
         <div class="queue">
             <h3 class="queue__title">
                 {move || match waiting.with(Vec::len) {
-                    0 => "Nothing is waiting in the queue.".to_owned(),
-                    n => format!("Waiting, in the order they start ({n})"),
+                    0 => "The queue is empty.".to_owned(),
+                    n => format!("Waiting ({n}), first to start at the top"),
                 }}
             </h3>
             <ol class="queue__list">
@@ -636,10 +636,10 @@ fn QueueRow(id: BundleId) -> impl IntoView {
             <span class="queue__place dim">{move || row.with(|t| format!("#{}", t.queue_position + 1))}</span>
             <button class="linklike queue__name" type="button" title="Show in Transfers" on:click=move |_| ui.show(id)>{name}</button>
             <span class="queue__buttons">
-                <Button small=true kind=ButtonKind::Ghost title="Top of the queue (<)" on_click=step(QueueStep::Top)>"top"</Button>
-                <Button small=true kind=ButtonKind::Ghost title="Up the queue (K)" on_click=step(QueueStep::Up)>"↑"</Button>
-                <Button small=true kind=ButtonKind::Ghost title="Down the queue (J)" on_click=step(QueueStep::Down)>"↓"</Button>
-                <Button small=true kind=ButtonKind::Ghost title="Bottom of the queue (>)" on_click=step(QueueStep::Bottom)>"end"</Button>
+                <Button small=true kind=ButtonKind::Ghost title="Move to the top of the queue (<)" on_click=step(QueueStep::Top)>"Top"</Button>
+                <Button small=true kind=ButtonKind::Ghost title="Move up in the queue (K)" on_click=step(QueueStep::Up)>"↑"</Button>
+                <Button small=true kind=ButtonKind::Ghost title="Move down in the queue (J)" on_click=step(QueueStep::Down)>"↓"</Button>
+                <Button small=true kind=ButtonKind::Ghost title="Move to the bottom of the queue (>)" on_click=step(QueueStep::Bottom)>"Bottom"</Button>
             </span>
         </li>
     }

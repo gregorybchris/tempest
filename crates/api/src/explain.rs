@@ -69,15 +69,18 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
             Some(Fix::ForceStart),
         ),
         Status::Stopped => Explanation::new("Stopped.", Some(Fix::Start)),
-        Status::Completed => {
-            Explanation::new("Complete. It stopped sharing.", Some(Fix::ShareAgain))
-                .with_detail(stopped_by(transfer.stopped_by))
-        }
+        Status::Completed => Explanation::new(
+            "Complete. Sharing stopped at its limit.",
+            Some(Fix::ShareAgain),
+        )
+        .with_detail(stopped_by(transfer.stopped_by)),
         Status::Errored { reason } => Explanation::new(reason.clone(), Some(Fix::Retry)),
         Status::Checking if transfer.kind == Kind::Share => {
-            Explanation::new("Reading its files to describe the bundle.", None)
+            Explanation::new("Reading its files to build the bundle.", None)
         }
-        Status::Checking => Explanation::new("Checking the data on disk against the bundle.", None),
+        Status::Checking => {
+            Explanation::new("Checking the files on disk against the bundle.", None)
+        }
         Status::Moving => Explanation::new(
             format!("Moving its files to {}.", transfer.save_folder.display()),
             None,
@@ -89,18 +92,18 @@ pub fn explain(transfer: &TransferInfo) -> Explanation {
 fn stopped_by(stop: Option<SharingStop>) -> String {
     match stop {
         Some(SharingStop::Ratio { ratio }) => format!(
-            "It reached its ratio limit: it had uploaded {} as much as it downloaded.",
+            "Sharing stopped at its ratio limit: it had uploaded {} what it downloaded.",
             times(ratio)
         ),
         Some(SharingStop::Time { seconds }) => format!(
-            "It reached its sharing time limit of {}.",
+            "Sharing stopped at its time limit of {}.",
             words::duration(seconds)
         ),
         Some(SharingStop::Idle { seconds }) => format!(
-            "No connected peer had wanted anything from it for {}, its idle timeout.",
+            "Sharing stopped: no peer had requested data for {} (idle timeout).",
             words::duration(seconds)
         ),
-        None => "It reached one of its sharing limits.".to_owned(),
+        None => "Sharing stopped at one of its limits.".to_owned(),
     }
 }
 
@@ -197,23 +200,23 @@ mod tests {
                 ..with(Status::Completed, 0, 0, 0)
             };
             let explanation = explain(&transfer);
-            assert_eq!(explanation.text, "Complete. It stopped sharing.");
+            assert_eq!(explanation.text, "Complete. Sharing stopped at its limit.");
             explanation.detail.unwrap()
         };
         assert_eq!(
             detail(Some(SharingStop::Ratio { ratio: 1.5 })),
-            "It reached its ratio limit: it had uploaded 1.5× as much as it downloaded."
+            "Sharing stopped at its ratio limit: it had uploaded 1.5× what it downloaded."
         );
         assert!(detail(Some(SharingStop::Ratio { ratio: 2.0 })).contains(" 2× "));
         assert_eq!(
             detail(Some(SharingStop::Time { seconds: 7200 })),
-            "It reached its sharing time limit of 2 hours."
+            "Sharing stopped at its time limit of 2 hours."
         );
         assert_eq!(
             detail(Some(SharingStop::Idle { seconds: 600 })),
-            "No connected peer had wanted anything from it for 10 minutes, its idle timeout."
+            "Sharing stopped: no peer had requested data for 10 minutes (idle timeout)."
         );
-        assert_eq!(detail(None), "It reached one of its sharing limits.");
+        assert_eq!(detail(None), "Sharing stopped at one of its limits.");
     }
 
     #[test]

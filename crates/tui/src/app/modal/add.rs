@@ -77,13 +77,13 @@ impl AddForm {
     pub(super) fn request(&self) -> Result<AddRequest, String> {
         let link = self.link.text().trim().to_owned();
         if link.is_empty() {
-            return Err("Paste a tempest: link.".to_owned());
+            return Err("Enter a tempest: link.".to_owned());
         }
         let folder = self.save_folder.text().trim().to_owned();
         let save_folder = match folder.is_empty() {
             true => None,
             false if Path::new(&folder).is_absolute() => Some(PathBuf::from(folder)),
-            false => return Err("The save folder must be an absolute path.".to_owned()),
+            false => return Err("Enter an absolute path, such as /home/you/films.".to_owned()),
         };
         Ok(AddRequest {
             link: Some(link),

@@ -74,7 +74,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let line = if let Some(path) = &share.building {
         Line::styled(
             format!(
-                " Building the bundle from {}: reading and hashing every file…",
+                " Reading every file in {} to build the bundle…",
                 path.display()
             ),
             Style::new().fg(theme.hot),
@@ -83,12 +83,12 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         Line::styled(format!(" {error}"), Style::new().fg(theme.bad))
     } else if share.editing {
         Line::styled(
-            " Only the path is needed. The engine reads it on its own machine.",
+            " Only the path is needed. The daemon reads it on its own machine.",
             Style::new().fg(theme.dim),
         )
     } else {
         Line::styled(
-            " Press a to fill in the form, then enter to share.",
+            " Press a to share a file or folder.",
             Style::new().fg(theme.dim),
         )
     };
@@ -101,7 +101,7 @@ fn draw_shares(frame: &mut Frame, app: &App, area: Rect) {
     if shares.is_empty() {
         frame.render_widget(
             Paragraph::new(Line::styled(
-                " Nothing shared yet. Shares made anywhere show here with their links.",
+                " No shares yet. Press a to share a file or folder.",
                 Style::new().fg(theme.dim),
             )),
             area,

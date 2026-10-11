@@ -28,7 +28,7 @@ impl PickKind {
     pub fn title(&self) -> &'static str {
         match self {
             Self::Category(_) => "Category",
-            Self::Status => "Show",
+            Self::Status => "Filter by status",
             Self::Sort => "Sort by",
             Self::View => "Views",
             Self::Unpublish(_) => "Unpublish from",

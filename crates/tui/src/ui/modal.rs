@@ -111,12 +111,12 @@ fn draw_quit(frame: &mut Frame, theme: &Theme, area: Rect, active: usize) {
     let width = 64.min(area.width.saturating_sub(4));
     let room = usize::from(width).saturating_sub(4);
     let what = match active {
-        1 => "1 transfer is".to_owned(),
-        n => format!("{n} transfers are"),
+        1 => "1 transfer".to_owned(),
+        n => format!("{n} transfers"),
     };
     let text = format!(
-        "{what} running on an engine that stops when this closes. A daemon can carry on \
-         sharing and downloading in the background."
+        "{what} will stop when you quit. Keep them going by moving them to a background \
+         daemon."
     );
     let mut lines: Vec<Line> = rows::wrap(&text, room)
         .into_iter()
@@ -125,11 +125,7 @@ fn draw_quit(frame: &mut Frame, theme: &Theme, area: Rect, active: usize) {
     lines.push(Line::raw(""));
     lines.push(key_line(
         theme,
-        &[
-            ("d", "hand to a daemon"),
-            ("s", "stop them"),
-            ("esc", "stay"),
-        ],
+        &[("d", "move to daemon"), ("s", "stop them"), ("esc", "stay")],
     ));
     let height = lines.len() as u16 + 2;
     let inner = popup(frame, theme, area, (width, height), "Quit");
@@ -231,7 +227,7 @@ fn draw_add(frame: &mut Frame, app: &App, area: Rect, form: &AddForm) {
                 draw_input(frame, theme, value, &form.link, "tempest:…", focused);
             }
             AddField::SaveFolder => {
-                let placeholder = "the category's or the engine's folder";
+                let placeholder = "the category's folder, else the default folder";
                 draw_input(frame, theme, value, &form.save_folder, placeholder, focused);
             }
             AddField::Tags => {
@@ -243,7 +239,7 @@ fn draw_add(frame: &mut Frame, app: &App, area: Rect, form: &AddForm) {
             }
             AddField::Stopped => {
                 let text = if form.stopped {
-                    "later (add it stopped)"
+                    "later (adds it stopped)"
                 } else {
                     "right away"
                 };
@@ -251,11 +247,7 @@ fn draw_add(frame: &mut Frame, app: &App, area: Rect, form: &AddForm) {
             }
         }
     }
-    let note = note_line(
-        theme,
-        "Paste a link and press enter; the rest is optional.",
-        form.error.as_deref(),
-    );
+    let note = note_line(theme, "Only the link is required.", form.error.as_deref());
     frame.render_widget(Paragraph::new(note), rows[6]);
 }
 
@@ -299,9 +291,9 @@ fn draw_remove(
     };
     let explanation = match (delete, share) {
         (true, true) => "Your original files are deleted for good.",
-        (true, false) => "Its files are deleted from disk too.",
-        (false, true) => "The share goes from the list; your files stay.",
-        (false, false) => "The transfer goes from the list; its files stay.",
+        (true, false) => "Removes it and deletes its files from disk.",
+        (false, true) => "Removes the share. Your original files stay.",
+        (false, false) => "Removes it from the list. Its files stay on disk.",
     };
     let delete_label = if share {
         "Delete originals"

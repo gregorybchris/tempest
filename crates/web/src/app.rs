@@ -165,7 +165,7 @@ fn SignOut() -> impl IntoView {
                 <Button
                     small=true
                     kind=ButtonKind::Ghost
-                    title="End this browser's session"
+                    title="Sign out of the daemon on this browser"
                     on_click=move || {
                         spawn_local(async move {
                             let _ = signin::sign_out().await;
@@ -496,7 +496,7 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
                         .with_untracked(|m| m.transfer(&id).map(|t| t.link.clone()));
                     controls.copy(link.unwrap_or_default());
                 }
-                None => controls.say(Tone::Dim, "Share something first."),
+                None => controls.say(Tone::Dim, "Nothing shared yet."),
             }
         }
         Command::StartStop
@@ -515,7 +515,7 @@ fn act(command: Command, store: Store, ui: Ui, controls: Controls, fields: Field
         | Command::QueueTop
         | Command::QueueBottom => {
             let Some(transfer) = target() else {
-                controls.say(Tone::Dim, "Choose a transfer first: j and k move.");
+                controls.say(Tone::Dim, "Select a transfer first (j/k to move).");
                 return;
             };
             let id = transfer.id;
@@ -562,13 +562,13 @@ fn Meters() -> impl IntoView {
     view! {
         <div class="meters">
             <Meter
-                label="↓ download"
+                label="↓ Download"
                 tone=Tone::Down
                 value=Signal::derive(move || present::rate(rates().0))
                 history=history(false)
             />
             <Meter
-                label="↑ upload"
+                label="↑ Upload"
                 tone=Tone::Up
                 value=Signal::derive(move || present::rate(rates().1))
                 history=history(true)
@@ -593,13 +593,13 @@ fn LinkBanner() -> impl IntoView {
         if lost.get() {
             view! {
                 <div class="banner tone--bad">
-                    <span>"Can't reach the engine. Trying again by itself; is it still running?"</span>
+                    <span>"Can't reach the daemon. Retrying automatically. Check that it is running."</span>
                     <Button small=true on_click=move || retry_now()>"Retry now"</Button>
                 </div>
             }
             .into_any()
         } else if store.link.get() == Link::Connecting && store.loaded.get_untracked() {
-            view! { <div class="banner tone--warn">"Reconnecting to the engine…"</div> }.into_any()
+            view! { <div class="banner tone--warn">"Reconnecting…"</div> }.into_any()
         } else {
             ().into_any()
         }

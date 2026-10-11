@@ -154,7 +154,7 @@ pub fn NumberField(
         <div class="field">
             <label class="field__label" for=id.clone()>{label}</label>
             <div class="number">
-                <button class="number__step" type="button" tabindex="-1" aria-label="Less"
+                <button class="number__step" type="button" tabindex="-1" aria-label="Decrease"
                     disabled=move || { value.get() <= min } on:click=move |_| nudge(-step)>"−"</button>
                 <input
                     id=id
@@ -187,7 +187,7 @@ pub fn NumberField(
                         }
                     }
                 />
-                <button class="number__step" type="button" tabindex="-1" aria-label="More"
+                <button class="number__step" type="button" tabindex="-1" aria-label="Increase"
                     disabled=move || { value.get() >= max } on:click=move |_| nudge(step)>"+"</button>
             </div>
             {help.map(|help| view! { <span class="field__help">{help}</span> })}

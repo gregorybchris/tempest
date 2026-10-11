@@ -100,7 +100,10 @@ pub fn size(n: u64) -> String {
 
 /// A speed limit as settings show it: `2.0M/s`, or `none`.
 pub fn limit(bytes_per_second: Option<u64>) -> String {
-    bytes_per_second.map_or_else(|| "none".to_owned(), |rate| format!("{}/s", bytes(rate)))
+    bytes_per_second.map_or_else(
+        || "no limit".to_owned(),
+        |rate| format!("{}/s", bytes(rate)),
+    )
 }
 
 /// A speed limit as typed: a number of bytes per second with an optional unit (`K`, `M`, `G`,
@@ -111,7 +114,7 @@ pub fn parse_limit(text: &str) -> Result<Option<u64>, String> {
     if text.is_empty() || text.eq_ignore_ascii_case("none") {
         return Ok(None);
     }
-    let invalid = || format!("{text:?} is not a speed such as 500K or 2.5M");
+    let invalid = || format!("\"{text}\" isn't a speed. Use 500K or 2.5M (per second), or none.");
     let lower = text.to_ascii_lowercase();
     let unit_part = lower
         .trim_end_matches("/s")
@@ -127,7 +130,7 @@ pub fn parse_limit(text: &str) -> Result<Option<u64>, String> {
     let number: f64 = number.trim().parse().map_err(|_| invalid())?;
     let rate = (number * scale).round();
     if !rate.is_finite() || rate < 1.0 || rate > u64::MAX as f64 {
-        return Err("A limit is at least 1 byte per second; type none for no limit.".to_owned());
+        return Err("A limit is at least 1 byte per second. Enter none for no limit.".to_owned());
     }
     Ok(Some(rate as u64))
 }
@@ -228,7 +231,7 @@ mod tests {
         for bad in ["fast", "0", "-1M", "0.1", "2X", "M"] {
             assert!(parse_limit(bad).is_err(), "{bad}");
         }
-        assert_eq!(limit(None), "none");
+        assert_eq!(limit(None), "no limit");
         assert_eq!(limit(Some(2_000_000)), "2.0M/s");
     }
 

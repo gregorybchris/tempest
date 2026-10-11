@@ -17,7 +17,7 @@
   min-width: 0;
 }
 
-/* ---------- Signing in to a remote engine ---------- */
+/* ---------- Signing in to a remote daemon ---------- */
 
 .signin {
   min-height: 100vh;
@@ -58,7 +58,7 @@
   padding: 7px 12px;
 }
 
-/* ---------- The engine's connection ---------- */
+/* ---------- The daemon's connection ---------- */
 
 .banner {
   display: flex;
@@ -873,7 +873,7 @@
   height: 100%;
 }
 
-/* The path, as a prompt would show it: `engine:/Users/chris`. */
+/* The path, as a prompt would show it: `daemon:/Users/chris`. */
 .pathbar {
   display: flex;
   align-items: center;

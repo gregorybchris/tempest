@@ -75,7 +75,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, area: Rect) {
         None => Some(("Loading the chunk map…".to_owned(), theme.dim)),
         Some(Err(error)) => Some((error.clone(), theme.bad)),
         Some(Ok(map)) if map.chunks == 0 => Some((
-            "The chunk map shows once the bundle's description arrives.".to_owned(),
+            "The chunk map appears once a peer sends the manifest.".to_owned(),
             theme.dim,
         )),
         Some(Ok(_)) => None,
@@ -111,7 +111,7 @@ fn legend_line(theme: &Theme, running: bool) -> Line<'static> {
     } else {
         spans.extend([
             block(Shade::Unknown),
-            text("missing · Not running, so how rare each chunk is isn't known."),
+            text("missing · Start the transfer to see how rare each chunk is."),
         ]);
     }
     Line::from(spans)

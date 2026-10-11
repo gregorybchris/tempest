@@ -30,7 +30,7 @@ use crate::{ApiError, ApiEvent, TransferInfo};
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     /// The API could not be reached, or the exchange broke off.
-    #[error("cannot reach the engine at {url}: {source}")]
+    #[error("cannot reach the daemon at {url}: {source}")]
     Unreachable {
         /// The API's URL.
         url: String,
@@ -41,7 +41,7 @@ pub enum ClientError {
     #[error("{0}")]
     Refused(ApiError),
     /// The API's answer is not what the client expected.
-    #[error("unexpected answer from the engine: {0}")]
+    #[error("unexpected answer from the daemon: {0}")]
     Unexpected(String),
     /// The client's settings could not be read.
     #[error("{}: {source}", path.display())]

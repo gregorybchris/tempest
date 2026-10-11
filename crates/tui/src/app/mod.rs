@@ -451,7 +451,7 @@ impl App {
                 match (&result, &error) {
                     (Ok(Reply::Shared(transfer)), _) => self.shared(Ok(transfer)),
                     (_, Some(error)) => self.shared(Err(error)),
-                    _ => self.shared(Err("The engine's answer was unexpected.")),
+                    _ => self.shared(Err("The daemon sent a reply Tempest can't read.")),
                 }
             }
             _ => {}

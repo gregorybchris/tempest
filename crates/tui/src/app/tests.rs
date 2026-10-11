@@ -204,7 +204,7 @@ fn the_add_modal_refuses_a_missing_link_or_relative_folder() {
     let Some(Modal::Add(form)) = &app.modal else {
         panic!("the modal stays open");
     };
-    assert_eq!(form.error.as_deref(), Some("Paste a tempest: link."));
+    assert_eq!(form.error.as_deref(), Some("Enter a tempest: link."));
     type_keys(&mut app, "tempest:abc");
     press(&mut app, KeyCode::Down);
     type_keys(&mut app, "downloads");
@@ -214,7 +214,7 @@ fn the_add_modal_refuses_a_missing_link_or_relative_folder() {
     };
     assert_eq!(
         form.error.as_deref(),
-        Some("The save folder must be an absolute path.")
+        Some("Enter an absolute path, such as /home/you/films.")
     );
 }
 
@@ -384,7 +384,10 @@ fn move_storage_needs_an_absolute_path() {
     let Some(Modal::Text { error, .. }) = &app.modal else {
         panic!("the modal stays open");
     };
-    assert_eq!(error.as_deref(), Some("Enter an absolute path."));
+    assert_eq!(
+        error.as_deref(),
+        Some("Enter an absolute path, such as /home/you/films.")
+    );
     press(&mut app, KeyCode::Home);
     type_keys(&mut app, "/");
     assert_eq!(
@@ -414,7 +417,7 @@ fn open_shows_the_folder_here_or_names_it_when_the_engine_is_remote() {
     assert_eq!(press(&mut app, KeyCode::Char('o')), None);
     assert_eq!(
         app.notice.unwrap().text,
-        "gamma is in /downloads/gamma on the engine's machine."
+        "gamma is in /downloads/gamma on the daemon's machine."
     );
 }
 
@@ -571,7 +574,7 @@ fn help_lists_the_areas_sections() {
         ["Move", "Transfer", "Queue", "Detail", "Find", "App"]
     );
     press(&mut app, KeyCode::Char('3'));
-    assert_eq!(titles(&app), ["Move", "Change", "App"]);
+    assert_eq!(titles(&app), ["Move", "Change the selected setting", "App"]);
     press(&mut app, KeyCode::Char('2'));
     assert_eq!(titles(&app), ["Move", "Transfer", "Share", "App"]);
 }
@@ -624,7 +627,7 @@ fn notices_report_successes_and_failures_and_fade() {
             Action::Remove { delete_files: true },
             "Removed alpha and deleted its files.",
         ),
-        (Action::Rename(None), "alpha has its bundle's name again."),
+        (Action::Rename(None), "Restored the original name of alpha."),
         (
             Action::Tags(["a".to_owned(), "b".to_owned()].into()),
             "Tagged alpha: a, b.",
@@ -822,7 +825,7 @@ fn completing_or_failing_shows_a_notice_once() {
     let notice = app.notice.take().unwrap();
     assert_eq!(
         notice.text,
-        "alpha is complete. Every chunk is on disk and checked."
+        "alpha is complete. All files are downloaded and verified."
     );
     assert!(!notice.error);
     // The same state again says nothing more.
@@ -835,7 +838,7 @@ fn completing_or_failing_shows_a_notice_once() {
     };
     app.apply(ApiEvent::Transfer(Box::new(failed)));
     let notice = app.notice.take().unwrap();
-    assert_eq!(notice.text, "beta stopped. The disk is full.");
+    assert_eq!(notice.text, "beta failed. The disk is full.");
     assert!(notice.error);
 
     // A transfer that arrives already complete, such as a new share, is not news.

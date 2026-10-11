@@ -124,9 +124,9 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
             ..app.finding.clone()
         };
         let message = match app.model.connection {
-            Connection::Connecting => "Connecting to the engine…".to_owned(),
+            Connection::Connecting => "Connecting to the daemon…".to_owned(),
             Connection::Lost { .. } if app.model.transfers().is_empty() => {
-                "No transfers to show until the engine answers.".to_owned()
+                "No transfers to show until the connection returns.".to_owned()
             }
             _ if !app.model.transfers().is_empty() => format!(
                 "Nothing matches {}. Press esc to clear the filters.",
@@ -259,7 +259,7 @@ fn draw_summary(frame: &mut Frame, app: &App, area: Rect) {
     let text = match (&app.model.connection, app.selected_transfer()) {
         (Connection::Lost { error }, _) => Text::from(vec![
             Line::styled(
-                " Lost touch with the engine. Trying again…",
+                " Can't reach the daemon. Retrying…",
                 Style::new().fg(theme.warn),
             ),
             Line::styled(format!(" {error}"), Style::new().fg(theme.dim)),
@@ -298,7 +298,7 @@ pub(super) fn fix_hint(fix: Fix) -> &'static str {
         Fix::Start => "Press space to start it.",
         Fix::Retry => "Press space to try again.",
         Fix::ShareAgain => "Press space to share it again.",
-        Fix::ForceStart => "Press F to start it now.",
+        Fix::ForceStart => "Press F to force start (skips the queue).",
     }
 }
 

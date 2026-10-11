@@ -98,7 +98,7 @@ fn Explanation(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
                 Fix::Start => ("Start", Controls::start_stop),
                 Fix::Retry => ("Try again", Controls::start_stop),
                 Fix::ShareAgain => ("Share again", Controls::start_stop),
-                Fix::ForceStart => ("Start now", Controls::force_start),
+                Fix::ForceStart => ("Force start", Controls::force_start),
             };
             let run = move || {
                 if let Some(t) = transfer.get_untracked() {
@@ -156,28 +156,28 @@ fn ControlsRow(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     let running = move || transfer.with(|t| t.as_ref().is_some_and(|t| runs(&t.status)));
     view! {
         <div class="detail__controls">
-            <Button small=true title="space" on_click=with(Controls::start_stop)>
+            <Button small=true title="Stop or start (space)" on_click=with(Controls::start_stop)>
                 {move || if running() { "Stop" } else { "Start" }}
             </Button>
-            <Button small=true title="F: run regardless of the queue" on_click=with(Controls::force_start)>
+            <Button small=true title="Start now, ignoring the queue (F)" on_click=with(Controls::force_start)>
                 "Force start"
             </Button>
-            <Button small=true title="R" on_click=with(Controls::recheck)>"Recheck"</Button>
-            <Button small=true title="r" on_click=dialog(Dialog::Rename)>"Rename"</Button>
-            <Button small=true title="t" on_click=dialog(Dialog::Tags)>"Tags…"</Button>
-            <Button small=true title="C" on_click=dialog(Dialog::Category)>"Category…"</Button>
-            <Button small=true title="L: its own speed and sharing limits" on_click=dialog(Dialog::Limits)>"Limits…"</Button>
-            <Button small=true title="m: move its files" on_click=dialog(Dialog::Move)>"Move…"</Button>
-            <Button small=true kind=ButtonKind::Danger title="x" on_click=dialog(Dialog::Remove)>
+            <Button small=true title="Recheck the files on disk (R)" on_click=with(Controls::recheck)>"Recheck"</Button>
+            <Button small=true title="Rename (r)" on_click=dialog(Dialog::Rename)>"Rename"</Button>
+            <Button small=true title="Edit tags (t)" on_click=dialog(Dialog::Tags)>"Tags…"</Button>
+            <Button small=true title="Set the category (C)" on_click=dialog(Dialog::Category)>"Category…"</Button>
+            <Button small=true title="Set its own speed and sharing limits (L)" on_click=dialog(Dialog::Limits)>"Limits…"</Button>
+            <Button small=true title="Move its files to another folder (m)" on_click=dialog(Dialog::Move)>"Move…"</Button>
+            <Button small=true kind=ButtonKind::Danger title="Remove (x)" on_click=dialog(Dialog::Remove)>
                 "Remove…"
             </Button>
         </div>
         <div class="detail__queue">
             <span class="dim">"queue"</span>
-            <Button small=true kind=ButtonKind::Ghost title="Top of the queue (<)" on_click=queue(QueueStep::Top)>"top"</Button>
-            <Button small=true kind=ButtonKind::Ghost title="Up the queue (K)" on_click=queue(QueueStep::Up)>"↑ up"</Button>
-            <Button small=true kind=ButtonKind::Ghost title="Down the queue (J)" on_click=queue(QueueStep::Down)>"↓ down"</Button>
-            <Button small=true kind=ButtonKind::Ghost title="Bottom of the queue (>)" on_click=queue(QueueStep::Bottom)>"bottom"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Move to the top of the queue (<)" on_click=queue(QueueStep::Top)>"Top"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Move up in the queue (K)" on_click=queue(QueueStep::Up)>"↑ Up"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Move down in the queue (J)" on_click=queue(QueueStep::Down)>"↓ Down"</Button>
+            <Button small=true kind=ButtonKind::Ghost title="Move to the bottom of the queue (>)" on_click=queue(QueueStep::Bottom)>"Bottom"</Button>
         </div>
     }
 }
@@ -197,9 +197,9 @@ fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
             <Stat label="time left" value=field(|t| present::eta(t.eta))/>
             <Stat label="peers" value=field(peers)/>
             <Stat label="ratio" value=field(|t| present::ratio(t.ratio))/>
-            <Stat label="received" value=field(|t| format::bytes(t.downloaded))/>
-            <Stat label="sent" value=field(|t| format::bytes(t.uploaded))/>
-            <Stat label="shared for" value=field(|t| format::duration(t.seeding_time))/>
+            <Stat label="downloaded" value=field(|t| format::bytes(t.downloaded))/>
+            <Stat label="uploaded" value=field(|t| format::bytes(t.uploaded))/>
+            <Stat label="time sharing" value=field(|t| format::duration(t.seeding_time))/>
             <Stat label="added" value=field(|t| present::date(t.added))/>
             <Stat label="category" value=field(|t| t.category.clone().unwrap_or_else(|| "none".to_owned()))/>
             <Stat label="queue" value=field(|t| if t.forced { "forced".to_owned() } else { format!("#{}", t.queue_position + 1) })/>
@@ -254,8 +254,8 @@ fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     }
 }
 
-/// Opens the transfer's folder in the engine's file manager, which only a browser on the
-/// engine's own machine can ask for, and copies its path, which any browser can.
+/// Opens the transfer's folder in the daemon's file manager, which only a browser on the
+/// daemon's own machine can ask for, and copies its path, which any browser can.
 #[component]
 fn FolderActions(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     let controls = expect_context::<Controls>();
@@ -265,12 +265,12 @@ fn FolderActions(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
     let label = file_manager();
     let reason = move || {
         if remote() {
-            "Folders open only on the engine's own machine, and this browser is connected remotely. Copy the path instead."
+            "Can't open folders: this browser is connected to a remote daemon. Copy the path instead."
                 .to_owned()
         } else if !saved() {
-            "Nothing has been saved yet.".to_owned()
+            "No files saved yet.".to_owned()
         } else {
-            format!("{label}, on the engine's machine (o)")
+            format!("{label}, on the daemon's machine (o)")
         }
     };
     let with = move |act: fn(Controls, &TransferInfo)| {
@@ -293,7 +293,7 @@ fn FolderActions(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
 }
 
 /// What opening a folder is called on this machine's file manager: the browser is on the
-/// engine's machine whenever the button works.
+/// daemon's machine whenever the button works.
 fn file_manager() -> &'static str {
     let platform = window().navigator().platform().unwrap_or_default();
     if platform.starts_with("Mac") {
@@ -364,7 +364,7 @@ fn Files(id: BundleId) -> impl IntoView {
     let data = poll(move || Box::pin(api::files(id)));
     polled(data, |files| {
         if files.is_empty() {
-            return view! { <Empty title="No files yet" text="The file list arrives with the bundle's description from a peer." /> }.into_any();
+            return view! { <Empty title="No files yet" text="The manifest arrives from a peer." /> }.into_any();
         }
         view! {
             <div class="table-scroll">
@@ -391,15 +391,15 @@ fn Peers(id: BundleId) -> impl IntoView {
     let data = poll(move || Box::pin(api::peers(id)));
     polled(data, |peers| {
         if peers.is_empty() {
-            return view! { <Empty title="No connections" text="Peers show here while the transfer runs and is connected." /> }.into_any();
+            return view! { <Empty title="No peers connected" text="Connected peers appear here while the transfer runs." /> }.into_any();
         }
         view! {
             <div class="table-scroll">
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>"Peer"</th><th>"Path"</th><th class="num">"↓"</th><th class="num">"↑"</th>
-                            <th class="num">"Has"</th><th>"State"</th><th class="num">"RTT"</th>
+                            <th>"Peer"</th><th title="Direct, or through a relay">"Route"</th><th class="num" title="Download rate from this peer">"↓"</th><th class="num" title="Upload rate to this peer">"↑"</th>
+                            <th class="num" title="How much of the bundle the peer has">"Progress"</th><th>"State"</th><th class="num" title="Round-trip time">"Latency"</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -471,7 +471,7 @@ fn DeeperView(id: BundleId, deeper: Deeper) -> impl IntoView {
         <div class="detail">
             <div class="deeper__head">
                 <Button kind=ButtonKind::Ghost small=true title="esc" on_click=move || ui.deeper.set(None)>
-                    "‹ back"
+                    "‹ Back"
                 </Button>
                 <h3 class="deeper__title">{title}</h3>
             </div>
@@ -496,7 +496,7 @@ fn Chunks(id: BundleId) -> impl IntoView {
         <Show
             when=move || data.with(|d| matches!(d, Some(Ok(map)) if map.chunks > 0))
             fallback=move || view! {
-                <Empty title="No chunks yet" text="The map shows once the bundle's description arrives from a peer." />
+                <Empty title="No chunks yet" text="The map appears once a peer sends the manifest." />
             }
         >
             <ChunkMap cells running columns=COLUMNS />
@@ -524,7 +524,7 @@ fn Rates(id: BundleId) -> impl IntoView {
     view! {
         <Show
             when=enough
-            fallback=|| view! { <Empty title="Measuring" text="Rates are sampled once a second while this page is open." /> }
+            fallback=|| view! { <Empty title="No data yet" text="Rates are recorded once a second while this page is open." /> }
         >
             <LineChart data label="Download and upload rates" height=280.0 />
         </Show>

@@ -190,12 +190,25 @@ fn Download() -> impl IntoView {
         close();
     };
     let stored = StoredValue::new(text);
+    let folder = RwSignal::new(String::new());
+    let tried = RwSignal::new(false);
+    let folder_problem = move || {
+        tried
+            .get()
+            .then(|| folder.with(|f| edits::save_folder_problem(f)))
+            .flatten()
+    };
     let download = move || {
+        tried.set(true);
+        if folder.with(|f| edits::save_folder_problem(f)).is_some() {
+            return;
+        }
+        let save_folder = Some(folder.get_untracked().trim().to_owned()).filter(|f| !f.is_empty());
         ui.offer.set(None);
         close();
         let text = stored.get_value();
         leptos::task::spawn_local(async move {
-            match api::add_link(text, None, false).await {
+            match api::add_link(text, save_folder, false).await {
                 Ok(added) => {
                     controls.say(Tone::Down, format!("Added {}", added.name));
                     ui.cursor.set(Some(added.id));
@@ -204,7 +217,7 @@ fn Download() -> impl IntoView {
             }
         });
     };
-    let folder = move || {
+    let default_folder = move || {
         config
             .info
             .with(|i| i.as_ref().and_then(|i| i.settings.save_folder.clone()))
@@ -225,9 +238,26 @@ fn Download() -> impl IntoView {
                     <dt>"Bundle ID"</dt>
                     <dd class="facts__path">{link.bundle.to_string()}</dd>
                     {(!trackers.is_empty()).then(|| view! { <dt>"Tracker"</dt><dd>{trackers}</dd> })}
-                    <dt>"Save to"</dt>
-                    <dd>{folder}</dd>
                 </dl>
+                <div class="field">
+                    <label class="field__label" for="download-folder">"Save to"</label>
+                    <div class="path-field">
+                        <input
+                            id="download-folder"
+                            class="input"
+                            type="text"
+                            placeholder=default_folder
+                            spellcheck="false"
+                            autocomplete="off"
+                            aria-invalid=move || bool_attr(folder_problem().is_some())
+                            prop:value=move || folder.get()
+                            on:input=move |e| folder.set(event_target_value(&e))
+                        />
+                        <Browse purpose=Purpose::Download value=folder on_choose=move |path| folder.set(path) />
+                    </div>
+                    {move || folder_problem().map(|p| view! { <span class="field__error">{p}</span> })}
+                    <span class="field__help">"Folder on the daemon's machine. Leave empty to use the default."</span>
+                </div>
                 <span class="field__help">"It starts when the queue has a free slot."</span>
             }
             .into_any()

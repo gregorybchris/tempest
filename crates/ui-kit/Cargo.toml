@@ -9,6 +9,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+js-sys.workspace = true
 leptos.workspace = true
 leptos-use.workspace = true
 send_wrapper.workspace = true

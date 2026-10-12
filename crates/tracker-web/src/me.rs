@@ -91,7 +91,7 @@ fn AccountView(account: Account) -> impl IntoView {
         <section class="page me">
             <header class="page__head">
                 <h1 class="page__title glow">{account.name.clone().unwrap_or_else(|| "Your account".to_owned())}</h1>
-                <p class="dim">{move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}</p>
+                <p class="dim"><span title=format::datetime(joined as i64 * 1000)>{move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}</span></p>
             </header>
             <div class="me__grid">
                 <Panel title="Display name">

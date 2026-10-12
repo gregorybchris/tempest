@@ -200,7 +200,7 @@ fn Summary(transfer: Memo<Option<TransferInfo>>) -> impl IntoView {
             <Stat label="downloaded" value=field(|t| format::bytes(t.downloaded))/>
             <Stat label="uploaded" value=field(|t| format::bytes(t.uploaded))/>
             <Stat label="time sharing" value=field(|t| format::duration(t.seeding_time))/>
-            <Stat label="added" value=field(|t| present::date(t.added))/>
+            <Stat label="added" value=field(|t| present::date(t.added)) title=field(|t| format::datetime(t.added))/>
             <Stat label="category" value=field(|t| t.category.clone().unwrap_or_else(|| "none".to_owned()))/>
             <Stat label="queue" value=field(|t| if t.forced { "forced".to_owned() } else { format!("#{}", t.queue_position + 1) })/>
         </Stats>

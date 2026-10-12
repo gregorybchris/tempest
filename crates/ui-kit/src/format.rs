@@ -104,6 +104,25 @@ pub fn ago(offset_ms: i64) -> String {
     }
 }
 
+/// A moment in milliseconds since the Unix epoch in the browser's time zone, with the zone:
+/// `Jul 11, 2025, 7:18 PM PDT`. Only works in a browser.
+pub fn datetime(millis: i64) -> String {
+    let options = js_sys::Object::new();
+    for (key, value) in [
+        ("year", "numeric"),
+        ("month", "short"),
+        ("day", "numeric"),
+        ("hour", "numeric"),
+        ("minute", "2-digit"),
+        ("timeZoneName", "short"),
+    ] {
+        let _ = js_sys::Reflect::set(&options, &key.into(), &value.into());
+    }
+    js_sys::Date::new(&(millis as f64).into())
+        .to_locale_string("en-US", &options)
+        .into()
+}
+
 /// The first eight characters of a hex identifier.
 pub fn short_id(hex: &str) -> &str {
     hex.get(..8).unwrap_or(hex)

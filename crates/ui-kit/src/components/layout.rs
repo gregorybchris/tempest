@@ -100,11 +100,14 @@ pub fn Stat(
     /// Its value, formatted.
     #[prop(into)]
     value: Signal<String>,
+    /// A tooltip for the value, such as an exact time.
+    #[prop(optional, into)]
+    title: Option<Signal<String>>,
 ) -> impl IntoView {
     view! {
         <div>
             <dt>{label}</dt>
-            <dd>{value}</dd>
+            <dd title=move || title.map(|t| t.get())>{value}</dd>
         </div>
     }
 }

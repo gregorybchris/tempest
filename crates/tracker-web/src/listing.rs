@@ -152,8 +152,8 @@ fn Detail(listing: RwSignal<Listing>) -> impl IntoView {
                 </div>
                 <p class="listing__byline dim">
                     "published by "<span class="listing__publisher"><PersonLink person=l.publisher.clone() /></span>
-                    " · "{move || present::ago(now.get(), created)}
-                    {(updated > created).then(|| view! { " · updated "{move || present::ago(now.get(), updated)} })}
+                    " · "<span title=format::datetime(created as i64 * 1000)>{move || present::ago(now.get(), created)}</span>
+                    {(updated > created).then(|| view! { " · updated "<span title=format::datetime(updated as i64 * 1000)>{move || present::ago(now.get(), updated)}</span> })}
                 </p>
                 {status.map(|(label, text)| view! {
                     <p class="notice"><Badge tone=Tone::Warn label=label.to_owned() />" "{text}</p>
@@ -400,7 +400,7 @@ fn Comments(
                             <li class="comment">
                                 <div class="comment__head">
                                     <span class="comment__author" class:comment__author--me=own><PersonLink person=c.author.clone() /></span>
-                                    <span class="dim">{move || present::ago(ctx.now.get(), created)}</span>
+                                    <span class="dim" title=format::datetime(created as i64 * 1000)>{move || present::ago(ctx.now.get(), created)}</span>
                                     {own.then(|| view! {
                                         <button class="btn btn--ghost btn--small comment__delete" type="button" on:click=move |_| remove(id)>
                                             "Delete"

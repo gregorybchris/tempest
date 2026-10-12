@@ -470,7 +470,7 @@ pub fn ResultCard(
                     {category}
                     {content.map(|c| view! { <span>{c}</span> })}
                     {byline.then(|| view! { <span>"by "<PersonLink person=listing.publisher.clone() /></span> })}
-                    <span>{move || present::ago(now.get(), created)}</span>
+                    <span title=format::datetime(created as i64 * 1000)>{move || present::ago(now.get(), created)}</span>
                 </div>
                 {(!excerpt.is_empty()).then(|| view! { <p class="result__excerpt">{excerpt}</p> })}
                 {(!listing.tags.is_empty()).then(|| view! { <div class="result__tags">{tags}</div> })}

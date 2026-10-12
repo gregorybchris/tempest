@@ -73,7 +73,7 @@ fn Account(profile: Profile) -> impl IntoView {
                             Some(_) => "",
                             None => "No name set. ",
                         }}
-                        {move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}
+                        <span title=format::datetime(joined as i64 * 1000)>{move || format!("Joined {}.", present::ago(ctx.now.get(), joined))}</span>
                         {move || own().then(|| view! {
                             " "<Badge tone=Tone::Down label="you" />
                         })}
@@ -257,7 +257,7 @@ fn Said(key: PeerId, total: u64) -> impl IntoView {
                                     <li class="said__item">
                                         <div class="said__head">
                                             <a href=Route::Listing(c.listing.bundle).hash()>{c.listing.title}</a>
-                                            <span class="dim">{move || present::ago(ctx.now.get(), created)}</span>
+                                            <span class="dim" title=format::datetime(created as i64 * 1000)>{move || present::ago(ctx.now.get(), created)}</span>
                                         </div>
                                         <p class="said__body">{present::excerpt(&c.comment.body, COMMENT_EXCERPT)}</p>
                                     </li>

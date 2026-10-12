@@ -5122,6 +5122,7 @@ dependencies = [
 name = "tempest-ui-kit"
 version = "0.4.1"
 dependencies = [
+ "js-sys",
  "leptos",
  "leptos-use",
  "proptest",

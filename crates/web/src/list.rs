@@ -10,6 +10,7 @@ use tempest_api::finding::{SortKey, StatusFilter};
 use tempest_protocol::BundleId;
 use tempest_ui_kit::chart::use_width;
 use tempest_ui_kit::components::*;
+use tempest_ui_kit::format;
 use tempest_ui_kit::theme::bool_attr;
 
 use crate::app::Fields;
@@ -444,7 +445,7 @@ fn Row(id: BundleId, index: usize, cursor: Selector<Option<BundleId>>) -> impl I
             <td class=cell(Column::Tags)>
                 {move || row.with(|t| t.tags.iter().map(|tag| view! { <Chip label=tag.clone() /> }).collect_view())}
             </td>
-            <td class=cell(Column::Added)>{text(|t| present::date(t.added))}</td>
+            <td class=cell(Column::Added) title=move || row.with(|t| format::datetime(t.added))>{text(|t| present::date(t.added))}</td>
         </tr>
     }
     .into_any()
